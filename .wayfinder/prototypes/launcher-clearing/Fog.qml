@@ -30,6 +30,12 @@ Item {
     /// 2–4% monochrome noise over the flat wash — kills banding (brief §3.5).
     property bool noise: true
 
+    /// Strength of the pale wash. The brief's §6.1 figure is 0.10, which assumes
+    /// the compositor is blurring behind the surface. When it is not, the veil is
+    /// the only thing standing between the wallpaper and the UI, and it has to
+    /// carry more — see findings.md §3.
+    property real washOpacity: Theme.fogWashOpacity
+
     /// Drives every animated property, so open/close is one opacity ramp.
     property real amount: 1.0
 
@@ -63,7 +69,7 @@ Item {
         anchors.fill: parent
         visible: root.mode === "fog"
         color: Theme.fogWash
-        opacity: Theme.fogWashOpacity * root.amount
+        opacity: root.washOpacity * root.amount
     }
 
     // Same wash, but carrying the board's vertical luminance gradient: more

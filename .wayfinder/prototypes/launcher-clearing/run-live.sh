@@ -7,8 +7,11 @@
 # Keys:  type to search · ↑/↓ move · Esc quit
 #        F1 scrim (pale mist → dusk → dim → graded)   F5 stand-in wallpaper
 #        F2 field (horizon ↔ boxed)                   F6 stand-in desktop on/off
-#        F3 panel (strata → card → none)              F7 horizon height
-#        F4 row haze on/off
+#        F3 panel (card → strata → none)              F7 horizon height
+#        F4 row haze on/off                           F8 veil 0.10 → 0.18 → 0.26
+#
+# For issue #11 question 4, run it twice — once plain, once with --blur — and
+# use F8 to find the lowest veil that still reads in each case.
 set -euo pipefail
 cd "$(dirname "$0")"
 

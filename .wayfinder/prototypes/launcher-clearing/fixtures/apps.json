@@ -1,0 +1,244 @@
+{
+ "apps": [
+  {
+   "id": "kitty",
+   "name": "kitty",
+   "subtitle": "Terminal emulator",
+   "icon": "kitty"
+  },
+  {
+   "id": "Alacritty",
+   "name": "Alacritty",
+   "subtitle": "Terminal",
+   "icon": "Alacritty"
+  },
+  {
+   "id": "discord",
+   "name": "Discord",
+   "subtitle": "Internet Messenger",
+   "icon": "discord"
+  },
+  {
+   "id": "obsidian",
+   "name": "Obsidian",
+   "subtitle": "Obsidian",
+   "icon": "obsidian"
+  },
+  {
+   "id": "steam",
+   "name": "Steam",
+   "subtitle": "Application for managing and playing games on Steam",
+   "icon": "steam"
+  },
+  {
+   "id": "org.kde.dolphin",
+   "name": "Dolphin",
+   "subtitle": "File Manager",
+   "icon": "org.kde.dolphin"
+  },
+  {
+   "id": "org.kde.spectacle",
+   "name": "Spectacle",
+   "subtitle": "Screenshot Capture Utility",
+   "icon": "spectacle"
+  },
+  {
+   "id": "mpv",
+   "name": "mpv Media Player",
+   "subtitle": "Multimedia player",
+   "icon": "mpv"
+  },
+  {
+   "id": "btop",
+   "name": "btop++",
+   "subtitle": "System Monitor",
+   "icon": "btop"
+  },
+  {
+   "id": "nvim",
+   "name": "Neovim",
+   "subtitle": "Text Editor",
+   "icon": "nvim"
+  },
+  {
+   "id": "org.kde.ark",
+   "name": "Ark",
+   "subtitle": "Archiving Tool",
+   "icon": "ark"
+  },
+  {
+   "id": "bssh",
+   "name": "Avahi SSH Server Browser",
+   "subtitle": "Browse for Zeroconf-enabled SSH Servers",
+   "icon": "network-wired"
+  },
+  {
+   "id": "bvnc",
+   "name": "Avahi VNC Server Browser",
+   "subtitle": "Browse for Zeroconf-enabled VNC Servers",
+   "icon": "network-wired"
+  },
+  {
+   "id": "avahi-discover",
+   "name": "Avahi Zeroconf Browser",
+   "subtitle": "Browse for Zeroconf services available on your network",
+   "icon": "network-wired"
+  },
+  {
+   "id": "brave-browser",
+   "name": "Brave",
+   "subtitle": "Web Browser",
+   "icon": "brave-desktop"
+  },
+  {
+   "id": "arch-update",
+   "name": "Cachy-Update",
+   "subtitle": "An interactive update notifier & applier for CachyOS",
+   "icon": "cachy-update-blue"
+  },
+  {
+   "id": "cachyos-hello",
+   "name": "CachyOS Hello",
+   "subtitle": "A tool providing access to documentation and support for new CachyOS users.",
+   "icon": "org.cachyos.hello"
+  },
+  {
+   "id": "org.cachyos.KernelManager",
+   "name": "CachyOS Kernel Manager",
+   "subtitle": "Kernel Manager",
+   "icon": "org.cachyos.KernelManager"
+  },
+  {
+   "id": "cachyos-pi",
+   "name": "CachyOS Package Installer",
+   "subtitle": "Simple Software Application Package Installer",
+   "icon": "cachyos-pi"
+  },
+  {
+   "id": "org.kde.plasma.emojier",
+   "name": "Emoji Selector",
+   "subtitle": "Emoji Selector",
+   "icon": "preferences-desktop-emoticons"
+  },
+  {
+   "id": "org.kde.filelight",
+   "name": "Filelight",
+   "subtitle": "Disk Usage Statistics",
+   "icon": "filelight"
+  },
+  {
+   "id": "io.github.benjamimgois.goverlay",
+   "name": "Goverlay",
+   "subtitle": "Linux gaming tools, made easy",
+   "icon": "io.github.benjamimgois.goverlay"
+  },
+  {
+   "id": "nwg-look",
+   "name": "GTK Settings",
+   "subtitle": "Adjust Look and Feel",
+   "icon": "nwg-look"
+  },
+  {
+   "id": "org.kde.gwenview",
+   "name": "Gwenview",
+   "subtitle": "Image Viewer",
+   "icon": "gwenview"
+  },
+  {
+   "id": "org.kde.haruna",
+   "name": "Haruna",
+   "subtitle": "Media Player",
+   "icon": "haruna"
+  },
+  {
+   "id": "heroic",
+   "name": "Heroic Games Launcher",
+   "subtitle": "An Open Source Launcher for GOG, Epic Games and Amazon Games",
+   "icon": "heroic"
+  },
+  {
+   "id": "org.kde.kinfocenter",
+   "name": "Info Center",
+   "subtitle": "Info Center",
+   "icon": "hwinfo"
+  },
+  {
+   "id": "org.kde.kate",
+   "name": "Kate",
+   "subtitle": "Advanced Text Editor",
+   "icon": "kate"
+  },
+  {
+   "id": "org.kde.kcalc",
+   "name": "KCalc",
+   "subtitle": "Scientific Calculator",
+   "icon": "accessories-calculator"
+  },
+  {
+   "id": "org.kde.kdeconnect.app",
+   "name": "KDE Connect",
+   "subtitle": "Device Synchronization",
+   "icon": "kdeconnect"
+  },
+  {
+   "id": "org.kde.kdeconnect.nonplasma",
+   "name": "KDE Connect Indicator",
+   "subtitle": "Display information about your devices",
+   "icon": "kdeconnect"
+  },
+  {
+   "id": "org.kde.kdeconnect.sms",
+   "name": "KDE Connect SMS",
+   "subtitle": "Text Messaging",
+   "icon": "kdeconnect"
+  },
+  {
+   "id": "org.kde.partitionmanager",
+   "name": "KDE Partition Manager",
+   "subtitle": "Partition Editor",
+   "icon": "partitionmanager"
+  },
+  {
+   "id": "kdesystemsettings",
+   "name": "KDE System Settings",
+   "subtitle": "KDE System Settings",
+   "icon": "preferences-system"
+  },
+  {
+   "id": "org.kde.konsole",
+   "name": "Konsole",
+   "subtitle": "Terminal",
+   "icon": "utilities-terminal"
+  },
+  {
+   "id": "kvantummanager",
+   "name": "Kvantum Manager",
+   "subtitle": "A simple GUI for installing, selecting and manipulating Kvantum themes",
+   "icon": "kvantum"
+  },
+  {
+   "id": "org.kde.kwalletmanager",
+   "name": "KWalletManager",
+   "subtitle": "Password Manager",
+   "icon": "kwalletmanager"
+  },
+  {
+   "id": "org.kde.kwrite",
+   "name": "KWrite",
+   "subtitle": "Text Editor",
+   "icon": "kwrite"
+  },
+  {
+   "id": "net.lutris.Lutris",
+   "name": "Lutris",
+   "subtitle": "Video Game Preservation Platform",
+   "icon": "net.lutris.Lutris"
+  },
+  {
+   "id": "cups",
+   "name": "Manage Printing",
+   "subtitle": "CUPS Web Interface",
+   "icon": "cups"
+  }
+ ]
+}

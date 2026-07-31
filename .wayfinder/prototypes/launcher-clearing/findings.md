@@ -71,7 +71,7 @@ to text sitting *on* the fog, and after the card decision the launcher has almos
 brief stands unchanged. What the section is still good for is the next surface that wants prose on
 bare fog — the numbers say it will need either a card of its own or the dusk variant.
 
-## 2. With dusk, the results plate can go away — which is what the brief actually wanted
+## 2. Plate or no plate — decided: card
 
 Sheet `2-panel.jpg`. The brief asks for "layered horizontal bands… stacked strata over boxed
 grids and heavy card borders" (§5), then the pale scrim forces a plate under the rows just to

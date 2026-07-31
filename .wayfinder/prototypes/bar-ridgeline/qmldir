@@ -1,0 +1,8 @@
+singleton Theme 1.0 Theme.qml
+singleton Vars 1.0 Vars.qml
+
+Icon 1.0 Icon.qml
+BarButton 1.0 BarButton.qml
+Ridgeline 1.0 Ridgeline.qml
+Bar 1.0 Bar.qml
+Knobs 1.0 Knobs.qml

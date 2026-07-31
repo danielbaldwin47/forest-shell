@@ -70,6 +70,7 @@ ShellRoot {
                 backdrop.flavour = s.wall || "ridge";
                 fog.mode = s.scrim || "fog";
                 fog.blurred = s.blurred === undefined ? true : s.blurred;
+                fog.washOpacity = s.wash || Theme.fogWashOpacity;
                 clearing.fieldStyle = s.field || "horizon";
                 clearing.panelStyle = s.panel || "strata";
                 clearing.rowHaze = s.haze === undefined ? true : s.haze;
@@ -97,7 +98,8 @@ ShellRoot {
                     clearing.fieldStyle = clearing.fieldStyle === "horizon" ? "boxed" : "horizon";
                     return;
                 case Qt.Key_F3:
-                    clearing.panelStyle = clearing.panelStyle === "strata" ? "card" : "strata";
+                    clearing.panelStyle = clearing.panelStyle === "card" ? "strata"
+                                        : clearing.panelStyle === "strata" ? "none" : "card";
                     return;
                 case Qt.Key_F4:
                     clearing.rowHaze = !clearing.rowHaze;
@@ -112,6 +114,15 @@ ShellRoot {
                 case Qt.Key_F7:
                     clearing.horizonFraction = clearing.horizonFraction > 0.35 ? 0.22
                                              : clearing.horizonFraction > 0.27 ? 0.42 : 0.32;
+                    return;
+                // The veil ladder — this is the knob that stands in for the
+                // compositor's blur when there isn't any. Run once with blur on
+                // and once with it off; the answer to question 4 is which rung
+                // each needs.
+                case Qt.Key_F8:
+                    fog.washOpacity = fog.washOpacity < 0.14 ? 0.18
+                                    : fog.washOpacity < 0.22 ? 0.26 : 0.10;
+                    console.log("veil", fog.washOpacity.toFixed(2));
                     return;
                 case Qt.Key_Down:
                     clearing.selected = Math.min(clearing.selected + 1, clearing.rows.length - 1);
@@ -174,7 +185,24 @@ ShellRoot {
             // what each scrim degrades to when the compositor won't blur
             { file: "34-fog-no-compositor-blur",  s: { blurred: false } },
             { file: "35-dusk-no-compositor-blur", s: { scrim: "dusk", panel: "none", blurred: false } },
-            { file: "36-dusk-no-blur-busy",       s: { scrim: "dusk", panel: "none", blurred: false, wall: "busy" } }
+            { file: "36-dusk-no-blur-busy",       s: { scrim: "dusk", panel: "none", blurred: false, wall: "busy" } },
+
+            // --- decided defaults (#11): pale mist + card + category on every
+            // row. Everything below holds those fixed and moves only what
+            // question 4 is about — whether the compositor blurs, and how hard
+            // the veil has to work when it doesn't.
+            { file: "37-chosen-recents",    s: { panel: "card" } },
+            { file: "38-chosen-query",      s: { panel: "card", query: "co" } },
+            { file: "39-chosen-blur-off",   s: { panel: "card", query: "co", blurred: false } },
+            { file: "40-chosen-busy",       s: { panel: "card", query: "co", wall: "busy" } },
+            { file: "41-chosen-busy-blur-off",        s: { panel: "card", query: "co", wall: "busy", blurred: false } },
+            { file: "42-chosen-busy-blur-off-veil18", s: { panel: "card", query: "co", wall: "busy", blurred: false, wash: 0.18 } },
+            { file: "43-chosen-busy-blur-off-veil26", s: { panel: "card", query: "co", wall: "busy", blurred: false, wash: 0.26 } },
+            // prose is the hard case: the transcript is the widest run of text
+            // the shell ever puts on the scrim.
+            { file: "44-chosen-ask-claude",  s: { panel: "card", query: "?", turns: win.claudeTranscript } },
+            { file: "45-chosen-ask-claude-blur-off", s: { panel: "card", query: "?", turns: win.claudeTranscript, wall: "busy", blurred: false } },
+            { file: "46-chosen-ask-claude-blur-off-veil26", s: { panel: "card", query: "?", turns: win.claudeTranscript, wall: "busy", blurred: false, wash: 0.26 } }
         ]
 
         property int shotIndex: -1

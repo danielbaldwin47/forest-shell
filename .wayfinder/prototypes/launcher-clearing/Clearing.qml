@@ -14,7 +14,7 @@ FocusScope {
 
     // --- knobs under test -------------------------------------------------
     property string fieldStyle: "horizon"   // "horizon" | "boxed"
-    property string panelStyle: "strata"    // "none" | "strata" | "card"
+    property string panelStyle: "card"      // "none" | "strata" | "card" — decided: card (#11)
     property bool showCategory: true        // category label on every row
     property bool rowHaze: true             // unselected rows sit in the fog
     property bool godRay: true              // one soft directional wash (brief §3.6)

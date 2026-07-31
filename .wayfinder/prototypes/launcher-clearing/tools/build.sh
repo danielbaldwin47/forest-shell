@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate everything this prototype commits: fixtures, normalized icons, the
-# noise tile, all 33 scene captures, and the labelled contact sheets.
+# noise tile, all 46 scene captures, and the labelled contact sheets.
 #
 #   ./tools/build.sh
 #
@@ -100,3 +100,38 @@ sheet 8-no-compositor-blur \
   -label 'B  dusk, blur off'        shots/35-dusk-no-compositor-blur.jpg \
   -label 'C  dusk, blur off, busy'  shots/36-dusk-no-blur-busy.jpg \
   -label 'D  dusk, blur on, busy'   shots/33-baseline-dusk-busy-panel-none.jpg
+
+# The decided combination — pale mist + card + category on every row — with only
+# the compositor-blur question left moving. This is the sheet question 4 is about.
+sheet 9-decided \
+  -label 'A  recents, blur on'      shots/37-chosen-recents.jpg \
+  -label 'B  query, blur on'        shots/38-chosen-query.jpg \
+  -label 'C  query, blur off'       shots/39-chosen-blur-off.jpg \
+  -label 'D  ask claude, blur on'   shots/44-chosen-ask-claude.jpg
+
+sheet 10-veil-ladder \
+  -label 'A  busy wall, blur on, veil 0.10 (spec)'  shots/40-chosen-busy.jpg \
+  -label 'B  blur off, veil 0.10 (spec)'            shots/41-chosen-busy-blur-off.jpg \
+  -label 'C  blur off, veil 0.18'                   shots/42-chosen-busy-blur-off-veil18.jpg \
+  -label 'D  blur off, veil 0.26'                   shots/43-chosen-busy-blur-off-veil26.jpg
+
+sheet 11-veil-ladder-prose \
+  -label 'A  ask claude, blur on'                shots/44-chosen-ask-claude.jpg \
+  -label 'B  blur off, busy wall, veil 0.10'     shots/45-chosen-ask-claude-blur-off.jpg \
+  -label 'C  blur off, busy wall, veil 0.26'     shots/46-chosen-ask-claude-blur-off-veil26.jpg
+
+# The footer legend at 1:1.8 — with the card decided this is the only text left
+# sitting on bare scrim, and the veil ladder makes it worse, not better.
+FOOTER='1120x56+400+1018'
+magick montage \
+  -label 'A  blur on, veil 0.10'  \( shots/40-chosen-busy.jpg            -crop $FOOTER +repage -resize 180% \) \
+  -label 'B  blur off, veil 0.10' \( shots/41-chosen-busy-blur-off.jpg   -crop $FOOTER +repage -resize 180% \) \
+  -label 'C  blur off, veil 0.26' \( shots/43-chosen-busy-blur-off-veil26.jpg -crop $FOOTER +repage -resize 180% \) \
+  -tile 1x -geometry +8+10 -background '#0b100d' -fill '#e6ece8' -pointsize 26 \
+  sheets/12-footer-detail.png
+magick sheets/12-footer-detail.png -quality 92 sheets/12-footer-detail.jpg
+rm -f sheets/12-footer-detail.png
+echo sheets/12-footer-detail.jpg
+
+# Contrast numbers quoted in findings.md §3.
+python3 tools/measure-contrast.py

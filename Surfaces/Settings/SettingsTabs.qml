@@ -61,9 +61,23 @@ QtObject {
 
     /// The tab to open for `id`, falling back to the first. Every entry point
     /// goes through this: a stale id in the state file, or a page name typed
-    /// into `qs ipc call settings show`, must open the window rather than
+    /// into `qs ipc call settings showTab`, must open the window rather than
     /// leaving it blank.
     function resolve(id: string): string {
         return find(id) ? id : firstTab;
+    }
+
+    /// The tab an arrow key from `id` lands on: `delta` is -1 for Up and +1 for
+    /// Down (#77). Clamped at both ends rather than wrapping, so walking off the
+    /// bottom of the rail stays on About instead of jumping back to Appearance.
+    ///
+    /// Every tab is a candidate, built or not — an unbuilt tab is navigable by
+    /// pointer and says what it will hold, and a rail the keyboard walks a
+    /// different list of than the mouse does would be a worse surprise than
+    /// landing on a page that explains itself.
+    function neighbour(id: string, delta: int): string {
+        const index = tabs.findIndex(tab => tab.id === resolve(id));
+        const next = index + delta;
+        return next < 0 || next >= tabs.length ? tabs[index].id : tabs[next].id;
     }
 }

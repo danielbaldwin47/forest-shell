@@ -5,13 +5,28 @@ pragma Singleton
 // The window itself is `SettingsView.qml`; this is the handle everything else
 // holds. There are three callers named in the ticket and they all end up here:
 //
-//   SettingsWindow.toggle()             the control centre's gear (#45)
-//   SettingsWindow.show("launcher")     a launcher action (#40) — `/settings …`
-//   qs ipc call settings show launcher  a keybind, a script, the shell switcher
+//   SettingsWindow.toggle()               the control centre's gear (#45)
+//   SettingsWindow.show("launcher")       a launcher action (#40) — `/settings …`
+//   qs ipc call settings open             a keybind, a script, the shell switcher
+//   qs ipc call settings showTab launcher the same, on a named tab
 //
 // The IPC target is `settings`, lowercase, matching the surface name — the
 // convention the shell-switch contract fixes for `launcher` and every other
 // surface with an external entry point.
+//
+// There is deliberately no IPC `show`, which is #77 and is a Quickshell CLI
+// collision rather than a preference. `show` is also a subcommand of `ipc`
+// itself, and the client's argument parser takes the literal token: every form
+// of `qs ipc call settings show` — with an argument, without one, after `--` —
+// is parsed as `qs ipc show` and prints the target listing instead of calling
+// anything, and exits 0 while doing it. Measured against this shell in
+// tools/settings-harness.sh, which asserts the name stays off the surface: an
+// advertised function nobody can call is worse than no function, because it is
+// the one everybody types first.
+//
+// So `open` is the no-argument door and `showTab` is the one that takes a tab.
+// The QML-facing `show(tab)` below is untouched — #40 and #45 call it, and it
+// never goes near the CLI.
 //
 // Neither the control centre nor the launcher exists yet (#39, #45), so the IPC
 // handler is not a convenience here: it is the only way to open the window, and
@@ -43,12 +58,19 @@ Singleton {
     /// the caller may be a keybind typed by hand, and an empty window would be
     /// a worse answer than the wrong one.
     function show(tab: string): void {
+        const wasShown = root.shown;
         loader.active = true;
         if (!loader.item)
             return;
 
         if (tab !== "")
             loader.item.selectTab(tab);
+
+        // One line per state change worth asserting on, which is what makes the
+        // window drivable from tools/settings-harness.sh — #81's lifecycle bug
+        // was silent for a week for want of exactly this.
+        Logger.log("settings", (wasShown ? "window raised" : "window opened")
+                   + " (tab " + loader.item.currentTab + ")");
 
         // Pressing the gear with the window already open but buried under other
         // windows has to bring it forward, or it reads as a dead button. Asking
@@ -61,13 +83,15 @@ Singleton {
             loader.item.requestActivate();
     }
 
-    function close(): void {
+    function close(reason: string): void {
+        if (root.shown)
+            Logger.log("settings", "window closed (" + (reason === "" ? "request" : reason) + ")");
         loader.active = false;
     }
 
     function toggle(): void {
         if (root.shown)
-            close();
+            close("toggle");
         else
             show("");
     }
@@ -77,11 +101,12 @@ Singleton {
 
         component: Component {
             SettingsView {
-                // The compositor's own close button — the only place in the
-                // shell where a window is dismissed by something outside it, and
-                // the reason the loader is driven by a signal rather than only
-                // by the functions above.
-                onCloseRequested: loader.active = false
+                // Closed by something that is not one of the functions above:
+                // the compositor's own close button, or Escape inside the
+                // window (#77). The reason travels with the signal so the log
+                // says which — a window that vanished and a window that was
+                // dismissed look identical afterwards.
+                onCloseRequested: reason => root.close(reason)
             }
         }
     }
@@ -92,9 +117,11 @@ Singleton {
     IpcHandler {
         target: "settings"
 
+        // The window, on the tab it was left on. The one to bind a key to.
         function open(): void { root.show(""); }
-        function show(tab: string): void { root.show(tab); }
-        function close(): void { root.close(); }
+        // ...and on a named tab. Not `show(tab)`: see the header.
+        function showTab(tab: string): void { root.show(tab); }
+        function close(): void { root.close("ipc"); }
         function toggle(): void { root.toggle(); }
     }
 

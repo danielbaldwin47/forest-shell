@@ -25,9 +25,10 @@
 #   nested_shell lock-harness.qml 'harness: lock harness ready'
 #   nested_ipc some target call
 #   nested_await "$NESTED_SHELL_LOG" 'the line that proves it' 15
+#   nested_key escape                      # a keystroke, into the focused window
 #
 # Sourcing installs an EXIT trap that tears the nested session down. See
-# tools/lock-harness.sh for the worked example.
+# tools/lock-harness.sh and tools/settings-harness.sh for the worked examples.
 #
 # WHAT THIS SEAM CANNOT DO YET — screenshots.
 #
@@ -52,7 +53,9 @@
 # --- state, all owned by this file ------------------------------------------
 
 NESTED_DISPLAY=""       # the wayland-N socket the nested compositor is on
+NESTED_SIGNATURE=""     # the nested Hyprland's instance signature, for hyprctl
 NESTED_WORK=""          # scratch dir: configs, logs, captures
+NESTED_ENV=()           # extra `env` assignments for the shell under test
 NESTED_HYPR_LOG=""
 NESTED_HYPR_PID=""
 NESTED_SHELL_LOG=""
@@ -91,6 +94,11 @@ nested_sockets() {
         -name 'wayland-[0-9]*' ! -name '*.lock' -printf '%f\n' 2>/dev/null | sort
 }
 
+nested_signatures() {
+    find "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" -mindepth 1 -maxdepth 1 -type d \
+        -printf '%f\n' 2>/dev/null | sort
+}
+
 ## Start a nested Hyprland and set NESTED_DISPLAY to the socket it opened.
 ##
 ## `env -u HYPRLAND_INSTANCE_SIGNATURE` is load-bearing in every launch below:
@@ -115,8 +123,9 @@ EOF
     # Which socket is ours, by set difference rather than "the newest one" —
     # two of these run in parallel often enough (one per worktree) that picking
     # by mtime eventually attaches a harness to somebody else's compositor.
-    local before after
+    local before after sig_before sig_after
     before=$(nested_sockets)
+    sig_before=$(nested_signatures)
 
     env -u HYPRLAND_INSTANCE_SIGNATURE Hyprland -c "$NESTED_WORK/hyprland.conf" \
         > "$NESTED_HYPR_LOG" 2>&1 &
@@ -134,7 +143,33 @@ EOF
         echo "could not start a nested Hyprland — see $NESTED_HYPR_LOG" >&2
         return 1
     fi
+
+    # The instance signature, by the same set difference and for the same
+    # reason: `hyprctl` talks to whichever instance the environment names, and
+    # the environment names the *outer* one. Getting this wrong is not a failed
+    # assertion — it is a keystroke delivered to the session you are working in.
+    sig_after=$(nested_signatures)
+    NESTED_SIGNATURE=$(comm -13 <(printf '%s\n' "$sig_before") <(printf '%s\n' "$sig_after") \
+        | head -1)
+
     nested_note "nested compositor on $NESTED_DISPLAY"
+}
+
+## Drive the nested compositor: `nested_hyprctl dispatch sendshortcut ", escape, activewindow"`.
+##
+## Keys are the only way to test a surface the way it is actually used — #77 was
+## a window with no keyboard path at all, and nothing about that is checkable by
+## calling functions on it. Fails loudly rather than falling back to the outer
+## instance.
+nested_hyprctl() {
+    [[ -n "$NESTED_SIGNATURE" ]] || { echo "no nested instance signature" >&2; return 1; }
+    HYPRLAND_INSTANCE_SIGNATURE="$NESTED_SIGNATURE" hyprctl "$@" 2>&1
+}
+
+## Send one key to the focused window inside the nested session, by its Hyprland
+## key name: `nested_key escape`, `nested_key tab`, `nested_key space`.
+nested_key() {
+    nested_hyprctl dispatch sendshortcut ", $1, activewindow" > /dev/null
 }
 
 ## Run a shell entry point inside the nested session, and wait for it to say it
@@ -146,8 +181,11 @@ nested_shell() {
     NESTED_SHELL_LOG="$NESTED_WORK/shell.log"
     NESTED_ENTRY="$entry"
 
+    # NESTED_ENV is how a harness keeps the shell under test off the user's own
+    # files: `NESTED_ENV=(XDG_CONFIG_HOME=… XDG_STATE_HOME=…)` before this call
+    # means a test that toggles a setting toggles a scratch one.
     env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED_DISPLAY" \
-        "$NESTED_QS" -p "$entry" > "$NESTED_SHELL_LOG" 2>&1 &
+        "${NESTED_ENV[@]}" "$NESTED_QS" -p "$entry" > "$NESTED_SHELL_LOG" 2>&1 &
     NESTED_SHELL_PID=$!
 
     if [[ -n "$ready" ]] && ! nested_await "$NESTED_SHELL_LOG" "$ready" "$timeout"; then

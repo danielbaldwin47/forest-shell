@@ -24,13 +24,47 @@ SettingsWindow.show("launcher")    // a launcher action (#40)
 ```
 
 ```sh
-qs ipc call settings show launcher
-qs ipc show target settings        # the whole external surface
+qs ipc call settings open              # the remembered tab
+qs ipc call settings showTab launcher  # a named one
+qs ipc call settings close
+qs ipc show                            # the whole external surface
 ```
 
 Neither the control centre nor the launcher exists yet, so the IPC target is
 currently the only way in — and the way the ticket's first acceptance criterion
 is exercised until they land and call the same functions.
+`tools/settings-harness.sh` drives all of it inside a nested Hyprland.
+
+There is deliberately no `show` on the IPC surface
+([#77](https://github.com/danielbaldwin47/forest-shell/issues/77)). `show` is
+also a subcommand of `ipc` itself, and the client's parser takes the literal
+token: every form of `qs ipc call settings show` — with an argument, without
+one, after `--` — is parsed as `qs ipc show`, prints the target listing and
+exits 0 without calling anything. `open` and `showTab` are the names that work.
+`SettingsWindow.show(tab)` is unaffected; it is QML-facing and never sees the
+CLI.
+
+## The keyboard
+
+Every control is reachable without a pointer
+([#77](https://github.com/danielbaldwin47/forest-shell/issues/77)):
+
+| Key | What |
+| --- | --- |
+| Tab / Shift-Tab | through the window: the rail is one stop, then the page |
+| Up / Down | the tab rail — selection follows focus |
+| Left / Right | within a chip row; one step on a slider |
+| Home / End | a slider's ends |
+| Space / Enter | activate: toggle a switch, pick a chip, press a button |
+| Escape | close the window |
+
+The decisions are in `Controls/KeyPolicy.qml`, which imports nothing but QtQuick
+so `tests/` can check them; the controls hold `activeFocusOnTab`, a `FocusRing`
+and a call into it. Tab traversal is also what scrolls a page — a control
+focused below the fold is brought into view by `TabPage`.
+
+A `FocusRing` is drawn only for `activeFocus`, and tapping a control does not
+take focus, so a pointer user never sees one.
 
 ## Ground rules
 
@@ -45,6 +79,14 @@ is exercised until they land and call the same functions.
   both derived from that — a slider cannot offer a value the file would clamp.
 - **Hand-editing always works.** A tab that has not been built lists what its
   section already holds rather than pretending the section is empty.
+- **The prose has a floor and the control has a ceiling.** `SettingRow` divides
+  its width by `Controls/RowMetrics.qml`: a hint always keeps a readable
+  measure, and a control too wide for what is left is the thing that gives. A
+  control that can wrap reads `availableWidth` off the row's slot and sets its
+  own width from it
+  ([#80](https://github.com/danielbaldwin47/forest-shell/issues/80) — before
+  this, three chips on the Appearance tab were off the right edge of the
+  window).
 
 ## Why `Controls/` is not in `Widgets/`
 

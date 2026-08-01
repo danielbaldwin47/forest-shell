@@ -39,6 +39,30 @@ Item {
     implicitWidth: 200
     implicitHeight: 24
 
+    // Arrow keys move one step, Home and End go to the ends — through
+    // `KeyPolicy.nudge`, which rounds the way the drag does, so a keyboard edit
+    // cannot write a value a dragged one never would (#77).
+    activeFocusOnTab: true
+
+    Keys.onPressed: event => {
+        const delta = keys.step(event.key);
+        if (delta !== 0) {
+            root.binding.commit(keys.nudge(root.current, delta, root.from, root.to,
+                                           root.stepSize));
+            event.accepted = true;
+            return;
+        }
+
+        if (event.key === Qt.Key_Home || event.key === Qt.Key_End) {
+            root.binding.commit(event.key === Qt.Key_Home ? root.from : root.to);
+            event.accepted = true;
+        }
+    }
+
+    KeyPolicy { id: keys }
+
+    FocusRing { inset: 6; radius: Theme.radiusSm }
+
     function commitAt(x: real): void {
         const span = groove.width - handle.width;
         if (span <= 0)

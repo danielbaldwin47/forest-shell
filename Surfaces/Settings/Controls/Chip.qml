@@ -8,6 +8,11 @@
 // Dumb, like the kit in Widgets/: it takes `selected` and reports `tapped`. It
 // does read Theme, which is why it is not in Widgets/ — see the README next to
 // this file.
+//
+// Focusable, and Space or Enter reports `tapped` exactly as a tap does (#77) —
+// one signal, so a chip cannot mean two different things depending on how it was
+// pressed. Which chip an arrow key moves to belongs to the control that owns the
+// row (`SettingChoice`), not here: a chip does not know what its neighbours mean.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -65,4 +70,19 @@ Rectangle {
         enabled: root.available
         onTapped: root.tapped()
     }
+
+    // A chip that is present but not choosable is skipped by Tab as well as by
+    // the pointer, rather than being a focus stop that does nothing.
+    activeFocusOnTab: root.available
+
+    Keys.onPressed: event => {
+        if (keys.isActivate(event.key)) {
+            root.tapped();
+            event.accepted = true;
+        }
+    }
+
+    KeyPolicy { id: keys }
+
+    FocusRing {}
 }

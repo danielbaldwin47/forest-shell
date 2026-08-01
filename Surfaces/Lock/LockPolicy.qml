@@ -63,6 +63,52 @@ QtObject {
         return answered ? "now" : "onInput";
     }
 
+    // --- Enter, and what there is to answer ----------------------------------
+
+    // #81: the lock shipped with `submit()` opening `if (!responseRequired)
+    // return;`, and a conversation that never opened made that unconditional.
+    // Every Enter — right password, wrong password — did nothing and said
+    // nothing, and the only way out of a secure lock is authenticating, so the
+    // session was lost. The rule that replaces it: Enter always has an outcome,
+    // and none of them is silence.
+
+    /// What pressing Enter should do, given what the conversation is doing.
+    ///
+    ///   "send"     PAM is asking; answer it. The normal case.
+    ///   "hold"     the conversation is real but is not asking *yet* — it is
+    ///              starting, or re-arming between attempts. The attempt is
+    ///              kept and sent when the prompt arrives, because a prompt is
+    ///              milliseconds away and discarding a typed password to say
+    ///              "not ready" would be its own bug.
+    ///   "wait"     an answer is already in flight. Enter again is not a second
+    ///              attempt.
+    ///   "stalled"  there is no conversation and none is coming. This is the
+    ///              broken lock, and it has to say so on screen while someone
+    ///              is still there to read it.
+    function submitOutcome(begun: bool, conversing: bool, responseRequired: bool, busy: bool): string {
+        if (busy)
+            return "wait";
+        if (responseRequired)
+            return "send";
+        return begun ? "hold" : "stalled";
+    }
+
+    // How long a held attempt — or a freshly opened conversation — may go
+    // unanswered before the surface says the lock is broken. Long enough that
+    // no working PAM stack ever trips it (the `login` stack prompts in single
+    // -digit milliseconds), short enough to be read as a response to the Enter
+    // that was just pressed.
+    readonly property int conversationTimeoutMs: 2000
+
+    /// What to show when no prompt ever arrives.
+    ///
+    /// Deliberately the same words as a pam error result: from where the user
+    /// is standing those are the same event, and this is not the screen on
+    /// which to explain the difference. The log carries the detail.
+    function stalledText(): string {
+        return failureText("error", "");
+    }
+
     /// Whether a completed attempt means the account is locked.
     ///
     /// `maxTries` is pam_faillock's own return, so it is the locale-independent

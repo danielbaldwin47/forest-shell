@@ -43,6 +43,10 @@ Item {
 
     property bool keyed: false
 
+    // Whether "the field can hear a keyboard" has already been logged, so the
+    // line is evidence of the first focus rather than a running commentary.
+    property bool focusReported: false
+
     // Inferred from the keystroke rather than read from a device — see
     // LockPolicy.capsFromKey. Undefined until the user types a cased letter,
     // which is exactly when it starts to matter.
@@ -281,7 +285,49 @@ Item {
                 // Each lock surface is its own window, so focus has to be taken
                 // rather than inherited — an output that comes up mid-lock is
                 // otherwise deaf.
-                Component.onCompleted: field.forceActiveFocus()
+                //
+                // Taken when the window is shown and again when it is activated,
+                // never at `Component.onCompleted` (#81): Quickshell builds the
+                // lock surfaces *before* it takes the compositor lock — it
+                // preloads them so the first frame is not blank — so at
+                // construction this window is not mapped, cannot hold active
+                // focus, and `forceActiveFocus()` there is a silent no-op.
+                Connections {
+                    target: field.Window.window
+
+                    function onVisibleChanged() {
+                        if (field.Window.window.visible)
+                            field.forceActiveFocus();
+                    }
+
+                    function onActiveChanged() {
+                        if (field.Window.window.active)
+                            field.forceActiveFocus();
+                    }
+                }
+
+                // The one thing no headless check and no harness can stand in
+                // for: whether a real keystroke would land here. Logged once
+                // when it arrives, and complained about if it never does —
+                // silence on this line means the lock cannot hear a keyboard.
+                onActiveFocusChanged: {
+                    if (field.activeFocus && !surface.focusReported) {
+                        surface.focusReported = true;
+                        focusWatchdog.stop();
+                        Logger.log("lock", "field has focus on " + surface.screen.name);
+                    }
+                }
+
+                Timer {
+                    id: focusWatchdog
+                    interval: policy.conversationTimeoutMs
+                    running: true
+                    onTriggered: {
+                        if (!field.activeFocus)
+                            Logger.warn("lock", "field never took focus on " + surface.screen.name
+                                        + " — the lock cannot hear a keyboard");
+                    }
+                }
 
                 // Runs before the input handles the key and does not consume
                 // it, so the character that summoned the field is also the

@@ -39,6 +39,13 @@ TestCase {
         ]
     }
 
+    // Every test below starts from the same row, so a test that moves the peak
+    // to watch it animate does not decide what the next one is reading.
+    function init() {
+        ridge.cells = sample;
+        ridge.animateExtent = true;
+    }
+
     function test_the_active_form_is_the_peak() {
         const strata = ridge.strata;
         compare(strata[2].active, true);
@@ -143,6 +150,165 @@ TestCase {
         ridge.cells = [];
         compare(ridge.strata.length, 0);
         compare(ridge.implicitWidth, 0);
+
+        ridge.cells = sample;
+    }
+
+    // --- the row as an item tree, not as an encoding -------------------------
+    //
+    // #75: every test above passed from the first commit and the indicator had
+    // still never animated on any machine. `strata` returns a *new* array of
+    // new objects each time `cells` changes, and a Repeater over a JS array
+    // does not diff it — so a workspace switch tore down every delegate and
+    // built fresh ones, and a QML `Behavior` does not run on a property's
+    // initial value. The Behaviors were attached to items that were destroyed
+    // before they could ever fire.
+    //
+    // Nothing above could see that, because nothing above looked at what the
+    // widget *built*. These do. It is still seam 1 — Ridgeline imports nothing
+    // but QtQuick, so its item tree and its animations are as reachable from
+    // qmltestrunner as its arithmetic was.
+
+    /// The delegate items, in row order. The Grid holds the Repeater as well,
+    /// which is told apart by not carrying a `modelData`.
+    function forms() {
+        const grid = ridge.children[0];
+        const out = [];
+        for (let i = 0; i < grid.children.length; i++)
+            if (grid.children[i].modelData !== undefined)
+                out.push(grid.children[i]);
+        return out;
+    }
+
+    /// The Rectangle inside a delegate — the thing that is actually drawn, and
+    /// the thing the Behaviors are on. The handlers are not items, so it is the
+    /// delegate's only child.
+    function drawn(form) {
+        return form.children[0];
+    }
+
+    /// A row of `count` cells with the peak at `peak`, all occupied.
+    function row(count, peak) {
+        const out = [];
+        for (let i = 0; i < count; i++)
+            out.push({ id: i + 1, occupied: true, active: i === peak });
+        return out;
+    }
+
+    /// Put the row in a known state and let anything in flight land, so a test
+    /// starting here is measuring its own change and not the previous one's.
+    function settle(cells) {
+        ridge.cells = cells;
+        wait(ridge.motionMs + 120);
+    }
+
+    function test_a_workspace_change_reuses_the_forms_it_already_built() {
+        // The bug, stated directly: same number of slots, so the same items
+        // must still be there afterwards. New items would have no previous
+        // value to animate from.
+        settle(row(5, 2));
+        const before = forms();
+        compare(before.length, 5);
+
+        ridge.cells = row(5, 4);
+
+        const after = forms();
+        compare(after.length, 5);
+        for (let i = 0; i < 5; i++)
+            verify(before[i] === after[i], "form " + i + " was rebuilt by a workspace change");
+    }
+
+    function test_the_extent_animates_rather_than_snapping() {
+        settle(row(5, 2));
+
+        // Two positions from the peak, so `occupiedHeight - falloff`.
+        const rising = drawn(forms()[4]);
+        compare(rising.height, 7);
+
+        ridge.cells = row(5, 4);
+
+        // A Behavior holds the property at its old value and animates from
+        // there; a rebuilt delegate is born at the new one, which is exactly
+        // what #75 measured as one frame per switch.
+        verify(rising.height < ridge.activeHeight,
+               "the peak snapped to " + rising.height + " instead of animating");
+        verify(rising.height > 0);
+        tryCompare(rising, "height", ridge.activeHeight, 2000);
+    }
+
+    function test_the_haze_animates_too() {
+        settle(row(5, 2));
+
+        const rising = drawn(forms()[4]);
+        fuzzyCompare(rising.opacity, 0.52, 0.0001);
+
+        ridge.cells = row(5, 4);
+
+        verify(rising.opacity < 1.0, "the haze snapped to full opacity");
+        tryCompare(rising, "opacity", 1.0, 2000);
+    }
+
+    function test_reduced_effects_snaps_the_extent_and_keeps_the_fade() {
+        // `animateExtent: false` is the bottom rung of the degrade ladder
+        // (#22 §7): an opacity-only crossfade, with the heights arriving at
+        // once. The forms are still reused — that is what leaves the fade
+        // something to run on.
+        settle(row(5, 2));
+        ridge.animateExtent = false;
+
+        const rising = drawn(forms()[4]);
+        ridge.cells = row(5, 4);
+
+        compare(rising.height, ridge.activeHeight);
+        verify(rising.opacity < 1.0, "reduced effects lost the crossfade as well");
+        tryCompare(rising, "opacity", 1.0, 2000);
+
+        ridge.animateExtent = true;
+    }
+
+    function test_a_row_that_changes_length_is_rebuilt_and_still_correct() {
+        // The one case that *should* rebuild: `bar.ridgeline.slots` changed, or
+        // a live workspace appeared past the slot range, so the row is a
+        // genuinely different row. Both directions, because shrinking asks
+        // delegates to read an index their row no longer has.
+        failOnWarning(/TypeError/);
+
+        settle(row(5, 2));
+        compare(forms().length, 5);
+
+        settle(row(6, 5));
+        const grown = forms();
+        compare(grown.length, 6);
+        compare(drawn(grown[5]).height, ridge.activeHeight);
+        compare(drawn(grown[0]).height, ridge.minHeight);
+
+        settle(row(3, 0));
+        const shrunk = forms();
+        compare(shrunk.length, 3);
+        compare(drawn(shrunk[0]).height, ridge.activeHeight);
+        compare(drawn(shrunk[2]).height, ridge.occupiedHeight - ridge.falloff);
+
+        ridge.cells = sample;
+    }
+
+    function test_a_live_workspace_past_the_slot_range_still_draws() {
+        // What `WorkspaceSlots` hands over when you open a workspace 9 by hand:
+        // a row that is the slot range plus one, with the stray on the right.
+        failOnWarning(/TypeError/);
+
+        settle([
+            { id: 1, occupied: true, active: false },
+            { id: 2, occupied: false, active: false },
+            { id: 3, occupied: false, active: false },
+            { id: 4, occupied: false, active: false },
+            { id: 5, occupied: false, active: false },
+            { id: 9, occupied: true, active: true }
+        ]);
+
+        const built = forms();
+        compare(built.length, 6);
+        compare(drawn(built[5]).height, ridge.activeHeight);
+        compare(built[5].modelData.id, 9);
 
         ridge.cells = sample;
     }

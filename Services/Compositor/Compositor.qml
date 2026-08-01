@@ -49,6 +49,13 @@ Singleton {
     readonly property int activeWorkspaceId:
         Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : 1
 
+    // The one state change everything on the bar's left cluster is downstream
+    // of, and it had no log line: #75 was an indicator that never animated, and
+    // the first question — is it being told, or is it not drawing? — had no
+    // evidence either way. One line per real workspace change, which is a
+    // keypress, not a frame.
+    onActiveWorkspaceIdChanged: Logger.log("compositor", "workspace " + root.activeWorkspaceId + " focused")
+
     /// Live workspaces, ascending, as plain data: `{ id, occupied, active }`.
     ///
     /// Special workspaces (scratchpads) have negative ids and are left out —
@@ -146,21 +153,68 @@ Singleton {
     /// `hyprctl` rather than `Hyprland.dispatch`, because `keyword` is a
     /// hyprctl command and not a dispatcher — this is the one subprocess the
     /// facade owns, and it runs once at startup rather than per frame or per
-    /// keypress. Re-running it appends a duplicate rule that has no additional
-    /// effect (it is the same rule), which is what a shell hot-reload does
-    /// during development; a compositor reload clears them.
+    /// keypress. Re-running it appends a rule rather than replacing one, so a
+    /// rule is turned off by pushing its opposite (`blur 0` over `blur 1`);
+    /// there is no clearing verb in the 0.5x syntax. A compositor reload drops
+    /// the lot.
+    ///
+    /// `rule` is a `<field> <value>` pair — the caller's business, since only
+    /// the caller knows what off means for its rule. The match clause is this
+    /// file's, via LayerRulePolicy next door, which is also where the reply is
+    /// read: #78 spent four PRs pushing a rule Hyprland refused every time,
+    /// because nothing here ever looked at what came back.
     function setLayerRule(rule: string, namespace: string) {
         if (!root.available) {
             Logger.warn("compositor", "no Hyprland session — skipping layerrule "
                         + rule + " for " + namespace);
             return;
         }
-        keyword.command = ["hyprctl", "keyword", "layerrule", rule + ", " + namespace];
-        keyword.running = true;
-        Logger.log("compositor", "layerrule " + rule + " → " + namespace);
+        // One process, so a rule pushed while another is in flight waits rather
+        // than replacing it mid-run — two arriving together is what a settings
+        // toggle looks like from here.
+        root.pendingRules = root.pendingRules.concat([{ rule: rule, namespace: namespace }]);
+        root.pushNextRule();
     }
 
-    Process { id: keyword }
+    property var pendingRules: []
+
+    function pushNextRule() {
+        if (keyword.running || root.pendingRules.length === 0)
+            return;
+        const next = root.pendingRules[0];
+        root.pendingRules = root.pendingRules.slice(1);
+        keyword.rule = next.rule;
+        keyword.namespace_ = next.namespace;
+        keyword.command = layerRules.command(next.rule, next.namespace);
+        keyword.running = true;
+    }
+
+    LayerRulePolicy { id: layerRules }
+
+    Process {
+        id: keyword
+
+        // What is in flight, kept for the log line: the reply arrives long
+        // after the call and says nothing about which rule it is answering.
+        property string rule: ""
+        property string namespace_: ""
+
+        stdout: StdioCollector { id: keywordOut }
+        stderr: StdioCollector { id: keywordErr }
+
+        // hyprctl exits 0 whether it applied the rule or refused it, so the
+        // reply text is the evidence and the exit code only catches a hyprctl
+        // that could not run at all. Both are in `accepted`.
+        onExited: (exitCode, exitStatus) => {
+            if (layerRules.accepted(exitCode, keywordOut.text))
+                Logger.log("compositor", "layerrule " + keyword.rule + " → " + keyword.namespace_);
+            else
+                Logger.warn("compositor",
+                            layerRules.complaint(keyword.rule, keyword.namespace_, exitCode,
+                                                 keywordOut.text, keywordErr.text));
+            root.pushNextRule();
+        }
+    }
 
     // Occupancy has to be asked for. These are the events after which the
     // window count under a workspace can differ from the last snapshot;

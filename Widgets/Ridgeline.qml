@@ -68,6 +68,17 @@ Item {
         return out;
     }
 
+    /// What a form reads while it is being taken off the end of a shorter row —
+    /// see the delegate below. An empty form, which is the nearest thing to
+    /// "not there" this widget draws.
+    readonly property var vanishing: ({
+        id: null,
+        active: false,
+        occupied: false,
+        extent: root.emptyHeight,
+        haze: root.emptyHaze
+    })
+
     // --- geometry ------------------------------------------------------------
     // These mirror the decided defaults in `bar.ridgeline`
     // (Core/SettingsSchema.qml), which is the one place the widget-kit rule
@@ -138,13 +149,32 @@ Item {
         rows: root.vertical ? root.strata.length : 1
         columns: root.vertical ? 1 : root.strata.length
 
+        // Counted, not enumerated (#75). `strata` returns a **new** array of new
+        // objects every time `cells` changes, and a Repeater over a JS array does
+        // not diff one: a new array identity destroys every delegate and builds
+        // fresh ones. A QML `Behavior` never runs on a property's initial value,
+        // only on a change to an existing one — so the four Behaviors below were
+        // attached to items that were destroyed before they could fire, and the
+        // indicator arrived at each new state in a single frame.
+        //
+        // With the count as the model, a workspace switch rebinds the forms that
+        // are already there and only a genuinely different row — `slots` changed,
+        // or a live workspace appeared past the range — rebuilds them.
+        // `WorkspaceSlots` is what keeps that count still.
         Repeater {
-            model: root.strata
+            model: root.strata.length
 
             delegate: Item {
                 id: cell
 
-                required property var modelData
+                required property int index
+
+                // `strata` shortens before the Repeater has dropped the
+                // delegates the shorter row no longer has, so an out-of-range
+                // index is a state a delegate really passes through on its way
+                // out rather than a fault. It is given a form to draw for that
+                // instant, not an undefined to throw on.
+                readonly property var modelData: root.strata[index] ?? root.vanishing
 
                 width: root.vertical ? root.extent : root.unitWidth
                 height: root.vertical ? root.unitWidth : root.extent

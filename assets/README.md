@@ -67,17 +67,18 @@ axis explicitly if a different optical size is ever wanted.
 
 ## Icons
 
-`icons/lucide/` holds the **pristine** upstream Lucide SVG set — 1756 icons,
-vendored so icon lookups need no network and no npm dependency.
+`icons/lucide/` holds the **forest-shell-normalized** Lucide SVG set — all 1756
+icons, vendored so icon lookups need no network and no npm dependency.
 
 - Pinned version: **lucide 1.28.0** (released 2026-07-30)
 - Source: [`lucide-icons-1.28.0.zip`](https://github.com/lucide-icons/lucide/releases/tag/1.28.0) release asset, `icons/*.svg` only (the sibling `*.json` metadata is not vendored)
-- License: ISC (`icons/lucide/LICENSE`)
+- License: ISC (`icons/lucide/LICENSE`) — untouched by the normalization
 
-To re-sync, download the release asset for the new tag and replace the directory
-wholesale; do not hand-edit files in it.
+To re-sync or bump the version, run `tools/vendor-lucide.sh [version]`; it
+downloads, normalizes and replaces the directory wholesale. Do not hand-edit
+files in it — `tests/run.sh` checks the invariants below on every run.
 
-### Two things upstream SVGs do not do
+### Why the set is not pristine
 
 Upstream icons open with `stroke="currentColor" stroke-width="2"`, and neither
 survives contact with QML as-is:
@@ -88,10 +89,35 @@ survives contact with QML as-is:
    An `Image` has no color property to override it either.
 2. **Stroke weight is wrong.** The spec calls for **1.5px**; upstream is 2.
 
-Substituting a literal hex color and `stroke-width="1.5"` renders exactly as
-asked (sampled `#66E0C8`, 893 ink px), so the raw assets are sound — they just
-need either a preprocessing step, a runtime recolor
-(`MultiEffect` / `ShaderEffect` colorization), or the Lucide **icon font**
-(`lucide-font-1.28.0.zip` from the same release), where `Text.color` just works.
-Choosing among those is
-[the icon rendering strategy ticket](https://github.com/danielbaldwin47/forest-shell/issues/19).
+Neither is fixable at runtime, so [#19](https://github.com/danielbaldwin47/forest-shell/issues/19)
+resolved to bake both in and recolor at runtime, and
+[#34](https://github.com/danielbaldwin47/forest-shell/issues/34) did it. The set
+carries two rewrites against upstream — the second applied to `fill` as well as
+`stroke`:
+
+| upstream | vendored |
+| --- | --- |
+| `stroke-width="2"` | `stroke-width="1.5"` |
+| `stroke="currentColor"` | `stroke="#ffffff"` |
+| `fill="currentColor"` (9 icons: `chart-scatter`, `images`, `key-round`, `palette`, `tag`, `tag-plus`, `tags`, `tag-x`, `vault`) | `fill="#ffffff"` |
+
+White is a neutral base, not a palette choice: `MultiEffect { colorization: 1.0 }`
+over a white source is **pixel-identical** to a file with the color baked in
+(measured), so the color stays dynamic at no cost in fidelity. Rewriting only
+`stroke` would leave those nine icons' inner dots black, and `MultiEffect` will
+not lift black.
+
+### Using them
+
+`Widgets/Icon.qml` is the only thing that reads this directory. Icons are
+addressed by **name** — the file stem — so the filenames are the lookup key and
+there is no manifest to keep in step:
+
+```qml
+Icon { name: "wifi"; size: 16; color: Theme.textSecondary }
+```
+
+The `gallery.qml` entry point (`qs-upstream -p ~/repos/forest-shell/gallery.qml`)
+renders the size ramp, the token roles and the oversample comparison on a real
+session — which is where fractional scale and `MultiEffect` can actually be
+judged.

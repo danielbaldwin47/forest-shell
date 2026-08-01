@@ -1,2 +1,5 @@
 # Pinterest pin images are copyrighted reference material - keep local only
 .wayfinder/assets/pins/
+
+# Python bytecode from tools/ scripts run in place
+__pycache__/

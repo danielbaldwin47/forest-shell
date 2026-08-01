@@ -124,27 +124,41 @@ TestCase {
     function test_the_clients_own_timeout_is_ignored_by_default() {
         // Almost every client passes a hardcoded 5000 it never thought about,
         // which would make the urgency table dead settings.
-        compare(policy.timeoutMs(policy.urgencyNormal, 5, settings), 8000);
-        compare(policy.timeoutMs(policy.urgencyLow, 30, settings), 5000);
+        compare(policy.timeoutMs(policy.urgencyNormal, 5000, settings), 8000);
+        compare(policy.timeoutMs(policy.urgencyLow, 30000, settings), 5000);
     }
 
     function test_the_clients_timeout_wins_when_the_user_asks_for_it() {
         const honoring = Object.assign({}, settings, { honorClientTimeout: true });
-        // Quickshell hands the hint over in seconds; the shell works in ms.
-        compare(policy.timeoutMs(policy.urgencyNormal, 5, honoring), 5000);
-        compare(policy.timeoutMs(policy.urgencyNormal, 2.5, honoring), 2500);
-        // 0 means "never expire" in the freedesktop spec, not "expire now".
+        // `Notification.expireTimeout` is **milliseconds**, measured on a live
+        // session (#74) — the capability survey said seconds and was wrong, and
+        // the 1000× it cost is why these cases are written out in the client's
+        // own units.
+        compare(policy.timeoutMs(policy.urgencyNormal, 5000, honoring), 5000);
+        compare(policy.timeoutMs(policy.urgencyNormal, 2500, honoring), 2500);
+        // The freedesktop "never expire" sentinel — not "expire now".
         compare(policy.timeoutMs(policy.urgencyNormal, 0, honoring), 0);
         // -1 is "server decides", which is the authored default.
         compare(policy.timeoutMs(policy.urgencyNormal, -1, honoring), 8000);
     }
 
+    function test_the_honored_timeout_is_read_as_milliseconds_not_seconds() {
+        // The regression #74 found: `notify-send -t 4000` asks for four
+        // seconds, and under the seconds reading became 4 000 000 ms, clamped
+        // to the five-minute ceiling. `-t 3` is the decisive case — three
+        // milliseconds is below the floor, where the seconds reading would have
+        // given a live 3 s popup.
+        const honoring = Object.assign({}, settings, { honorClientTimeout: true });
+        compare(policy.timeoutMs(policy.urgencyNormal, 4000, honoring), 4000);
+        compare(policy.timeoutMs(policy.urgencyNormal, 3, honoring), policy.minTimeoutMs);
+    }
+
     function test_an_honored_client_timeout_is_still_bounded() {
         // A client asking for an hour on screen does not get one.
         const honoring = Object.assign({}, settings, { honorClientTimeout: true });
-        compare(policy.timeoutMs(policy.urgencyNormal, 3600, honoring), policy.maxTimeoutMs);
+        compare(policy.timeoutMs(policy.urgencyNormal, 3600000, honoring), policy.maxTimeoutMs);
         // Nor does one asking for a frame.
-        compare(policy.timeoutMs(policy.urgencyNormal, 0.05, honoring), policy.minTimeoutMs);
+        compare(policy.timeoutMs(policy.urgencyNormal, 50, honoring), policy.minTimeoutMs);
     }
 
     function test_a_missing_settings_object_still_yields_a_timeout() {
@@ -263,7 +277,8 @@ TestCase {
 
     function test_a_record_carries_what_the_center_has_to_render() {
         const record = policy.record({
-            id: 7,
+            serverId: 7,
+            seq: 3,
             time: 1000,
             appKey: "telegram",
             appName: "Telegram",
@@ -273,7 +288,8 @@ TestCase {
             body: "on my way",
             urgency: policy.urgencyNormal
         });
-        compare(record.id, 7);
+        compare(record.serverId, 7);
+        compare(record.seq, 3);
         compare(record.time, 1000);
         compare(record.appKey, "telegram");
         compare(record.appName, "Telegram");
@@ -300,6 +316,96 @@ TestCase {
         compare(policy.record({ image: "/tmp/a.png" }).image, "/tmp/a.png");
     }
 
+    // --- row identity (#76) ---------------------------------------------------
+
+    function test_two_notifications_with_the_same_daemon_id_get_different_keys() {
+        // The daemon's id counter restarts at 1 with every server, and history
+        // does not — so a shell restart used to put two different rows in the
+        // list under the same id (#76). The row key may not be borrowed from
+        // the daemon.
+        const before = policy.record({ serverId: 1, seq: 12, time: 1000, summary: "old" });
+        const after = policy.record({ serverId: 1, seq: 13, time: 2000, summary: "new" });
+        verify(before.key !== after.key, "keys collided: " + before.key);
+        // The daemon id is still there, under a name that says whose it is.
+        compare(before.serverId, 1);
+        compare(after.serverId, 1);
+    }
+
+    function test_a_key_is_unique_even_within_one_millisecond() {
+        // A burst arrives faster than the clock ticks, so the timestamp alone
+        // is not an identity.
+        const a = policy.record({ seq: 1, time: 1000, appKey: "telegram" });
+        const b = policy.record({ seq: 2, time: 1000, appKey: "telegram" });
+        verify(a.key !== b.key, "keys collided: " + a.key);
+    }
+
+    function test_a_key_is_the_same_value_every_time_it_is_derived() {
+        // The center keys its delegates on this. A key that changed on reload
+        // would rebuild every row.
+        const fields = { serverId: 4, seq: 9, time: 1234, appKey: "telegram" };
+        compare(policy.record(fields).key, policy.record(fields).key);
+        verify(policy.record(fields).key.length > 0);
+    }
+
+    function test_the_next_sequence_number_clears_the_history_in_hand() {
+        compare(policy.nextSeq([], 0), 1);
+        compare(policy.nextSeq(undefined, undefined), 1);
+        compare(policy.nextSeq([policy.record({ seq: 12 }), policy.record({ seq: 11 })], 0), 13);
+    }
+
+    function test_the_next_sequence_number_clears_the_persisted_counter_too() {
+        // The list on its own is not a high-water mark: the center dismisses
+        // single rows (#43) and a lowered historyLimit truncates it, so the
+        // highest number issued can leave the list entirely (#76).
+        compare(policy.nextSeq([], 40), 41);
+        compare(policy.nextSeq([policy.record({ seq: 2 })], 40), 41);
+        // And the counter is not enough on its own either — state.json is read
+        // lazily, so a row can be remembered before the floor has arrived.
+        compare(policy.nextSeq([policy.record({ seq: 99 })], 40), 100);
+    }
+
+    function test_a_row_with_no_sequence_number_does_not_hold_the_counter_back() {
+        // Hand-edited, or written by a build that predates the key (#76).
+        compare(policy.nextSeq([{ time: 1 }, policy.record({ seq: 4 })], 0), 5);
+        compare(policy.nextSeq(["nonsense", null], 0), 1);
+    }
+
+    function test_a_run_of_arrivals_never_repeats_a_key() {
+        // The service's own loop: ask for the next seq, build, remember. The
+        // limit is well under the run, so the list keeps losing the numbers it
+        // was asked for — which is the case the persisted counter is for.
+        let history = [];
+        let counter = 0;
+        const keys = {};
+        for (let i = 0; i < 20; i++) {
+            counter = policy.nextSeq(history, counter);
+            const entry = policy.record({
+                serverId: (i % 5) + 1,   // the daemon's counter, restarting
+                seq: counter,
+                time: 1000,              // one millisecond, worst case
+                appKey: "telegram"
+            });
+            verify(keys[entry.key] === undefined, "repeated key " + entry.key);
+            keys[entry.key] = true;
+            history = policy.remember(history, entry, 5);
+        }
+    }
+
+    function test_dismissing_the_newest_row_does_not_reissue_its_number() {
+        // What #43's center does, and what the list alone cannot survive: the
+        // row holding the highest number is removed, and the next arrival must
+        // still not land on a number that has been used.
+        let counter = policy.nextSeq([], 0);
+        const first = policy.record({ seq: counter, time: 1000, appKey: "telegram" });
+        let history = policy.remember([], first, 100);
+
+        history = history.filter(row => row.key !== first.key);   // dismissed
+        counter = policy.nextSeq(history, counter);
+        const second = policy.record({ seq: counter, time: 1000, appKey: "telegram" });
+
+        verify(second.key !== first.key, "reissued " + first.key + " after a dismissal");
+    }
+
     function test_records_are_strings_whatever_the_client_sent() {
         const record = policy.record({ summary: undefined, body: null, appName: 12 });
         compare(record.summary, "");
@@ -312,7 +418,7 @@ TestCase {
     function test_history_is_newest_first_and_bounded() {
         let history = [];
         for (let i = 0; i < 5; i++)
-            history = policy.remember(history, policy.record({ id: i, summary: "n" + i }), 3);
+            history = policy.remember(history, policy.record({ serverId: i, seq: i, summary: "n" + i }), 3);
         compare(history.length, 3);
         compare(history[0].summary, "n4");
         compare(history[2].summary, "n2");
@@ -360,7 +466,7 @@ TestCase {
         // The limit may have been lowered since the file was written.
         const history = [];
         for (let i = 0; i < 10; i++)
-            history.push(policy.record({ id: i, summary: "n" + i }));
+            history.push(policy.record({ serverId: i, seq: i, summary: "n" + i }));
         compare(policy.readHistory(history, 4).length, 4);
         compare(policy.readHistory(history, 4)[0].summary, "n0");
     }
@@ -372,5 +478,63 @@ TestCase {
         compare(loaded[0].body, "");
         compare(loaded[0].appName, "");
         compare(loaded[0].urgency, "normal");
+    }
+
+    function test_a_row_keeps_its_key_across_a_read_back() {
+        // The key is what the center's delegates are keyed on, so it has to be
+        // the same value before the write and after the read (#76).
+        const written = policy.record({ serverId: 1, seq: 7, time: 1000, appKey: "telegram" });
+        const loaded = policy.readHistory([written], 10);
+        compare(loaded[0].key, written.key);
+        compare(loaded[0].seq, 7);
+        compare(loaded[0].serverId, 1);
+    }
+
+    function test_a_hand_added_row_is_given_a_key_nothing_else_holds() {
+        // state.json is hand-editable (#21), so a row can arrive with no
+        // sequence number at all — including into a file whose other rows have
+        // one. The numbers issued here have to clear those (#76).
+        const loaded = policy.readHistory([
+            { time: 3000, appKey: "harness", summary: "hand-added" },
+            policy.record({ seq: 5, time: 2000, appKey: "telegram", summary: "written" }),
+            { time: 1000, appKey: "harness", summary: "also hand-added" }
+        ], 100);
+
+        compare(loaded.length, 3);
+        const seen = {};
+        for (const row of loaded) {
+            verify(row.seq > 0, "row kept a zero sequence number");
+            verify(seen[row.key] === undefined, "duplicate key " + row.key);
+            seen[row.key] = true;
+        }
+        // Newest first, so the head still holds the highest number.
+        verify(loaded[0].seq > loaded[2].seq);
+    }
+
+    function test_a_loaded_history_has_no_duplicate_keys_across_a_restart() {
+        // The shape #76 measured: twelve rows, a restart, one more — the daemon
+        // id counter starts again at 1, the history does not.
+        let history = [];
+        let counter = 0;
+        for (let i = 0; i < 12; i++) {
+            counter = policy.nextSeq(history, counter);
+            history = policy.remember(history, policy.record({
+                serverId: i + 1, seq: counter, time: 1000 + i, appKey: "telegram"
+            }), 100);
+        }
+
+        // The restart: the file is read back, the counter comes back with it,
+        // and the next notification is from a server whose ids start at 1.
+        const restored = policy.readHistory(history, 100);
+        const after = policy.remember(restored, policy.record({
+            serverId: 1, seq: policy.nextSeq(restored, counter), time: 2000, appKey: "telegram"
+        }), 100);
+
+        compare(after.length, 13);
+        const seen = {};
+        for (const row of after) {
+            verify(seen[row.key] === undefined, "duplicate key " + row.key);
+            seen[row.key] = true;
+        }
     }
 }

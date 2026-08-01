@@ -42,6 +42,11 @@ SettingRow {
     // derived from — so a knob cannot be validated as one kind and edited as
     // another.
     Loader {
+        /// Passed through to whatever is loaded: the row's slot is this
+        /// Loader's parent, not the control's, so without this a choice loaded
+        /// from a knob table would never learn when it has to wrap (#80).
+        readonly property real availableWidth: parent?.availableWidth ?? 0
+
         sourceComponent: {
             switch (Config.schema.knobKind(knobBinding.spec)) {
             case "choice": return choiceControl;

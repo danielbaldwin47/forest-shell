@@ -55,6 +55,11 @@ Rectangle {
     TextInput {
         id: field
 
+        // Tab reaches the field (#77). No focus ring on this one: the border
+        // already goes strong on focus and ember on an invalid value, and a
+        // ring outside that would be a second thing saying the same word.
+        activeFocusOnTab: true
+
         anchors.fill: parent
         anchors.leftMargin: Theme.space3
         anchors.rightMargin: Theme.space3

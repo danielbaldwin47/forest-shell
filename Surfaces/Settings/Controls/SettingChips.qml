@@ -22,7 +22,17 @@ Flow {
 
     readonly property var selected: Array.isArray(root.binding.value) ? root.binding.value : []
 
+    /// Where it wraps, from the `SettingRow` slot around it (#80). A Flow left
+    /// to itself lays out on one line however wide that is, which for a long
+    /// allowlist is a line that leaves the window.
+    property real availableWidth: root.parent?.availableWidth ?? 0
+
+    readonly property real naturalWidth: metrics.naturalWidth(root)
+
+    width: metrics.slotWidth(root.naturalWidth, root.availableWidth)
     spacing: Theme.space1
+
+    RowMetrics { id: metrics }
 
     function toggle(value: string): void {
         const has = root.selected.indexOf(value) >= 0;

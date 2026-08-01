@@ -50,4 +50,20 @@ Rectangle {
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: root.binding.commit(!root.checked) }
+
+    // Space and Enter do what a tap does, through the same commit — so the
+    // knob's refusal to move until the engine has taken the value is true of
+    // the keyboard too (#77).
+    activeFocusOnTab: true
+
+    Keys.onPressed: event => {
+        if (keys.isActivate(event.key)) {
+            root.binding.commit(!root.checked);
+            event.accepted = true;
+        }
+    }
+
+    KeyPolicy { id: keys }
+
+    FocusRing {}
 }

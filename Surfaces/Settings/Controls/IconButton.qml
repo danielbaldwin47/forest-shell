@@ -48,4 +48,19 @@ Item {
         enabled: root.possible
         onTapped: root.tapped()
     }
+
+    // A button that cannot act — the up arrow on the first module — is not a
+    // focus stop either (#77).
+    activeFocusOnTab: root.possible
+
+    Keys.onPressed: event => {
+        if (root.possible && keys.isActivate(event.key)) {
+            root.tapped();
+            event.accepted = true;
+        }
+    }
+
+    KeyPolicy { id: keys }
+
+    FocusRing {}
 }

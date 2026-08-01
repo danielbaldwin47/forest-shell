@@ -54,7 +54,7 @@ nested_up || exit 1
 # The shell gets its own config dir. `layerrule blur false` below is a real
 # settings write, and the real one belongs to whoever is running this.
 mkdir -p "$NESTED_WORK/config"
-NESTED_SHELL_ENV=("XDG_CONFIG_HOME=$NESTED_WORK/config")
+NESTED_ENV=("XDG_CONFIG_HOME=$NESTED_WORK/config")
 
 nested_shell blur-harness.qml 'harness: blur harness ready' || exit 1
 

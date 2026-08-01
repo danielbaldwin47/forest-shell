@@ -351,7 +351,8 @@ QtObject {
 
             // Off by default: nearly every client passes a hardcoded 5000 it
             // never thought about, so honouring it would make the table above
-            // dead settings. On, a client's own expire-timeout hint wins.
+            // dead settings. On, a client's own expire-timeout hint wins — in
+            // milliseconds, like the table, and bounded the same way (#74).
             honorClientTimeout: { def: false, coerce: c.boolean },
 
             // Popups on screen at once. Past this the oldest leaves early to

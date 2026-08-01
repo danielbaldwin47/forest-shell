@@ -13,6 +13,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Window
 import qs.Core
 import qs.Widgets
 
@@ -37,6 +38,13 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
+    // #80 also reported the pane looking scrolled away from the top on the one
+    // capture ever taken of it. Nothing here moves `contentY` on load — it is
+    // zero until something scrolls it, and the only thing that does is focus
+    // moving below the fold, which cannot happen before the window is used. The
+    // oversized row that ticket is about is the remaining explanation, and
+    // confirming that needs a capture this seam cannot take.
+
     // Whether anything in this section is currently written to the file. Reads
     // `Config.values` so that clearing the section makes the affordance go away
     // by itself.
@@ -53,6 +61,39 @@ Flickable {
     }
 
     SpecStore { id: store }
+
+    // --- the keyboard (#77) ---------------------------------------------------
+    //
+    // Tab traversal moves focus without moving the page, so a control below the
+    // fold takes the ring somewhere nothing is drawn — which from the outside is
+    // indistinguishable from Tab having done nothing at all. Where to scroll to
+    // is `KeyPolicy.scrollTo`; this only asks.
+
+    KeyPolicy { id: keys }
+
+    readonly property Item focusedItem: Window.activeFocusItem
+    onFocusedItemChanged: root.revealFocused()
+
+    /// Whether an item is on this page. The focused item may be on the tab rail
+    /// or in another window entirely, and mapping from one of those would scroll
+    /// the page to a coordinate that means nothing here.
+    function holds(item: Item): bool {
+        for (let node = item; node; node = node.parent)
+            if (node === root.contentItem)
+                return true;
+        return false;
+    }
+
+    function revealFocused(): void {
+        const item = root.focusedItem;
+        if (!item || !root.holds(item))
+            return;
+
+        const pos = item.mapToItem(root.contentItem, 0, 0);
+        root.contentY = keys.scrollTo(root.contentY, root.height, pos.y, item.height,
+                                      Theme.space5,
+                                      Math.max(0, root.contentHeight - root.height));
+    }
 
     ColumnLayout {
         id: column
@@ -124,6 +165,17 @@ Flickable {
 
                 HoverHandler { id: resetHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: Config.reset(root.section) }
+
+                activeFocusOnTab: true
+
+                Keys.onPressed: event => {
+                    if (keys.isActivate(event.key)) {
+                        Config.reset(root.section);
+                        event.accepted = true;
+                    }
+                }
+
+                FocusRing {}
             }
         }
 

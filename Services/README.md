@@ -21,13 +21,20 @@ Two rules that hold across all of them:
 - A service that only one surface uses is not a service: it lives with its
   surface (`Surfaces/Drawers/Launcher/services/`), not here.
 
-Two of them exist so far, both landed by the notification ticket (#42):
+Two of them exist so far:
 
-- `Notifications/` — `NotificationServer`, the live popup list, do-not-disturb
-  and the persisted history. The rules about an arriving notification are split
-  into `NotificationPolicy.qml`, which imports nothing but QtQuick so `tests/`
-  can reach them; the singleton next door is the wiring.
-- `Compositor/` — deliberately thin, and only as wide as its callers: the
-  focused screen and whether that screen is showing a fullscreen window. The
-  workspace model and `dispatch()` land with the ridgeline (#35) and the shared
-  drawer window (#38).
+- `Notifications/` (#42) — `NotificationServer`, the live popup list,
+  do-not-disturb and the persisted history. The rules about an arriving
+  notification are split into `NotificationPolicy.qml`, which imports nothing
+  but QtQuick so `tests/` can reach them; the singleton next door is the wiring.
+- `Compositor/` (#35, #42) — the Hyprland facade. It reports workspaces as
+  plain data, focuses them, owns the one `hyprctl` call the shell makes — the
+  layer rule that asks Hyprland to blur behind the bar — and answers the two
+  questions the popups ask: the focused screen, and whether that screen is
+  showing a fullscreen window. Everything above it speaks in workspace ids and
+  intentions, which is what keeps Hyprland's two awkward facts (empty
+  workspaces do not exist; window counts are a stale snapshot until you ask
+  again) in one file.
+
+The rest are empty until their ticket lands; the directories exist so nothing
+has to move when they do.

@@ -23,12 +23,14 @@ if [[ $# -gt 0 ]]; then
   exec "$runner" -input "$1"
 fi
 
-# The vendored icon set is a checked-in invariant, not a build artifact: it is
-# normalized in place, so "did someone drop a pristine upstream SVG in there"
-# is a thing the test run should catch. Not a QML test, so it runs first and
-# separately.
+# The vendored icon set and the grain texture are checked-in invariants, not
+# build artifacts: both are generated in place from a script, so "did someone
+# drop a pristine upstream SVG in there" and "is this still the texture the
+# recipe makes" are things the test run should catch. Not QML tests, so they
+# run first and separately.
 python=$(command -v python3 || true)
-[[ -n "$python" ]] || { echo "python3 not found (needed for the icon set check)" >&2; exit 1; }
+[[ -n "$python" ]] || { echo "python3 not found (needed for the asset checks)" >&2; exit 1; }
 "$python" ../tools/normalize-lucide.py --check
+"$python" ../tools/make-noise.py --check
 
 exec "$runner" -input .

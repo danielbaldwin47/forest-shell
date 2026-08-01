@@ -15,6 +15,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import qs.Services.Notifications
+import qs.Services.Compositor
 
 Singleton {
     id: root
@@ -41,7 +42,12 @@ Singleton {
         // without this line the shell would take the bus name only once a
         // surface asked — which is to say, after the first notification had
         // already been lost (#42).
-        report("deferred", [ShellState, Notifications]);
+        //
+        // Compositor is here because the bar's Hyprland layerrule has to be
+        // pushed whether or not anything on the bar is currently reading
+        // workspaces — a bar carrying only a clock would otherwise never
+        // construct the facade, and would sit unblurred (#35).
+        report("deferred", [ShellState, Notifications, Compositor]);
     }
 
     function report(stage: string, services) {

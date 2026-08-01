@@ -9,8 +9,9 @@
 // retires it.
 //
 // Startup is staged (Core/Startup.qml):
-//   stage 1, synchronous — Config, Theme, Background. The wallpaper is on the
-//                          first frame; nothing else belongs here.
+//   stage 1, synchronous — Config, Theme, Background, Bar. #22 §4 budgets the
+//                          first frame as "wallpaper *and bar* rendered", so
+//                          both surfaces are here; nothing else belongs.
 //   stage 2, deferred    — chained off the first painted frame, so no service
 //                          construction can delay it.
 pragma ComponentBehavior: Bound
@@ -19,6 +20,7 @@ import Quickshell
 import qs.Core
 import qs.Surfaces.Background
 import qs.Surfaces.Notifications
+import qs.Surfaces.Bar
 
 ShellRoot {
     id: shell
@@ -32,8 +34,10 @@ ShellRoot {
         ServiceInit.initSync();
     }
 
-    // Stage one.
+    // Stage one. Both are one window per screen, created and destroyed by
+    // screen hotplug and by nothing else (#22 §1, §3).
     Background {}
+    Bar {}
 
     // Stage two. Surfaces and services added by later tickets hook in here.
     //

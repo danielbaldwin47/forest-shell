@@ -75,6 +75,32 @@ TestCase {
         compare(registry.firstTab, "appearance");
     }
 
+    function test_arrow_keys_walk_the_rail_in_order() {
+        // #77: the rail was pointer-only. Up and Down move one tab, in the
+        // order the list above states, and stop at the ends — walking off the
+        // bottom staying on About is a better answer than jumping back to the
+        // top of a list the user can see.
+        compare(registry.neighbour("appearance", 1), "bar");
+        compare(registry.neighbour("bar", -1), "appearance");
+        compare(registry.neighbour("appearance", -1), "appearance");
+        compare(registry.neighbour("about", 1), "about");
+    }
+
+    function test_arrow_keys_walk_onto_unbuilt_tabs_too() {
+        // The keyboard walks the same rail the pointer does. A tab #55 has not
+        // built yet opens a page that says so, which is a better surprise than
+        // a rail the arrow keys skip entries in.
+        compare(registry.neighbour("launcher", 1), "controlCenter");
+        verify(!registry.find("controlCenter").built);
+    }
+
+    function test_arrow_keys_from_an_id_that_is_not_a_tab() {
+        // Same fallback as every other entry point: a stale id in the state
+        // file behaves as the first tab rather than throwing.
+        compare(registry.neighbour("nonesuch", 1), "bar");
+        compare(registry.neighbour("", -1), registry.firstTab);
+    }
+
     function test_find_returns_null_for_an_unknown_id() {
         compare(registry.find("nonesuch"), null);
         compare(registry.find("about").title, "About");

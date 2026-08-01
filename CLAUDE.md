@@ -21,9 +21,11 @@ thin.
 
 **2. `tools/nested-session.sh` — the real shell inside a nested Hyprland.**
 Everything that only exists once a compositor is involved: lifecycles that
-depend on real Wayland protocol events, IPC, layer-shell behaviour, anything
-`Quickshell.*`. Drive it over IPC and assert on the log.
-`tools/lock-harness.sh` is the worked example.
+depend on real Wayland protocol events, IPC, layer-shell behaviour, keyboard
+focus, anything `Quickshell.*`. Drive it over IPC or with `nested_key`, and
+assert on the log. `tools/lock-harness.sh` and `tools/settings-harness.sh` are
+the worked examples; a harness that edits config sets `NESTED_ENV` to a scratch
+`XDG_CONFIG_HOME` so it does not touch the session running it.
 
 Surfaces get a log line for each state change worth asserting on. #81 was a
 silent lifecycle: nothing logged, so a lock that could not be unlocked had two

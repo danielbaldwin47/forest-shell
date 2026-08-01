@@ -31,10 +31,11 @@ FloatingWindow {
     /// change, so the window reopens where it was left (#54).
     property string currentTab: tabs.resolve(ShellState.values.settings.lastTab)
 
-    /// The window was closed from outside the shell — the compositor's close
-    /// button or a window-manager kill. Whoever opened the window owns tearing
-    /// it down; this only reports it.
-    signal closeRequested()
+    /// The window wants to go away, and why: `"compositor"` for the close
+    /// button or a window-manager kill, `"escape"` for the key (#77). Whoever
+    /// opened the window owns tearing it down; this only reports it, and the
+    /// reason is what the log line at the other end says.
+    signal closeRequested(string reason)
 
     title: "forest-shell — settings"
     // Stated rather than assumed: the window exists only while it is open, so
@@ -54,7 +55,7 @@ FloatingWindow {
         if (window.visible)
             window.wasShown = true;
         else if (window.wasShown)
-            window.closeRequested();
+            window.closeRequested("compositor");
     }
 
     SettingsTabs { id: tabs }
@@ -70,18 +71,89 @@ FloatingWindow {
         // which tab you had open is not part of your setup (#21).
         window.currentTab = resolved;
         ShellState.set("settings.lastTab", resolved);
+        Logger.log("settings", "tab selected (" + resolved + ")");
+
+        // The keyboard goes with the selection, whoever moved it — an arrow
+        // key, a click, or `qs ipc call settings showTab`. Selecting a tab
+        // rebuilds the page under the focused item, and without this the
+        // keyboard is left on something that is on its way out: Tab from the
+        // rail then lands on the *previous* tab's controls, and a window opened
+        // over IPC answers no keys at all. `callLater` so it happens after the
+        // page has been swapped rather than during.
+        Qt.callLater(window.focusRail);
     }
+
+    // --- the keyboard (#77) ---------------------------------------------------
+    //
+    // The window shipped pointer-only. What is here is the part that needs a
+    // scene — focus, and where it starts — and the decisions are in
+    // `Controls/KeyPolicy.qml` and the tab registry, both of which tests/ reads.
+
+    KeyPolicy { id: keys }
+
+    /// Puts the keyboard on the rail. Where focus starts when the window opens,
+    /// so the first Tab lands somewhere predictable rather than wherever the
+    /// scene happened to build first — and where it is put back after a tab
+    /// change, which rebuilds the page under whatever held it.
+    function focusRail(): void {
+        railPane.forceActiveFocus(Qt.TabFocusReason);
+    }
+
+    /// An arrow key on the rail. Selection follows focus, which is what a rail
+    /// of tabs does everywhere else — arrowing to a tab you then have to press
+    /// Enter on would be two keys to do what the pointer does in one click.
+    function walkRail(from: string, delta: int): void {
+        const next = tabs.neighbour(from, delta);
+        if (next === from)
+            return;
+        window.selectTab(next);
+    }
+
+    Component.onCompleted: window.focusRail()
 
     RowLayout {
         anchors.fill: parent
         spacing: 0
+        focus: true
+
+        // Escape, from wherever the focus is. An unhandled key walks up the
+        // focus chain, so the window needs exactly one handler for it and no
+        // control needs to know the window can be closed.
+        Keys.onPressed: event => {
+            if (keys.isDismiss(event.key)) {
+                window.closeRequested("escape");
+                event.accepted = true;
+            }
+        }
 
         // --- the rail --------------------------------------------------------
 
         Rectangle {
+            id: railPane
+
             Layout.fillHeight: true
             Layout.preferredWidth: 196
             color: Theme.bgSunken
+
+            // One tab stop for the whole rail, not ten (#77): Tab reaches the
+            // rail and the next Tab leaves it for the page, and moving *within*
+            // the rail is what the arrow keys are for. Ten stops would put nine
+            // keypresses between the window opening and the first setting on it.
+            //
+            // Held by the pane rather than by the selected row, because per-row
+            // `activeFocusOnTab` does not reliably take a row back *out* of the
+            // focus chain once it has held focus — measured in the nested
+            // session, where Tab walked from one rail row to the next and the
+            // page was never reached at all.
+            activeFocusOnTab: true
+
+            Keys.onPressed: event => {
+                const delta = keys.step(event.key);
+                if (delta !== 0) {
+                    window.walkRail(window.currentTab, delta);
+                    event.accepted = true;
+                }
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -181,6 +253,13 @@ FloatingWindow {
 
                         HoverHandler { id: railHover; cursorShape: Qt.PointingHandCursor }
                         TapHandler { onTapped: window.selectTab(railItem.modelData.id) }
+
+                        // The ring is on the selected row and belongs to the
+                        // pane's focus, not to this row's — the row is not a
+                        // focus stop of its own. Selection follows the arrow
+                        // keys, so the ring is always around the tab that is
+                        // open, which is also the one Enter would open.
+                        FocusRing { visible: railPane.activeFocus && railItem.selected }
                     }
                 }
 

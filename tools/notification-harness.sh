@@ -67,7 +67,10 @@ cleanup_harness() {
     nested_down
     # After nested_down, so the shell is gone before the bus it is on.
     [[ -n "${HARNESS_BUS_PID:-}" ]] && kill "$HARNESS_BUS_PID" 2>/dev/null
-    if (( NESTED_KEEP )); then
+    # The same rule nested_down keeps for its logs: this is where the state file
+    # a migration check failed on lives, so a failed run keeps it and a clean
+    # one does not litter.
+    if (( NESTED_KEEP )) || (( nested_fail_count > 0 )); then
         printf '  scratch config/state kept in %s\n' "$HARNESS_ROOT"
         return
     fi
@@ -98,6 +101,25 @@ state_file() {
     find "$XDG_STATE_HOME" -name state.json -print -quit 2>/dev/null
 }
 
+## Wait for the state file to carry something, and print its contents.
+##
+## The path has to be resolved on every tick and not once up front: the file
+## does not exist until the shell's first write, so a `nested_await "$(state_file)"`
+## would poll the empty string for the whole timeout and then report the write
+## as the thing that failed.
+state_await() {
+    local pattern="$1" timeout="${2:-10}" file
+    for _ in $(seq 1 $(( timeout * 10 ))); do
+        file=$(state_file)
+        if [[ -n "$file" ]] && grep -qa "$pattern" "$file"; then
+            cat "$file"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
 # Every `remembered` line the running shell has written, as its key alone.
 remembered_keys() {
     grep -a 'notifications: remembered ' "$1" \
@@ -107,11 +129,25 @@ remembered_keys() {
 ## Post one notification and wait for the shell to say it saw it. Every wait in
 ## here is on evidence rather than a sleep: a notification that never arrives
 ## has to fail the assertion below, not the timeout above it.
+##
+## The result is checked at every call site, including the ones whose assertion
+## is about something else — a notification that silently never arrived turns a
+## uniqueness check into a check over nothing, which passes.
 post() {
     local summary="$1"
     shift
     notify-send -a harness "$@" "$summary" >/dev/null 2>&1
-    nested_await "$NESTED_SHELL_LOG" "remembered .*$summary" 10
+    nested_await "$NESTED_SHELL_LOG" "remembered .*$summary" 10 && return 0
+    nested_fail "the shell never remembered '$summary'"
+    return 1
+}
+
+## Take the shell down and bring a second one up in the same compositor — a new
+## notification server, whose id counter starts again at 1.
+restart_shell() {
+    kill "$NESTED_SHELL_PID" 2>/dev/null
+    wait "$NESTED_SHELL_PID" 2>/dev/null
+    nested_shell shell.qml "$READY" 25
 }
 
 nested_up || exit 1
@@ -141,8 +177,8 @@ fi
 
 # --- 2. row ids survive a restart (#76) ---------------------------------------
 
-post "first-server-a" >/dev/null
-post "first-server-b" >/dev/null
+post "first-server-a"
+post "first-server-b"
 
 first_run_keys=$(remembered_keys "$NESTED_SHELL_LOG")
 cp "$NESTED_SHELL_LOG" "$NESTED_WORK/shell.first.log"
@@ -150,17 +186,10 @@ cp "$NESTED_SHELL_LOG" "$NESTED_WORK/shell.first.log"
 # The write is debounced by a second (Notifications.qml), and the flush on
 # destruction only runs if the engine tears down cleanly — so wait for the file
 # to actually carry the rows before taking the shell away.
-if ! nested_await "$(state_file)" 'first-server-b' 10; then
-    nested_fail "history never reached the state file"
-fi
+state_await 'first-server-b' 10 > /dev/null || nested_fail "history never reached the state file"
 
-kill "$NESTED_SHELL_PID" 2>/dev/null
-wait "$NESTED_SHELL_PID" 2>/dev/null
-
-# A second server. Its notification id counter starts again at 1; the history it
-# is writing into does not.
-nested_shell shell.qml "$READY" 25 || exit 1
-post "second-server" >/dev/null
+restart_shell || exit 1
+post "second-server"
 
 second_run_keys=$(remembered_keys "$NESTED_SHELL_LOG")
 all_keys=$(printf '%s\n%s\n' "$first_run_keys" "$second_run_keys" | grep -v '^$')
@@ -170,6 +199,16 @@ if [[ -n "$all_keys" && -z "$duplicate" ]]; then
     nested_pass "row keys stay unique across a restart ($(wc -l <<< "$all_keys") rows)"
 else
     nested_fail "row keys collided across a restart: ${duplicate:-no rows were remembered}"
+fi
+
+# The counter goes to disk with the list it numbers. Without it a history the
+# center has emptied — or a lowered `historyLimit` — takes the high-water mark
+# with it, and the next start reissues numbers already used (#76).
+persisted=$(state_await '"seq"' 10) || persisted=""
+if [[ -n "$persisted" ]] && grep -qE '"seq": *[1-9]' <<< "$persisted"; then
+    nested_pass "the sequence counter is persisted beside the list"
+else
+    nested_fail "no sequence counter in the state file"
 fi
 
 # Both servers have to have reissued the same notification id, or the check
@@ -185,6 +224,7 @@ fi
 
 kill "$NESTED_SHELL_PID" 2>/dev/null
 wait "$NESTED_SHELL_PID" 2>/dev/null
+NESTED_SHELL_PID=""
 
 file=$(state_file)
 if [[ -z "$file" ]]; then
@@ -213,11 +253,9 @@ EOF
 
     # Both rows are still there, and the two that shared daemon id 1 no longer
     # share anything the center would key on.
-    post "after-migration" >/dev/null
-    if ! nested_await "$(state_file)" 'after-migration' 10; then
-        nested_note "the post-migration write had not settled"
-    fi
-    migrated=$(cat "$(state_file)")
+    post "after-migration"
+    migrated=$(state_await 'after-migration' 10) \
+        || nested_fail "the migrated history was never written back"
     if grep -q 'before-restart' <<< "$migrated" && grep -q 'after-restart' <<< "$migrated"; then
         nested_pass "the rows that predate the key are kept, not dropped"
     else
@@ -227,6 +265,16 @@ EOF
         nested_pass "the daemon id is kept as serverId and is no longer the row id"
     else
         nested_fail "migrated rows still carry the daemon id as their identity"
+    fi
+
+    # The rows arrived with no sequence number of their own, so the keys they
+    # come back with are the ones `readHistory` issued — the case a hand-added
+    # row hits too.
+    keys=$(grep -o '"key": *"[^"]*"' <<< "$migrated" | sort)
+    if [[ -n "$keys" ]] && [[ -z "$(uniq -d <<< "$keys")" ]]; then
+        nested_pass "every migrated row came back with a key of its own"
+    else
+        nested_fail "migrated rows share a key: ${keys:-none were written}"
     fi
 fi
 

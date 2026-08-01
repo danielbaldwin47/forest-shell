@@ -223,35 +223,46 @@ QtObject {
         };
     }
 
-    /// The row key the center's delegates are keyed on (#76).
+    /// A history row's identity (#76) — what the center (#43) will key its
+    /// delegates on, and what "dismiss this row" will name.
     ///
-    /// Derived rather than stored, so it is the same value before a write and
-    /// after a read, and so a row that predates it gets one for free. All three
-    /// parts earn their place: `seq` is what cannot repeat within a run of
-    /// history, `time` is what keeps a row written before the state file had
-    /// loaded from landing on a stored seq, and `appKey` goes last so its
-    /// contents cannot be confused for a separator.
+    /// Recomputed on every `record()` rather than carried through one, so it is
+    /// the same value before a write and after a read and a row that predates
+    /// it gets one for free. It does still land in state.json, because a record
+    /// is persisted whole; that copy is never read back as the key.
+    ///
+    /// All three parts earn their place: `seq` is what cannot repeat within a
+    /// run of history, `time` is what keeps a row remembered before the state
+    /// file has loaded from landing on a stored seq, and `appKey` goes last so
+    /// its contents cannot be confused for a separator.
     function keyFor(time: var, seq: var, appKey: var): string {
         return String(time) + ":" + String(seq) + ":" + text(appKey);
     }
 
-    /// The sequence number for the next row, from the history in hand.
+    /// The sequence number for the next row: one above everything in the
+    /// history in hand, and one above `floor`.
     ///
-    /// No counter is persisted beside the list because the list already carries
-    /// one: history is newest-first and the cap drops the oldest, so the
-    /// highest `seq` ever issued is still at the head. A row without one — hand
-    /// written, or from a build that predates the key — counts as zero and does
-    /// not hold the counter back.
-    function nextSeq(history: var): int {
+    /// Both halves are needed. The list alone is not a high-water mark — the
+    /// center dismisses single rows (#43) and lowering `historyLimit` truncates
+    /// it, so the highest number issued can leave — which is why `floor` is the
+    /// counter persisted beside the list in state.json. And the counter alone
+    /// is not enough either: the state file is read lazily, so a notification
+    /// can be remembered before the floor has arrived, and the rows already in
+    /// hand are the only thing that number must not land on.
+    function nextSeq(history: var, floor: var): int {
         const list = Array.isArray(history) ? history : [];
-        let highest = 0;
-        for (const entry of list) {
-            const seq = entry !== null && typeof entry === "object" && typeof entry.seq === "number"
-                      ? entry.seq : 0;
-            if (seq > highest)
-                highest = seq;
-        }
+        let highest = typeof floor === "number" && floor > 0 ? Math.floor(floor) : 0;
+        for (const entry of list)
+            highest = Math.max(highest, seqOf(entry));
         return highest + 1;
+    }
+
+    /// A row's sequence number, or 0 for a row that has none — hand-written, or
+    /// from a build that predates the key. Zero holds nothing back and is not
+    /// an identity; `readHistory` is what issues one.
+    function seqOf(entry: var): int {
+        return entry !== null && typeof entry === "object" && typeof entry.seq === "number"
+             ? entry.seq : 0;
     }
 
     /// An image worth writing to disk. Inline image data lives in Quickshell's
@@ -279,14 +290,26 @@ QtObject {
     ///
     /// The limit is applied on the way in as well as on the way out, because it
     /// may have been lowered since the file was written.
+    /// A row that arrives without a sequence number is given one here, above
+    /// every number the file already carries — a row hand-added to state.json,
+    /// or written by the build that predates the key (#76), still comes back
+    /// with an identity nothing else in the list shares. Newest first, so the
+    /// head gets the highest and the next arrival counts on from there.
     function readHistory(raw: var, limit: int): var {
         if (!Array.isArray(raw) || limit <= 0)
             return [];
-        return raw
+        const rows = raw
             .filter(entry => entry !== null && typeof entry === "object" && !Array.isArray(entry)
                     && typeof entry.time === "number")
-            .slice(0, limit)
-            .map(entry => record(entry));
+            .slice(0, limit);
+
+        let highest = 0;
+        for (const entry of rows)
+            highest = Math.max(highest, seqOf(entry));
+
+        return rows.map((entry, index) => record(seqOf(entry) > 0
+            ? entry
+            : Object.assign({}, entry, { seq: highest + rows.length - index })));
     }
 
     // --- helpers -------------------------------------------------------------

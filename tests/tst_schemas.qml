@@ -348,17 +348,27 @@ TestCase {
         const rows = result.raw.notifications.history;
         compare(rows.length, 3);
 
-        const seen = {};
         for (const row of rows) {
             compare(row.id, undefined);            // no longer the row's identity
             verify(typeof row.serverId === "number", "lost the daemon id");
-            verify(typeof row.seq === "number", "no sequence number");
-            verify(seen[row.seq] === undefined, "duplicate seq " + row.seq);
-            seen[row.seq] = true;
         }
-        // Newest first, so the head holds the highest sequence number — the
-        // next arrival counts on from there.
-        verify(rows[0].seq > rows[2].seq);
+        compare(rows[0].serverId, 1);
+        compare(rows[2].serverId, 1);
+        // The key is not assigned here: NotificationPolicy gives one to any row
+        // that arrives without a sequence number, which covers a row hand-added
+        // to an already-migrated file as well as these.
+    }
+
+    function test_migrating_leaves_a_serverId_that_is_already_there_alone() {
+        // A file half-written by a newer build, or hand-edited. Whatever wrote
+        // `serverId` knew more than this step does.
+        const result = migrations.run({
+            stateVersion: 1,
+            notifications: { history: [{ id: 9, serverId: 4, time: 1 }] }
+        }, state.migrations, state.versionKey, state.version);
+        verify(result.ok, result.error);
+        compare(result.raw.notifications.history[0].serverId, 4);
+        compare(result.raw.notifications.history[0].id, undefined);
     }
 
     function test_migrating_a_state_file_with_no_history_changes_nothing() {

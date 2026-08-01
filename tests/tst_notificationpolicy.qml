@@ -347,28 +347,41 @@ TestCase {
         verify(policy.record(fields).key.length > 0);
     }
 
-    function test_the_next_sequence_number_comes_from_the_history_in_hand() {
-        // Newest first, and the cap drops the oldest, so the highest seq the
-        // list has ever held is still in it — no counter to persist separately.
-        compare(policy.nextSeq([]), 1);
-        compare(policy.nextSeq(undefined), 1);
-        compare(policy.nextSeq([policy.record({ seq: 12 }), policy.record({ seq: 11 })]), 13);
+    function test_the_next_sequence_number_clears_the_history_in_hand() {
+        compare(policy.nextSeq([], 0), 1);
+        compare(policy.nextSeq(undefined, undefined), 1);
+        compare(policy.nextSeq([policy.record({ seq: 12 }), policy.record({ seq: 11 })], 0), 13);
+    }
+
+    function test_the_next_sequence_number_clears_the_persisted_counter_too() {
+        // The list on its own is not a high-water mark: the center dismisses
+        // single rows (#43) and a lowered historyLimit truncates it, so the
+        // highest number issued can leave the list entirely (#76).
+        compare(policy.nextSeq([], 40), 41);
+        compare(policy.nextSeq([policy.record({ seq: 2 })], 40), 41);
+        // And the counter is not enough on its own either — state.json is read
+        // lazily, so a row can be remembered before the floor has arrived.
+        compare(policy.nextSeq([policy.record({ seq: 99 })], 40), 100);
     }
 
     function test_a_row_with_no_sequence_number_does_not_hold_the_counter_back() {
         // Hand-edited, or written by a build that predates the key (#76).
-        compare(policy.nextSeq([{ time: 1 }, policy.record({ seq: 4 })]), 5);
-        compare(policy.nextSeq(["nonsense", null]), 1);
+        compare(policy.nextSeq([{ time: 1 }, policy.record({ seq: 4 })], 0), 5);
+        compare(policy.nextSeq(["nonsense", null], 0), 1);
     }
 
     function test_a_run_of_arrivals_never_repeats_a_key() {
-        // The service's own loop: ask for the next seq, build, remember.
+        // The service's own loop: ask for the next seq, build, remember. The
+        // limit is well under the run, so the list keeps losing the numbers it
+        // was asked for — which is the case the persisted counter is for.
         let history = [];
+        let counter = 0;
         const keys = {};
         for (let i = 0; i < 20; i++) {
+            counter = policy.nextSeq(history, counter);
             const entry = policy.record({
                 serverId: (i % 5) + 1,   // the daemon's counter, restarting
-                seq: policy.nextSeq(history),
+                seq: counter,
                 time: 1000,              // one millisecond, worst case
                 appKey: "telegram"
             });
@@ -376,6 +389,21 @@ TestCase {
             keys[entry.key] = true;
             history = policy.remember(history, entry, 5);
         }
+    }
+
+    function test_dismissing_the_newest_row_does_not_reissue_its_number() {
+        // What #43's center does, and what the list alone cannot survive: the
+        // row holding the highest number is removed, and the next arrival must
+        // still not land on a number that has been used.
+        let counter = policy.nextSeq([], 0);
+        const first = policy.record({ seq: counter, time: 1000, appKey: "telegram" });
+        let history = policy.remember([], first, 100);
+
+        history = history.filter(row => row.key !== first.key);   // dismissed
+        counter = policy.nextSeq(history, counter);
+        const second = policy.record({ seq: counter, time: 1000, appKey: "telegram" });
+
+        verify(second.key !== first.key, "reissued " + first.key + " after a dismissal");
     }
 
     function test_records_are_strings_whatever_the_client_sent() {
@@ -462,20 +490,44 @@ TestCase {
         compare(loaded[0].serverId, 1);
     }
 
+    function test_a_hand_added_row_is_given_a_key_nothing_else_holds() {
+        // state.json is hand-editable (#21), so a row can arrive with no
+        // sequence number at all — including into a file whose other rows have
+        // one. The numbers issued here have to clear those (#76).
+        const loaded = policy.readHistory([
+            { time: 3000, appKey: "harness", summary: "hand-added" },
+            policy.record({ seq: 5, time: 2000, appKey: "telegram", summary: "written" }),
+            { time: 1000, appKey: "harness", summary: "also hand-added" }
+        ], 100);
+
+        compare(loaded.length, 3);
+        const seen = {};
+        for (const row of loaded) {
+            verify(row.seq > 0, "row kept a zero sequence number");
+            verify(seen[row.key] === undefined, "duplicate key " + row.key);
+            seen[row.key] = true;
+        }
+        // Newest first, so the head still holds the highest number.
+        verify(loaded[0].seq > loaded[2].seq);
+    }
+
     function test_a_loaded_history_has_no_duplicate_keys_across_a_restart() {
         // The shape #76 measured: twelve rows, a restart, one more — the daemon
         // id counter starts again at 1, the history does not.
         let history = [];
-        for (let i = 0; i < 12; i++)
+        let counter = 0;
+        for (let i = 0; i < 12; i++) {
+            counter = policy.nextSeq(history, counter);
             history = policy.remember(history, policy.record({
-                serverId: i + 1, seq: policy.nextSeq(history), time: 1000 + i, appKey: "telegram"
+                serverId: i + 1, seq: counter, time: 1000 + i, appKey: "telegram"
             }), 100);
+        }
 
-        // The restart: the file is read back, and the next notification comes
-        // from a server whose counter is at 1 again.
+        // The restart: the file is read back, the counter comes back with it,
+        // and the next notification is from a server whose ids start at 1.
         const restored = policy.readHistory(history, 100);
         const after = policy.remember(restored, policy.record({
-            serverId: 1, seq: policy.nextSeq(restored), time: 2000, appKey: "telegram"
+            serverId: 1, seq: policy.nextSeq(restored, counter), time: 2000, appKey: "telegram"
         }), 100);
 
         compare(after.length, 13);

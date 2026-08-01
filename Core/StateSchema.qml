@@ -57,7 +57,14 @@ QtObject {
         },
 
         notifications: {
-            history: { def: [], coerce: c.array }    // #43
+            history: { def: [], coerce: c.array },   // #43
+
+            // The last sequence number issued to a history row (#76). Beside
+            // the list rather than derived from it, because the list is not a
+            // reliable high-water mark: the center dismisses single rows (#43),
+            // and lowering `historyLimit` truncates it — either can take the
+            // highest number away and let the next arrival reissue it.
+            seq: { def: 0, coerce: c.integer(0) }
         },
 
         weather: {
@@ -72,29 +79,34 @@ QtObject {
     readonly property var migrations: [
         {
             to: 2,
-            describe: "notification history rows get their own id",
+            describe: "notification history: id → serverId",
             migrate: function (raw) {
                 // v1 rows carried the freedesktop daemon's notification id as
-                // their identity. That counter restarts at 1 with every server
-                // and history does not, so one shell restart was enough to put
-                // two different rows in the list under the same id (#76).
+                // their identity, under the name `id`. That counter restarts at
+                // 1 with every server and history does not, so one shell
+                // restart was enough to put two different rows in the list
+                // under the same id (#76). The number is still worth keeping —
+                // it correlates a row with a popup that is still on screen —
+                // but only under a name that says whose it is.
+                //
+                // The row *key* is not assigned here. `NotificationPolicy`
+                // gives one to any row that arrives without a sequence number,
+                // so a row hand-added to an already-migrated file is covered by
+                // the same code path as these — and there is one implementation
+                // of the numbering rather than two that must agree.
                 const notifications = raw.notifications;
                 if (!notifications || !Array.isArray(notifications.history))
                     return raw;
 
-                // Newest first, so the head gets the highest number and the
-                // next arrival counts on from there.
-                const rows = notifications.history;
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
+                for (const row of notifications.history) {
                     // state.json is hand-editable (#21) and a step that throws
                     // stops the whole run — anything that is not a row is left
                     // exactly as it is, for the reader to drop.
                     if (row === null || typeof row !== "object" || Array.isArray(row))
                         continue;
-                    if (typeof row.seq !== "number")
-                        row.seq = rows.length - i;
-                    if (row.serverId === undefined && typeof row.id === "number")
+                    if (row.id === undefined)
+                        continue;
+                    if (row.serverId === undefined)
                         row.serverId = row.id;
                     delete row.id;
                 }

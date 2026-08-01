@@ -164,6 +164,12 @@ Singleton {
         const stored = root.policy.readHistory(ShellState.values.notifications.history,
                                                Config.values.notifications.historyLimit);
 
+        // Never downwards. A row remembered before the file arrived has already
+        // taken a number out of the counter's range, and the rows just read may
+        // carry numbers `readHistory` issued to a hand-edited file.
+        root.seq = root.policy.nextSeq(stored, Math.max(root.seq,
+                                                        ShellState.values.notifications.seq)) - 1;
+
         if (!root.loaded) {
             root.loaded = true;
             // Anything already in hand arrived while the file was still being
@@ -214,14 +220,21 @@ Singleton {
         root.show(notification, settings);
     }
 
+    /// The last sequence number issued to a history row (#76). Persisted beside
+    /// the list rather than derived from it, because the list is not a reliable
+    /// high-water mark — the center dismisses single rows (#43), and lowering
+    /// `historyLimit` truncates it below.
+    property int seq: 0
+
     // The row's identity is the shell's, not the daemon's: `notification.id`
     // comes from a counter that restarts at 1 with every server, and history
     // outlives the server (#76). It is kept as `serverId` for correlating with
-    // a live popup; `seq` counts on from the history already in hand.
+    // a live popup.
     function remember(notification: Notification, appKey: string) {
+        root.seq = root.policy.nextSeq(root.history, root.seq);
         const entry = root.policy.record({
             serverId: notification.id,
-            seq: root.policy.nextSeq(root.history),
+            seq: root.seq,
             time: Date.now(),
             appKey: appKey,
             appName: notification.appName,
@@ -402,8 +415,12 @@ Singleton {
     // this one is about the burst, that one is about the file.
     property int writeDebounceMs: 1000
 
+    // The counter goes out with the list it numbers, on the same debounce: the
+    // two are one fact, and a list written without its high-water mark is a
+    // file that reissues numbers on the next start (#76).
     function writeHistory() {
         ShellState.set("notifications.history", root.history);
+        ShellState.set("notifications.seq", root.seq);
     }
 
     Timer {

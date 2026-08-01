@@ -18,7 +18,8 @@
 //
 // The mode switch writes `appearance.darkMode` through Config — the real path
 // the Dark/Light tile will use, not a local bool — so what you see is what the
-// shell does. It puts the setting back on exit.
+// shell does. It puts the setting back when the window closes; kill the process
+// mid-session and the flip stands, in the user's real settings.json.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
@@ -208,16 +209,27 @@ ShellRoot {
                             Item {
                                 implicitWidth: 16 * 6
                                 implicitHeight: 16 * 6
-                                // Nearest-neighbour, so the magnification shows
-                                // the rasterization and not the upscaler.
-                                layer.enabled: true
-                                layer.smooth: false
 
                                 Icon {
                                     name: "wifi"
                                     size: 16
                                     color: Theme.accentPrimary
                                     oversample: overCell.modelData.value
+
+                                    // The layer has to sit on the *scaled*
+                                    // item, not on a wrapper drawn 1:1, or
+                                    // `smooth` has nothing to apply to. Like
+                                    // this the icon is rendered once at 16×16
+                                    // and that texture is then drawn 6× with
+                                    // nearest-neighbour filtering, so what you
+                                    // are judging is the rasterization rather
+                                    // than the upscaler. The texture size is
+                                    // pinned for the same reason — left to
+                                    // itself it would scale with the display.
+                                    layer.enabled: true
+                                    layer.smooth: false
+                                    layer.textureSize: Qt.size(16, 16)
+
                                     transformOrigin: Item.TopLeft
                                     scale: 6
                                 }

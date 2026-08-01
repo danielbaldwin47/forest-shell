@@ -3,10 +3,14 @@
 
 Two rewrites, and only two:
 
-    stroke-width="2"            -> stroke-width="1.5"   (design system spec, #8)
+    stroke-width="..."          -> stroke-width="1.5"   (design system spec, #8;
+                                                         upstream ships 2)
     stroke|fill="currentColor"  -> "#ffffff"            (Qt's SVG renderer does
                                                          not resolve currentColor
                                                          — it draws opaque black)
+
+The second covers `fill` as well as `stroke` because nine icons carry the
+colour on an inner shape, and `MultiEffect` will not lift a black dot.
 
 The colour is **not** baked to a palette token. White plus
 `MultiEffect { colorization: 1.0 }` is pixel-identical to a baked-colour file
@@ -48,13 +52,22 @@ def normalize(text: str) -> str:
 
 
 def defects(name: str, text: str) -> list[str]:
-    """What is still wrong with one already-normalized file."""
+    """What is still wrong with one already-normalized file.
+
+    States the invariants over again rather than calling `normalize()` and
+    diffing: a check that runs the same code it is checking passes whenever
+    that code is wrong in a self-consistent way.
+    """
     found = []
     if "currentColor" in text:
         found.append(f"{name}: still carries currentColor")
     widths = set(STROKE_WIDTH_ATTR.findall(text))
-    if widths != {STROKE_WIDTH}:
-        found.append(f"{name}: stroke-width {sorted(widths) or 'absent'}")
+    if not widths:
+        # Not something the rewrite can repair — it substitutes an attribute,
+        # it does not add one. Upstream changed shape; look at the file.
+        found.append(f"{name}: no stroke-width at all (upstream shape changed)")
+    elif widths != {STROKE_WIDTH}:
+        found.append(f"{name}: stroke-width {sorted(widths)}")
     if f'stroke="{BASE_COLOR}"' not in text:
         found.append(f'{name}: no stroke="{BASE_COLOR}"')
     return found

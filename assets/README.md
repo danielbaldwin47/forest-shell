@@ -92,7 +92,8 @@ survives contact with QML as-is:
 Neither is fixable at runtime, so [#19](https://github.com/danielbaldwin47/forest-shell/issues/19)
 resolved to bake both in and recolor at runtime, and
 [#34](https://github.com/danielbaldwin47/forest-shell/issues/34) did it. The set
-carries exactly two rewrites against upstream:
+carries two rewrites against upstream — the second applied to `fill` as well as
+`stroke`:
 
 | upstream | vendored |
 | --- | --- |

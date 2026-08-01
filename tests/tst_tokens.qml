@@ -108,14 +108,28 @@ TestCase {
         // (#33), so it arrives unvalidated. Junk is dropped, not painted.
         ignoreWarning(/unknown palette role/);
         ignoreWarning(/not a colour/);
+        ignoreWarning(/not a colour/);
         const p = tokens.palette(true, {
             noSuchRole: "#ffffff",
-            accentPrimary: "teal",       // named colours are refused on purpose
-            accentDeep: "#0c757bff"
+            accentPrimary: "teal",        // named colours are refused on purpose
+            accentWarm: "#0c7f",          // #RGBA — a form QColor cannot parse
+            accentDeep: "#ff0c757b"       // #AARRGGBB — alpha leads, not trails
         });
         compare(p.accentPrimary, tokens.dark.accentPrimary);
-        compare(p.accentDeep, "#0c757bff");
+        compare(p.accentWarm, tokens.dark.accentWarm);
+        compare(p.accentDeep, "#ff0c757b");
         compare(p.noSuchRole, undefined);
+    }
+
+    function test_only_the_hex_lengths_qcolor_parses_are_accepted() {
+        // Qt takes #RGB, #RRGGBB and #AARRGGBB. There is no #RGBA: a
+        // four-digit override would sail through and then paint as something
+        // else entirely.
+        for (const value of ["#fff", "#0c757b", "#ff0c757b"])
+            verify(tokens.isColor(value), value + " should be accepted");
+        for (const value of ["#f0f0", "#12345", "#0c757", "0c757b", "teal",
+                             "rgb(1,2,3)", "", 16777215, null, undefined])
+            verify(!tokens.isColor(value), value + " should be refused");
     }
 
     function test_palette_does_not_hand_out_its_own_table() {

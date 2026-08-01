@@ -51,12 +51,18 @@ Item {
     /// 1.5-scale display — it lies on exactly the machine we calibrate to.
     property real oversample: 3.0
 
-    /// Root of the normalized icon set. The set is normalized in place, so
-    /// there is no second directory and no generate-before-run step.
-    property url setRoot: Qt.resolvedUrl("../assets/icons/lucide/")
+    /// Root of the normalized icon set — the one thing in the shell that knows
+    /// where the icons live. Readonly, because there is exactly one set: it is
+    /// normalized in place, so there is no second directory and no
+    /// generate-before-run step for a caller to point at.
+    readonly property url setRoot: Qt.resolvedUrl("../assets/icons/lucide/")
 
     /// True once the named icon has actually loaded — false for a typo'd name.
     readonly property bool valid: src.status === Image.Ready
+
+    /// A name that did not resolve. Distinct from `!valid`, which is also true
+    /// while an icon is still loading and when no name is set at all.
+    readonly property bool missing: src.status === Image.Error
 
     implicitWidth: size
     implicitHeight: size
@@ -71,6 +77,9 @@ Item {
         fillMode: Image.PreserveAspectFit
         cache: true
         visible: false   // the MultiEffect below is what gets drawn
+        // Tests `status` and not `root.missing`: inside the handler the binding
+        // that derives `missing` has not necessarily been re-evaluated yet, and
+        // a warning that only sometimes fires is worse than none.
         onStatusChanged: if (status === Image.Error)
             console.warn("Icon: no such lucide icon:", root.name)
     }
@@ -87,7 +96,7 @@ Item {
     // and it keeps the layout honest. Rendering nothing would hide the typo.
     Rectangle {
         anchors.fill: parent
-        visible: src.status === Image.Error
+        visible: root.missing
         color: "transparent"
         border.color: root.color
         border.width: 1

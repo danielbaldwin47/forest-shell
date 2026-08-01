@@ -37,16 +37,14 @@ Singleton {
     // can alias it — an alias needs something to point at.
     Tokens { id: tokenData }
 
-    /// The tokens as data, for the rare consumer that needs the table itself
-    /// (the settings GUI listing every role, #54) rather than one token.
-    readonly property QtObject tokens: tokenData
-
     // --- mode ----------------------------------------------------------------
 
-    /// Dark is the primary theme and the default; v1 ships dark-first (#8).
-    /// Guarded because Theme is stage one of startup alongside Config, and a
-    /// binding that evaluates a beat early must not resolve to a hole.
-    readonly property bool dark: Config.values?.appearance?.darkMode ?? true
+    /// Dark is the primary theme; v1 ships dark-first (#8). Unguarded on
+    /// purpose: reading `Config.values` constructs Config, whose read is
+    /// synchronous (stage one — the wallpaper depends on it) and whose resolve
+    /// fills every leaf, so this is either complete or unreachable. A `?? true`
+    /// here would be the schema's default written down a second place.
+    readonly property bool dark: Config.values.appearance.darkMode
 
     /// Flip the mode. The one write Theme owns — so the key name lives here,
     /// with the property that reads it, and the Dark/Light tile stays a tile.
@@ -59,7 +57,7 @@ Singleton {
     // Every role, resolved for the current mode with the user's overrides on
     // top. Re-evaluates when either changes; the roles below ride that.
     readonly property var palette: tokenData.palette(
-        root.dark, Config.values?.appearance?.paletteOverrides ?? null)
+        root.dark, Config.values.appearance.paletteOverrides)
 
     readonly property color bgBase: palette.bgBase
     readonly property color bgSunken: palette.bgSunken
@@ -85,8 +83,6 @@ Singleton {
     readonly property alias fogWashOpacity: tokenData.fogWashOpacity
     readonly property alias fogBlur: tokenData.fogBlur
     readonly property alias fogSaturation: tokenData.fogSaturation
-    readonly property alias gradientTopLift: tokenData.gradientTopLift
-    readonly property alias grainOpacity: tokenData.grainOpacity
 
     // --- spacing -------------------------------------------------------------
     readonly property alias space1: tokenData.space1

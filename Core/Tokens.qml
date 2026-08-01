@@ -119,29 +119,31 @@ QtObject {
         return out;
     }
 
-    /// Whether a value is a hex colour literal Qt will parse. Deliberately
-    /// narrower than Qt's own parser — named colours ("teal") are refused so an
-    /// override cannot smuggle in a hue the palette never sampled.
+    /// Whether a value is a hex colour literal Qt will parse. The three lengths
+    /// are the ones `QColor` actually accepts — `#RGB`, `#RRGGBB` and
+    /// `#AARRGGBB`; there is no four-digit `#RGBA` form, and admitting one would
+    /// let an override through that paints as something else entirely.
+    ///
+    /// Deliberately narrower than Qt's own parser besides: named colours
+    /// ("teal") are refused, so an override cannot smuggle in a hue the palette
+    /// never sampled.
     function isColor(value: var): bool {
         return typeof value === "string"
-            && /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value);
+            && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value);
     }
 
-    // --- material ------------------------------------------------------------
-    // Brief §3: the board's depth is atmospheric, not shadowed. These are the
-    // three ways a surface says "further away" — and the only ones.
-
+    // --- fog scrim -----------------------------------------------------------
+    // Brief §3.1, spec'd whole in #8: the desktop recedes into *mist*, not into
+    // a black dim. Only the opacity ever animates — the blur never does, and is
+    // likely delegated to a Hyprland layer rule.
+    //
+    // The brief's other atmospheric devices — the vertical luminance gradient
+    // (§3.2) and the anti-banding grain (§3.5) — are ranges, not values. The
+    // surface ticket that picks one adds the token then; guessing here would
+    // commit a number that ticket would have to migrate away from.
     readonly property real fogWashOpacity: 0.10   // the wash over a scrimmed desktop
     readonly property real fogBlur: 14            // px; Hyprland layer blur live
     readonly property real fogSaturation: -0.20   // MultiEffect delta for saturate(0.8)
-
-    // Vertical luminance gradient, brief §3.2 (4–6%); bar prototype (#26) chose
-    // the middle of the range.
-    readonly property real gradientTopLift: 0.05
-
-    // Fine monochrome noise over large flat fills, brief §3.5 (2–4%) — it is
-    // there to kill gradient banding, not to be seen.
-    readonly property real grainOpacity: 0.03
 
     // --- spacing -------------------------------------------------------------
     // 4px grid (#8). Component internals 4–16, panel padding 16–24, section

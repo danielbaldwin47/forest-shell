@@ -27,6 +27,8 @@ fi
 # normalized in place, so "did someone drop a pristine upstream SVG in there"
 # is a thing the test run should catch. Not a QML test, so it runs first and
 # separately.
-../tools/normalize-lucide.py --check
+python=$(command -v python3 || true)
+[[ -n "$python" ]] || { echo "python3 not found (needed for the icon set check)" >&2; exit 1; }
+"$python" ../tools/normalize-lucide.py --check
 
 exec "$runner" -input .

@@ -6,6 +6,7 @@ The dumb reusable kit ([architecture #12](https://github.com/danielbaldwin47/for
 | --- | --- |
 | `Icon.qml` | A Lucide glyph, addressed by name, recoloured live |
 | `DebouncedLoader.qml` | Content lifetime for windows that outlive their visibility |
+| `Strata.qml` | A row of receding strata — height and opacity as a range, on either axis |
 
 One rule, and it is the whole point of the directory:
 

@@ -141,6 +141,20 @@ TestCase {
         compare(tokens.palette(true, null).bgBase, "#0b100d");
     }
 
+    // --- surface texture -----------------------------------------------------
+
+    function test_the_atmospheric_amounts_are_tokens_not_settings() {
+        // The brief gives §3.2 and §3.5 as ranges; #35 picked a point in each
+        // while building the bar surface. They live here so config answers "is
+        // this surface grainy" rather than "how grainy" — one amount, every
+        // surface, no number with two homes.
+        compare(tokens.topLightAmount, 0.05);
+        compare(tokens.grainOpacity, 0.03);
+        // Brief §3.5 puts the grain between 2% and 4%; outside that it is
+        // either invisible or visible as noise rather than as depth.
+        verify(tokens.grainOpacity >= 0.02 && tokens.grainOpacity <= 0.04);
+    }
+
     // --- spacing, radii ------------------------------------------------------
 
     function test_spacing_is_a_4px_grid() {

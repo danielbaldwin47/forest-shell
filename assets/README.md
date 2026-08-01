@@ -121,3 +121,22 @@ The `gallery.qml` entry point (`qs-upstream -p ~/repos/forest-shell/gallery.qml`
 renders the size ramp, the token roles and the oversample comparison on a real
 session — which is where fractional scale and `MultiEffect` can actually be
 judged.
+
+## Textures
+
+`textures/grain.png` is the anti-banding noise the bar surface tiles over its
+fill ([#35](https://github.com/danielbaldwin47/forest-shell/issues/35); the
+amount is `Theme.grainOpacity`, 3%). A 32px-tall gradient over a flat fill bands
+visibly on an 8-bit panel, and the brief's fix (§3.5) is noise.
+
+It is **generated, not vendored** — a 64×64 fixed-seed uniform noise field, so
+the size, seed and distribution are readable in `tools/gen-grain.py` instead of
+being a binary to take on trust:
+
+```sh
+tools/gen-grain.py           # regenerate
+tools/gen-grain.py --check   # what tests/run.sh runs
+```
+
+The check compares decoded *pixels*, not file bytes, so a machine whose zlib
+compresses differently does not fail it.

@@ -26,6 +26,8 @@ import QtQuick.Layouts
 import Quickshell
 import qs.Core
 import qs.Widgets
+import qs.Services.Compositor
+import qs.Surfaces.Bar
 
 ShellRoot {
     id: gallery
@@ -66,6 +68,19 @@ ShellRoot {
             "wifi", "bluetooth", "volume-2", "battery-medium", "cpu", "bell",
             "calendar", "cloud-fog", "mountain-snow", "settings", "search", "power"
         ]
+
+        // The shipping ridgeline rule, not a copy of it: the same slot union
+        // the facade feeds the bar, and the same falloff. Fed mock workspace
+        // states, since the gallery is not a bar and has no compositor to ask.
+        readonly property QtObject ridgeSpec: RidgelineSpec {}
+        readonly property QtObject ridgeSlots: WorkspaceSlots {}
+        readonly property var ridgeKnobs: win.ridgeSpec.knobs({})
+
+        function ridgeRow(active, occupied) {
+            const live = occupied.map(id => ({ id: id, windows: 1 }));
+            const cells = win.ridgeSlots.cells(win.ridgeKnobs.slots, live, active);
+            return win.ridgeSpec.strata(cells, win.ridgeKnobs);
+        }
 
         readonly property var setSample: [
             "a-arrow-up", "activity", "airplay", "alarm-clock", "album", "anchor",
@@ -342,6 +357,63 @@ ShellRoot {
 
                         Item { Layout.fillWidth: true }
                     }
+                }
+
+                // --- the ridgeline ------------------------------------------------
+                // Strata is a Widgets/ component, but the falloff that gives it
+                // meaning is the bar's (Surfaces/Bar/RidgelineSpec.qml) — so the
+                // gallery renders the real rule rather than four hand-typed
+                // heights that would drift from it. Worth a real display: at
+                // 1.5× scale a 3px empty stratum is 4.5 device px, and whether
+                // that reads as "nearly gone" or as "gone" is the whole
+                // question #10 left open.
+                CapsLabel { text: "RIDGELINE — HEIGHT AND HAZE AS DISTANCE, ACTIVE IN TEAL" }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space7
+
+                    Repeater {
+                        model: [
+                            { label: "active 3 of 5", active: 3, occupied: [1, 2, 3, 5] },
+                            { label: "active 1, rest empty", active: 1, occupied: [1] },
+                            { label: "all occupied", active: 4, occupied: [1, 2, 3, 4, 5] },
+                            { label: "a hole in the row", active: 2, occupied: [1, 2, 9] }
+                        ]
+
+                        ColumnLayout {
+                            id: ridgeCell
+
+                            required property var modelData
+
+                            readonly property var cells: win.ridgeRow(
+                                ridgeCell.modelData.active, ridgeCell.modelData.occupied)
+
+                            spacing: Theme.space2
+
+                            Strata {
+                                Layout.alignment: Qt.AlignHCenter | Qt.AlignBottom
+
+                                model: ridgeCell.cells.map(cell => ({
+                                    length: cell.length,
+                                    haze: cell.haze,
+                                    color: cell.active ? Theme.accentPrimary : Theme.textSecondary
+                                }))
+                                unitWidth: win.ridgeKnobs.unitWidth
+                                gap: win.ridgeKnobs.gap
+                                extent: win.ridgeKnobs.activeHeight
+                                animationMs: Theme.motionStandard
+                                animationCurve: Theme.fogEase
+                            }
+
+                            CapsLabel {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: ridgeCell.modelData.label.toUpperCase()
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
                 }
 
                 // --- a slab of the set -------------------------------------------

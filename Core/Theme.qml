@@ -83,6 +83,8 @@ Singleton {
     readonly property alias fogWashOpacity: tokenData.fogWashOpacity
     readonly property alias fogBlur: tokenData.fogBlur
     readonly property alias fogSaturation: tokenData.fogSaturation
+    readonly property alias topLightAmount: tokenData.topLightAmount
+    readonly property alias grainOpacity: tokenData.grainOpacity
 
     // --- spacing -------------------------------------------------------------
     readonly property alias space1: tokenData.space1

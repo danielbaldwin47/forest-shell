@@ -14,6 +14,7 @@ pragma Singleton
 // line to the right list and touch nothing else.
 import QtQuick
 import Quickshell
+import qs.Services.Compositor
 
 Singleton {
     id: root
@@ -34,7 +35,12 @@ Singleton {
         // without a name here its file would only be read the first time some
         // surface happened to ask (#33). Deferred, because nothing in it is
         // worth a frame.
-        report("deferred", [ShellState]);
+        //
+        // Compositor is named here rather than left to the bar: it subscribes
+        // to Hyprland's event socket, and a shell whose bar is hidden still
+        // wants that subscription live so the row is right the moment it comes
+        // back.
+        report("deferred", [ShellState, Compositor]);
     }
 
     function report(stage: string, services) {

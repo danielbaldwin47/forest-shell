@@ -137,13 +137,18 @@ QtObject {
     // a black dim. Only the opacity ever animates — the blur never does, and is
     // likely delegated to a Hyprland layer rule.
     //
-    // The brief's other atmospheric devices — the vertical luminance gradient
-    // (§3.2) and the anti-banding grain (§3.5) — are ranges, not values. The
-    // surface ticket that picks one adds the token then; guessing here would
-    // commit a number that ticket would have to migrate away from.
     readonly property real fogWashOpacity: 0.10   // the wash over a scrimmed desktop
     readonly property real fogBlur: 14            // px; Hyprland layer blur live
     readonly property real fogSaturation: -0.20   // MultiEffect delta for saturate(0.8)
+
+    // --- surface texture -----------------------------------------------------
+    // The brief's other two atmospheric devices — the vertical luminance
+    // gradient (§3.2) and the anti-banding grain (§3.5) — are ranges in the
+    // brief, and #35 picked a point in each while building the bar surface.
+    // They live here rather than in `bar.surface` because config answers "is
+    // this surface grainy", never "how grainy": one amount, every surface.
+    readonly property real topLightAmount: 0.05   // white at the top edge, fading by 55%
+    readonly property real grainOpacity: 0.03     // 3% noise over a flat fill
 
     // --- spacing -------------------------------------------------------------
     // 4px grid (#8). Component internals 4–16, panel padding 16–24, section

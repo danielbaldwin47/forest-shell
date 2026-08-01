@@ -20,5 +20,16 @@ Two rules that hold across all of them:
 - A service that only one surface uses is not a service: it lives with its
   surface (`Surfaces/Drawers/Launcher/services/`), not here.
 
-Empty until the first service ticket lands; the directory exists so nothing has
-to move when it does.
+`Compositor/` is the first of these to land
+([#35](https://github.com/danielbaldwin47/forest-shell/issues/35)). It holds the
+facade singleton and the pure workspace-row rule beside it — the same split as
+`Core/Config.qml` against `Core/SettingsSchema.qml`, so the part with no
+Quickshell imports is reachable from `tests/`:
+
+| File | What |
+| --- | --- |
+| `Compositor.qml` | The facade: the workspace row per screen, `focusWorkspace`, `blurLayer` |
+| `WorkspaceSlots.qml` | Fixed slots unioned with Hyprland's live workspaces, as data |
+
+The rest are empty until their ticket lands; the directories exist so nothing
+has to move when they do.

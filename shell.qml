@@ -18,6 +18,7 @@ import QtQuick
 import Quickshell
 import qs.Core
 import qs.Surfaces.Background
+import qs.Surfaces.Bar
 
 ShellRoot {
     id: shell
@@ -33,6 +34,12 @@ ShellRoot {
 
     // Stage one.
     Background {}
+
+    // Stage two. The bar declares itself here but builds its windows off the
+    // first painted frame — the gate is inside Bar.qml, on the `Variants`
+    // model, so the surface stays one declaration rather than a Loader holding
+    // a window.
+    Bar {}
 
     // Stage two. Surfaces and services added by later tickets hook in here.
     Connections {

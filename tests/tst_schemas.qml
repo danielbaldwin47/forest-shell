@@ -51,6 +51,32 @@ TestCase {
         }
     }
 
+    function test_the_bar_ships_its_geometry_as_settings() {
+        // #35: flush-vs-floating, height and the module layout are settings and
+        // not constants, because #10 measured that flushness is a property of
+        // the *wallpaper* — so which failure mode to accept belongs to whoever
+        // chose the wallpaper.
+        const values = store.resolve(settings.spec, {}).values;
+        compare(values.bar.position, "top");
+        compare(values.bar.height, 32);
+        compare(values.bar.floating, false);
+        compare(values.bar.padding, 12);
+        compare(values.bar.moduleGap, 14);
+        compare(values.bar.modules.left.join(","), "workspaces");
+        compare(values.bar.modules.center.join(","), "clock");
+        compare(values.bar.modules.right.length, 0);
+    }
+
+    function test_the_bar_position_enum_is_only_what_v1_renders() {
+        // The widgets are axis-agnostic, but nothing has been looked at
+        // sideways yet: an enum value that renders untested is worse than one
+        // that is missing.
+        const leaf = store.leafAt(settings.spec, "bar.position");
+        compare(leaf.coerce("bottom"), "bottom");
+        compare(leaf.coerce("left"), undefined);
+        compare(leaf.coerce("elsewhere"), undefined);
+    }
+
     function test_intent_lives_in_settings() {
         // Toggled often, but still setup: these travel with the config (#21).
         verify(store.leafAt(settings.spec, "appearance.darkMode") !== null);

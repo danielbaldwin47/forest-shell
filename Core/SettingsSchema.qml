@@ -58,9 +58,34 @@ QtObject {
         },
 
         bar: {
+            // Geometry (#35). Flush-vs-floating and height are *settings*, not
+            // constants: #10 measured that flushness is a property of the
+            // wallpaper rather than of the bar, so the choice of failure mode
+            // belongs to whoever picked the wallpaper.
+            //
+            // `left` and `right` are absent on purpose. The widgets are
+            // axis-agnostic so a vertical bar can land without a rewrite, but
+            // v1 ships nothing that has been looked at sideways, and an enum
+            // value that renders untested is worse than one that is missing.
+            position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
+            height: { def: 32, coerce: c.integer(20, 64) },
+            floating: { def: false, coerce: c.boolean },
+            padding: { def: 12, coerce: c.integer(0, 48) },
+            moduleGap: { def: 14, coerce: c.integer(0, 48) },
+
+            // The module layout, by registry id, in visual order (#35). One
+            // object rather than three keys because it is one decision, and
+            // because naming any cluster replaces the whole layout — per-slot
+            // merging would make "take the clock off my bar" unwritable.
+            // Surfaces/Bar/BarSpec.qml owns the id vocabulary and drops the
+            // rest with a warning.
+            modules: {
+                def: ({ left: ["workspaces"], center: ["clock"], right: [] }),
+                coerce: c.object
+            },
+
             surface: { def: ({}), coerce: c.object, themed: true },
             ridgeline: { def: ({}), coerce: c.object, themed: true }
-            // Position, height, module layout land with #35 and #37.
         },
 
         launcher: {

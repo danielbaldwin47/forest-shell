@@ -22,4 +22,11 @@ runner=$(command -v qmltestrunner || true)
 if [[ $# -gt 0 ]]; then
   exec "$runner" -input "$1"
 fi
+
+# The vendored icon set is a checked-in invariant, not a build artifact: it is
+# normalized in place, so "did someone drop a pristine upstream SVG in there"
+# is a thing the test run should catch. Not a QML test, so it runs first and
+# separately.
+../tools/normalize-lucide.py --check
+
 exec "$runner" -input .

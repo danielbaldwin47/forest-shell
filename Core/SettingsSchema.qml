@@ -48,9 +48,13 @@ QtObject {
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
+            // Role → colour, read by Core/Theme.qml (#34): an unknown role or
+            // an unparseable colour is dropped with a warning rather than
+            // painted, because this arrives hand-edited.
             paletteOverrides: { def: ({}), coerce: c.object, themed: true },
             dynamic: { def: ({}), coerce: c.object, themed: true }
-            // Palette mode and the token overrides land with #34, #58, #59.
+            // The palette *mode* — fixed forest / constrained accent / matugen
+            // — lands with #58 and #59.
         },
 
         bar: {

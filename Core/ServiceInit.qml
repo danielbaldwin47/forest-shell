@@ -1,3 +1,5 @@
+pragma Singleton
+
 // Force-touches the services that must run whether or not any surface is
 // looking at them (#12 §4): a QML singleton nothing references is never
 // constructed, so a service that only listens — battery, notifications, idle —
@@ -8,9 +10,8 @@
 // them would be evaluated when this singleton is created, which is stage one —
 // and the whole point of the deferred list is that it is not.
 //
-// Empty for now — the skeleton has no services yet. Later tickets add a name
-// per line to the right list and touch nothing else.
-pragma Singleton
+// Nearly empty — the shell has no services yet. Later tickets add a name per
+// line to the right list and touch nothing else.
 import QtQuick
 import Quickshell
 

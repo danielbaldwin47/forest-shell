@@ -91,14 +91,4 @@ TestCase {
         compare(c.array({}), undefined);
     }
 
-    function test_array_of_drops_unusable_members() {
-        // One bad pin should not cost the user their whole pinned list.
-        const pins = c.arrayOf(c.string)(["firefox", { bad: true }, "kitty"]);
-        compare(pins.length, 2);
-        compare(pins[1], "kitty");
-    }
-
-    function test_array_of_rejects_non_arrays() {
-        compare(c.arrayOf(c.string)("firefox"), undefined);
-    }
 }

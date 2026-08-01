@@ -42,6 +42,25 @@ TestCase {
         verify(paths.indexOf("bar.surface") >= 0);
     }
 
+    function test_leaf_paths_under_a_section() {
+        // What per-section reset-to-defaults is built on (#21).
+        const paths = store.leafPathsUnder(spec, "bar");
+        compare(paths.length, 3);
+        verify(paths.indexOf("bar.height") >= 0);
+        verify(paths.indexOf("wallpaper.path") < 0);
+    }
+
+    function test_leaf_paths_under_a_leaf_is_that_leaf() {
+        const paths = store.leafPathsUnder(spec, "bar.height");
+        compare(paths.length, 1);
+        compare(paths[0], "bar.height");
+    }
+
+    function test_leaf_paths_under_an_unknown_path_is_empty() {
+        compare(store.leafPathsUnder(spec, "nope").length, 0);
+        compare(store.leafPathsUnder(spec, "bar.surface.color").length, 0);
+    }
+
     function test_leaf_at_finds_leaves_and_nothing_else() {
         compare(store.leafAt(spec, "bar.height").def, 36);
         compare(store.leafAt(spec, "bar"), null);

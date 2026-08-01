@@ -6,7 +6,7 @@
 // files next to it (Core/SpecStore.qml, Core/Migrations.qml), where tests can
 // reach it without a Quickshell runtime.
 //
-// The four behaviours that are not obvious:
+// The behaviours that are not obvious:
 //
 //   Reading is blocking for settings and lazy for state. Stage one has to hand
 //   the wallpaper to the first frame (#12 §4), so `settings.json` is read
@@ -21,12 +21,19 @@
 //   are written, unknown keys are carried through untouched, and a burst of
 //   set() calls (a slider being dragged) is one atomic write.
 //
-//   Save → watch → reload is broken twice over. The watcher's reload is
+//   Save → watch → reload is broken in layers. The watcher's reload is
 //   debounced (an atomic write is a temp file plus a rename, so it arrives as
-//   several inotify events), a reload whose text is still exactly what we last
-//   wrote is skipped inside the save cooldown, and — the backstop that does not
-//   depend on timing at all — a reload that resolves to the same values
-//   dispatches nothing.
+//   several inotify events); a read that brings back bytes already taken in is
+//   dropped outright, which needs no timing at all; a reload whose text is
+//   still exactly what we last wrote is skipped inside the save cooldown; and
+//   the backstop is that a reload resolving to the same values dispatches
+//   nothing.
+//
+//   A file that cannot be read stops writes. Broken JSON or a migration that
+//   throws leaves `raw` holding the *last good* file, which is not a base to
+//   write from — the next set() would put it straight over the half-typed edit
+//   the user is still working on. Writes are refused until a readable version
+//   of the file appears.
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
@@ -69,6 +76,16 @@ Scope {
     // A sparse write starts from here, which is what preserves them.
     property var raw: ({})
 
+    // Set when the file on disk cannot be read — broken JSON, or a migration
+    // that threw. `raw` is then someone else's file, not a base to write from,
+    // so writing is refused until a readable version appears. Without this the
+    // next `set()` would serialize the last good config straight over a
+    // half-typed edit the user is still working on.
+    property bool unreadable: false
+
+    // The schema's table, reached once rather than at every call site.
+    readonly property var spec: root.schema.spec
+
     property string lastWrittenText: ""
     property string lastReadText: ""
     property bool hasRead: false
@@ -83,17 +100,17 @@ Scope {
         if (root.defaultsApplied)
             return;
         root.defaultsApplied = true;
-        root.values = store.defaults(root.schema.spec);
+        root.values = store.defaults(root.spec);
     }
 
-    function get(path) {
+    function get(path: string): var {
         return store.getPath(root.values, path);
     }
 
-    // Returns false when the key or the value is refused, so the GUI (#54) can
-    // say so rather than silently doing nothing.
-    function set(path, value) {
-        const leaf = store.leafAt(root.schema.spec, path);
+    // Returns false when the key, the value, or the file's current state is
+    // refused, so the GUI (#54) can say so rather than silently doing nothing.
+    function set(path: string, value: var): bool {
+        const leaf = store.leafAt(root.spec, path);
         if (!leaf) {
             Logger.warn(root.label, "no such key: " + path);
             return false;
@@ -104,13 +121,21 @@ Scope {
             Logger.warn(root.label, path + ": refusing " + JSON.stringify(value));
             return false;
         }
+        if (root.unreadable) {
+            Logger.warn(root.label, path + ": refusing to write over an unreadable "
+                        + root.path);
+            return false;
+        }
 
         const previous = store.getPath(root.values, path);
         if (store.equals(previous, coerced))
             return true;
 
         const next = store.json.deepCopy(root.values);
-        store.setPath(next, path, coerced);
+        // Copied, not stored by reference: a caller that keeps hold of the
+        // object it passed could otherwise change what the shell thinks the
+        // value is, with no dispatch and nothing written.
+        store.setPath(next, path, store.json.deepCopy(coerced));
         root.values = next;
 
         dispatch(path, coerced, previous);
@@ -121,19 +146,32 @@ Scope {
     // Reset-to-default is deletion, not a write of the current default: the key
     // leaves the file, so a later change to the shipped default reaches the
     // user (#21).
-    function reset(path) {
-        const leaf = store.leafAt(root.schema.spec, path);
-        if (!leaf) {
-            Logger.warn(root.label, "no such key: " + path);
+    //
+    // `path` may be a leaf, a section (`reset("bar")`), or empty for the whole
+    // file — per-section and full reset are the same operation at a different
+    // depth, which is what makes them one line in the settings GUI (#54).
+    function reset(path: string): bool {
+        const paths = path ? store.leafPathsUnder(root.spec, path) : store.leafPaths(root.spec);
+        if (paths.length === 0) {
+            Logger.warn(root.label, "no such key or section: " + path);
             return false;
         }
-        if (!set(path, leaf.def))
+        if (root.unreadable) {
+            Logger.warn(root.label, "refusing to write over an unreadable " + root.path);
             return false;
+        }
 
-        // The value may already have *been* the default while the key was still
-        // written out explicitly, in which case set() had nothing to change —
-        // but clearing the key is the whole point of a reset.
-        if (store.getPath(root.raw, path) !== undefined)
+        let wrote = false;
+        for (const leafPath of paths) {
+            if (!set(leafPath, store.leafAt(root.spec, leafPath).def))
+                return false;
+            // The value may already have *been* the default while the key was
+            // still written out explicitly, in which case set() had nothing to
+            // change — but clearing the key is the whole point of a reset.
+            if (store.getPath(root.raw, leafPath) !== undefined)
+                wrote = true;
+        }
+        if (wrote)
             writeTimer.restart();
         return true;
     }
@@ -167,19 +205,30 @@ Scope {
             // this into a notification; until then the log is the notice.)
             Logger.warn(root.label, "ignoring " + root.path + ": " + parsed.error
                         + " — keeping the last good " + root.label + ", file untouched");
+            root.unreadable = true;
             return;
         }
         apply(parsed.value);
     }
 
     function apply(rawValue) {
-        const spec = root.schema.spec;
         const migrated = migrations.run(rawValue, root.schema.migrations,
                                         root.schema.versionKey, root.schema.version);
-        const resolved = store.resolve(spec, migrated.raw);
+        if (!migrated.ok) {
+            // The file is intact and this build cannot make sense of it, so it
+            // is left exactly as it is and writing is refused until it can be
+            // read. Startup carries on regardless (#21). (#42 turns this into a
+            // notification; until then the log is the notice.)
+            Logger.warn(root.label, root.path + ": " + migrated.error
+                        + " — leaving the file alone");
+            root.unreadable = true;
+            return;
+        }
+        root.unreadable = false;
+
+        const resolved = store.resolve(root.spec, migrated.raw);
         const before = root.values;
-        const beforeRaw = root.raw;
-        const changed = store.changedPaths(spec, before, resolved.values);
+        const changed = store.changedPaths(root.spec, before, resolved.values);
 
         root.raw = migrated.raw;
         root.values = resolved.values;
@@ -188,14 +237,18 @@ Scope {
             Logger.warn(root.label, issue.path + ": cannot use "
                         + JSON.stringify(issue.value) + " — using the default");
 
-        // A migration that produces the file that is already there writes
-        // nothing: the version bump alone is not a reason to touch a file the
-        // user owns.
-        if (migrated.to !== migrated.from && !store.equals(migrated.raw, beforeRaw)) {
-            // The backup is taken from the text still on disk, before the
-            // migrated file replaces it.
-            if (migrated.rewritten)
-                writeBackup(migrated.from, file.text());
+        // A version change is the *only* thing that makes the shell rewrite a
+        // file the user owns (#21 — the other is an explicit GUI action). It
+        // covers the file that has never carried a stamp as well as the one
+        // that carries an old one: both are v1 by definition, and stamping is
+        // what stops the whole migration chain from being re-run on them every
+        // startup. A file already at the current version is never touched.
+        if (migrated.to !== migrated.from) {
+            // Taken unconditionally, from the text still on disk: the rewrite
+            // reformats and prunes default-equal keys even when no migration
+            // step had anything to move, and the user's own copy of what they
+            // wrote is the one thing that cannot be reconstructed afterwards.
+            writeBackup(migrated.from, file.text());
             Logger.log(root.label, "migrated " + root.path + " v" + migrated.from
                        + " to v" + migrated.to
                        + (migrated.applied.length > 0 ? " (" + migrated.applied.join("; ") + ")" : ""));
@@ -215,7 +268,7 @@ Scope {
     }
 
     function dispatch(path, value, previous) {
-        const leaf = store.leafAt(root.schema.spec, path);
+        const leaf = store.leafAt(root.spec, path);
         if (leaf && leaf.onChange)
             leaf.onChange(value, previous, path);
         root.keyChanged(path, value, previous);
@@ -234,8 +287,15 @@ Scope {
     function write() {
         writeTimer.stop();
         ensureDefaults();
+        if (root.unreadable) {
+            // A write queued before the file went bad. `raw` is the last good
+            // file, not the one on disk, so writing now would replace whatever
+            // the user is in the middle of typing.
+            Logger.warn(root.label, "not writing " + root.path + " — it cannot be read");
+            return;
+        }
 
-        let out = store.serialize(root.schema.spec, root.values, root.raw);
+        let out = store.serialize(root.spec, root.values, root.raw);
         const versionKey = root.schema.versionKey;
         if (typeof out[versionKey] !== "number") {
             // Stamp first, so a file opened by hand leads with the version it

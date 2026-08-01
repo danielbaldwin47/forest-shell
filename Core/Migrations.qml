@@ -27,31 +27,42 @@ QtObject {
         return isNaN(version) ? oldest : version;
     }
 
-    // `{ raw, from, to, applied, rewritten }`. The input is not mutated.
+    // `{ raw, from, to, applied, ok, error }`. The input is not mutated.
     //
-    // `rewritten` says whether a step actually changed something, which is what
-    // decides whether a backup is worth keeping: a file that only lacked its
-    // version stamp gets stamped, not backed up.
+    // A step that throws stops the run: `ok` is false, `raw` is the file
+    // exactly as it arrived, and the version is *not* bumped — so the shell
+    // carries on with whatever that file resolves to, the file is left alone
+    // for the user to look at, and the same migration is retried next start
+    // rather than half of it being baked in. A migration must never be able to
+    // take startup down with it (#21 — "never blocks startup").
     function run(raw, registry, versionKey, latest) {
         const from = versionOf(raw, versionKey, 1);
         const ordered = (registry || []).slice().sort((a, b) => a.to - b.to);
+        const original = json.deepCopy(json.isPlainObject(raw) ? raw : {});
 
-        let out = json.deepCopy(json.isPlainObject(raw) ? raw : {});
+        let out = json.deepCopy(original);
         const applied = [];
-        let rewritten = false;
 
         for (const step of ordered) {
             if (step.to <= from || step.to > latest)
                 continue;
 
-            const before = JSON.stringify(out);
-            out = step.migrate(out) || out;
+            try {
+                out = step.migrate(out) || out;
+            } catch (error) {
+                return {
+                    raw: original, from: from, to: from, applied: applied,
+                    ok: false, error: "migration to v" + step.to + " ("
+                        + step.describe + ") failed: " + String(error.message || error)
+                };
+            }
             applied.push(step.describe);
-            if (JSON.stringify(out) !== before)
-                rewritten = true;
         }
 
         out[versionKey] = Math.max(from, latest);
-        return { raw: out, from: from, to: out[versionKey], applied: applied, rewritten: rewritten };
+        return {
+            raw: out, from: from, to: out[versionKey], applied: applied,
+            ok: true, error: ""
+        };
     }
 }

@@ -34,9 +34,9 @@ Singleton {
     signal reloaded()
     signal keyChanged(string path, var value, var previous)
 
-    function get(path) { return state.get(path); }
-    function set(path, value) { return state.set(path, value); }
-    function reset(path) { return state.reset(path); }
+    function get(path: string): var { return state.get(path); }
+    function set(path: string, value: var): bool { return state.set(path, value); }
+    function reset(path: string): bool { return state.reset(path); }
 
     // Do-not-disturb: the one toggle that is state rather than config, because
     // it is situational rather than part of the setup (#21). Owned by the

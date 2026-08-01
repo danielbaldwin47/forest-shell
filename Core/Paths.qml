@@ -1,9 +1,10 @@
+pragma Singleton
+
 // Every path the shell knows, in one place.
 //
 // The repo root *is* the Quickshell config dir (#12), but user settings do not
 // live in it — they go to `~/.config/forest-shell/`, so the checkout stays
 // clean and a git pull never fights a settings write.
-pragma Singleton
 import QtQuick
 import Quickshell
 

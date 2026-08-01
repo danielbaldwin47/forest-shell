@@ -1,3 +1,5 @@
+pragma Singleton
+
 // Logging with a process-relative timestamp.
 //
 // Startup is budgeted from process launch (#22: first frame ≤ 1.5 s,
@@ -8,7 +10,6 @@
 // If /proc is unreadable the timestamps are relative to the first log call
 // instead, which is a long way into startup and would read as a suspiciously
 // fast shell — so that fallback announces itself once, in the log.
-pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io

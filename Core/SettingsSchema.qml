@@ -25,8 +25,12 @@
 // between the laptop and the desktop — while situational ephemera live in
 // Core/StateSchema.qml and never churn this file (#21).
 //
-// Sections are thin where their ticket has not landed yet; the section list is
-// what is settled, and later tickets add lines to it and nothing else.
+// Sections are thin, several of them empty, and that is the point: what #21
+// settled is the *section list*, and a key's name, default and range belong to
+// the ticket that builds the thing it configures. Guessing them here would
+// commit names those tickets would then have to migrate away from. The keys
+// present are the ones #33 names outright — dark mode, the wallpaper, the
+// night-light schedule — plus the four theme-flagged groups it asks for.
 //
 // Pure data, no Quickshell imports, so tests/ can reach it.
 import QtQuick
@@ -44,26 +48,19 @@ QtObject {
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
-            // Fixed forest / constrained accent (#58) / full dynamic (#59).
-            paletteMode: { def: "forest", coerce: c.oneOf(["forest", "accent", "dynamic"]) },
             paletteOverrides: { def: ({}), coerce: c.object, themed: true },
-            dynamic: { def: ({}), coerce: c.object, themed: true },
-            animations: { def: true, coerce: c.boolean },
-            // 0 stops motion without a rebuild — #22 §5 wants that reachable.
-            motionScale: { def: 1.0, coerce: c.number(0, 3) }
+            dynamic: { def: ({}), coerce: c.object, themed: true }
+            // Palette mode and the token overrides land with #34, #58, #59.
         },
 
         bar: {
-            position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
-            height: { def: 36, coerce: c.integer(20, 96) },
             surface: { def: ({}), coerce: c.object, themed: true },
             ridgeline: { def: ({}), coerce: c.object, themed: true }
-            // Module layout and per-module options land with #35 and #37.
+            // Position, height, module layout land with #35 and #37.
         },
 
         launcher: {
-            maxResults: { def: 8, coerce: c.integer(1, 50) }
-            // Provider options land with #39–#41.
+            // Providers and their options land with #39–#41.
         },
 
         controlCenter: {
@@ -76,25 +73,21 @@ QtObject {
 
         notifications: {
             // DND is not here — it is situational, so it is state (#21).
-            timeoutMs: { def: 5000, coerce: c.integer(0, 60000) },
-            historyLimit: { def: 100, coerce: c.integer(0, 1000) }
-            // Per-app rules land with #43.
+            // Timeouts, history and per-app rules land with #42 and #43.
         },
 
         weatherTime: {
-            location: { def: "", coerce: c.string },
-            units: { def: "metric", coerce: c.oneOf(["metric", "imperial"]) },
-            clockFormat: { def: "24h", coerce: c.oneOf(["24h", "12h"]) }
+            // Location, units and clock format land with #50.
         },
 
         wallpaper: {
-            path: { def: "", coerce: c.path },
-            fillMode: { def: "crop", coerce: c.oneOf(["crop", "fit", "stretch", "tile"]) }
+            path: { def: "", coerce: c.path }
+            // Fill mode and any transition land with the wallpaper work.
         },
 
         system: {
             // Schedule, not a live toggle: the intent is "warm my screen at
-            // night", which is setup and belongs in config (#21).
+            // night", which is setup and belongs in config (#21, #33).
             nightLight: {
                 enabled: { def: false, coerce: c.boolean },
                 from: { def: "20:00", coerce: c.string },

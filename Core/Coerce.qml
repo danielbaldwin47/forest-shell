@@ -11,6 +11,12 @@
 // there is no obvious reading — an unknown enum name — the key falls back
 // instead of guessing.
 //
+// This is a closed vocabulary, not a grab-bag: bool, string, path, number,
+// integer, enum, object, array is the whole set a schema line may use, and a
+// key whose value does not fit one of them is a sign the key wants splitting.
+// Some have no caller yet only because their section's ticket has not landed —
+// they are what the schema is written *in*, so they stay.
+//
 // Pure functions, no Quickshell imports, so tests/ can reach them.
 import QtQuick
 
@@ -88,21 +94,5 @@ QtObject {
 
     function array(value) {
         return Array.isArray(value) ? value : undefined;
-    }
-
-    // Drops the members the element coercer rejects rather than the whole list:
-    // one unparseable pin should not empty a pinned-apps list.
-    function arrayOf(coerceElement) {
-        return function (value) {
-            if (!Array.isArray(value))
-                return undefined;
-            const out = [];
-            for (const element of value) {
-                const coerced = coerceElement(element);
-                if (coerced !== undefined)
-                    out.push(coerced);
-            }
-            return out;
-        };
     }
 }

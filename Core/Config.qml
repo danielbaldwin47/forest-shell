@@ -30,11 +30,13 @@ pragma Singleton
 //       function onKeyChanged(path, value, previous) { ... }
 //   }
 //
-// `pragma Singleton` leads the file rather than following this comment, and has
-// to: Quickshell's scan for it gives up at the first line that looks like the
-// start of an object body, and does not notice that the `Connections {` above
-// is inside a comment. A singleton it misses becomes a plain type — every
-// property and function on it reads back `undefined`, with nothing logged.
+// `pragma Singleton` leads this file, and every other singleton in the repo,
+// rather than following the header comment: Quickshell's scan for it gives up
+// at the first line that looks like the start of an object body, and does not
+// notice that the `Connections {` above is inside a comment. A singleton it
+// misses becomes a plain type — every property and function on it reads back
+// `undefined`, with nothing logged, anywhere. This is the one file that
+// explains it; the others just do it.
 import QtQuick
 import Quickshell
 
@@ -49,9 +51,9 @@ Singleton {
     signal reloaded()
     signal keyChanged(string path, var value, var previous)
 
-    function get(path) { return settings.get(path); }
-    function set(path, value) { return settings.set(path, value); }
-    function reset(path) { return settings.reset(path); }
+    function get(path: string): var { return settings.get(path); }
+    function set(path: string, value: var): bool { return settings.set(path, value); }
+    function reset(path: string): bool { return settings.reset(path); }
 
     // The one shorthand the shell has so far. Read by the background surface on
     // the first frame, so it stays a plain property rather than a lookup.

@@ -74,14 +74,33 @@ TestCase {
         const result = run({ version: 3, b: 5 });
         compare(result.raw.version, 3);
         compare(result.applied.length, 0);
-        compare(result.rewritten, false);
     }
 
-    function test_reports_whether_a_step_actually_rewrote_anything() {
-        // This is what decides whether a backup is worth keeping: a file that
-        // only lacked its stamp is stamped, not backed up.
-        verify(run({ version: 1, a: 5 }).rewritten);
-        verify(!run({ version: 1 }).rewritten);
+    // --- a step that throws --------------------------------------------------
+
+    function test_a_throwing_step_leaves_the_file_exactly_as_it_was() {
+        // A migration must never be able to take startup down with it, and a
+        // half-applied chain must never be written back (#21).
+        const registry = [
+            { to: 2, describe: "moves a", migrate: function (raw) { raw.moved = raw.a; return raw; } },
+            { to: 3, describe: "explodes", migrate: function () { throw new Error("boom"); } }
+        ];
+        const result = migrations.run({ version: 1, a: 5 }, registry, "version", 3);
+        compare(result.ok, false);
+        compare(result.raw.a, 5);
+        compare(result.raw.moved, undefined);
+        compare(result.raw.version, 1);
+        // Not bumped, so the same migration is retried next start rather than
+        // half of it being baked in.
+        compare(result.to, 1);
+        verify(result.error.indexOf("explodes") >= 0);
+        verify(result.error.indexOf("boom") >= 0);
+    }
+
+    function test_a_clean_run_reports_ok() {
+        const result = run({ version: 1, a: 5 });
+        compare(result.ok, true);
+        compare(result.error, "");
     }
 
     function test_never_downgrades_a_file_from_a_newer_shell() {
@@ -116,14 +135,14 @@ TestCase {
         compare(result.to, settings.version);
         compare(result.raw.wallpaper.path, "/a.jpg");
         compare(result.raw.background, undefined);
-        verify(result.rewritten);
     }
 
     function test_v2_leaves_an_already_migrated_file_alone() {
         const raw = { settingsVersion: settings.version, wallpaper: { path: "/a.jpg" } };
         const result = migrations.run(raw, settings.migrations, settings.versionKey, settings.version);
         compare(result.raw.wallpaper.path, "/a.jpg");
-        compare(result.rewritten, false);
+        compare(result.from, settings.version);
+        compare(result.applied.length, 0);
     }
 
     function test_v2_keeps_an_unrelated_background_key() {

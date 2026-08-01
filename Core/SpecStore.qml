@@ -58,6 +58,22 @@ QtObject {
         return out;
     }
 
+    // Every leaf at or below a dotted path — one leaf for a leaf path, a
+    // section's worth for a section path, and nothing for a path the spec does
+    // not have. This is what makes per-section and whole-file reset the same
+    // operation at a different depth (#21).
+    function leafPathsUnder(spec, path) {
+        let node = spec;
+        for (const key of path.split(".")) {
+            if (!json.isPlainObject(node) || isLeaf(node) || node[key] === undefined)
+                return [];
+            node = node[key];
+        }
+        if (isLeaf(node))
+            return [path];
+        return leafPaths(node).map(under => path + "." + under);
+    }
+
     // The leaf spec at a dotted path, or null if the path is not a leaf —
     // including paths that reach *into* a whole-sub-object leaf, which have no
     // spec of their own.

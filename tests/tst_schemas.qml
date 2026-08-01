@@ -66,15 +66,34 @@ TestCase {
     }
 
     function test_a_hand_edited_file_resolves_and_writes_back_sparse() {
-        const raw = { settingsVersion: 2, bar: { height: "44" }, keptByANewerShell: 1 };
+        const raw = {
+            settingsVersion: 2,
+            system: { nightLight: { enabled: "true", temperature: "3200" } },
+            keptByANewerShell: 1
+        };
         const values = store.resolve(settings.spec, raw).values;
-        compare(values.bar.height, 44);
+        compare(values.system.nightLight.enabled, true);
+        compare(values.system.nightLight.temperature, 3200);
 
         const out = store.serialize(settings.spec, values, raw);
-        compare(out.bar.height, 44);
-        compare(out.bar.position, undefined);
+        compare(out.system.nightLight.enabled, true);
+        compare(out.system.nightLight.temperature, 3200);
+        // Untouched keys stay out of the file, and so does the whole section
+        // that has none.
+        compare(out.system.nightLight.from, undefined);
+        compare(out.appearance, undefined);
         compare(out.keptByANewerShell, 1);
         compare(out.settingsVersion, 2);
+    }
+
+    function test_empty_sections_are_sections_and_not_leaves() {
+        // Several sections are deliberately empty until their ticket lands;
+        // they must still be walkable, not read as a whole-sub-object leaf.
+        for (const section of ["launcher", "controlCenter", "dashboard",
+                               "notifications", "weatherTime"]) {
+            verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
+            compare(store.leafPathsUnder(settings.spec, section).length, 0);
+        }
     }
 
     // --- state.json ----------------------------------------------------------

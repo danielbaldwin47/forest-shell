@@ -131,10 +131,13 @@ TestCase {
         compare(out.grain, 0.05);
     }
 
-    function test_shape_drops_keys_it_does_not_name() {
+    function test_shape_keeps_keys_it_does_not_name() {
+        // A group written by a newer shell must not be pruned by an older one:
+        // the settings GUI serializes the *resolved* group back sparsely, so a
+        // key dropped here would be a key dropped from the user's file (#54).
         const out = c.shape(surfaceFields)({ opacity: 0.9, mystery: 1 });
-        compare(out.mystery, undefined);
-        compare(Object.keys(out).length, 2);
+        compare(out.mystery, 1);
+        compare(Object.keys(out).length, 3);
     }
 
     function test_shape_rejects_a_non_object_wholesale() {
@@ -156,5 +159,22 @@ TestCase {
 
     function test_array_of_still_rejects_non_arrays() {
         compare(c.arrayOf(c.string)("clock"), undefined);
+        compare(c.arrayOf(c.string)({ a: "b" }), undefined);
+    }
+
+    function test_map_of_drops_only_the_bad_entry() {
+        const rules = c.mapOf(c.oneOf(["normal", "silent", "blocked"]));
+        const out = rules({ firefox: "silent", slack: "screaming", mail: "blocked" });
+
+        compare(out.firefox, "silent");
+        compare(out.mail, "blocked");
+        // Not "normal" — an entry that cannot be read is absent, and absent is
+        // what normal already means.
+        compare(out.slack, undefined);
+    }
+
+    function test_map_of_still_rejects_a_non_object() {
+        compare(c.mapOf(c.string)(["silent"]), undefined);
+        compare(c.mapOf(c.string)("silent"), undefined);
     }
 }

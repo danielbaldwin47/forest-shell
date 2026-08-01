@@ -38,6 +38,14 @@ QtObject {
             lastTab: { def: "", coerce: c.string }   // #45
         },
 
+        settings: {
+            // The settings window reopens where it was left (#54). Empty means
+            // "the first tab" rather than a tab id repeated here — the tab
+            // order lives in one place, and it is not this file. An id from a
+            // build that had a tab this one does not falls back the same way.
+            lastTab: { def: "", coerce: c.string }
+        },
+
         claude: {
             // Resumes the conversation across a shell restart (#41).
             sessionId: { def: "", coerce: c.string }

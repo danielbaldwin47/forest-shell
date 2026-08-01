@@ -19,6 +19,7 @@ import QtQuick
 import Quickshell
 import qs.Core
 import qs.Surfaces.Background
+import qs.Surfaces.Settings
 import qs.Surfaces.Lock
 import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
@@ -55,6 +56,10 @@ ShellRoot {
         target: Startup
         function onDeferredStage() {
             ServiceInit.initDeferred();
+            // Naming the singleton is what constructs it, and constructing it
+            // is what registers `qs ipc call settings …`. The window itself is
+            // not built until something opens it (#54).
+            ServiceInit.initSurfaces([SettingsWindow]);
             lock.active = true;
             notificationPopups.active = true;
         }

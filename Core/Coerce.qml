@@ -118,10 +118,12 @@ QtObject {
     /// `"loud"` — or of 0.2, which #10 measured at 1.25:1 against the
     /// wallpaper — would reach the screen.
     ///
-    /// Keys the shape does not name are dropped rather than carried: the
-    /// resolved values are what the shell reads, and an unknown key there could
-    /// only ever be noise. The *file* keeps them regardless — sparse
-    /// serialization never rewrites a key it was not asked about.
+    /// Keys the shape does not name are carried through untouched, not pruned.
+    /// A themed group is one key, so the settings GUI (#54) serializes the
+    /// *resolved* group back into the file sparsely — if resolution dropped an
+    /// unknown key here, an older shell's first slider move would prune a group
+    /// written by a newer one, which is exactly the pruning the sparse-write
+    /// rule exists to prevent (Core/SpecStore.qml).
     function shape(fields, label) {
         return function (value) {
             if (object(value) === undefined)
@@ -143,6 +145,31 @@ QtObject {
                 } else {
                     out[key] = coerced;
                 }
+            }
+            for (const key in value)
+                if (!(key in fields))
+                    out[key] = value[key];
+            return out;
+        };
+    }
+
+    /// String-keyed map whose *values* all coerce the same way — one key
+    /// holding many independent entries, like `notifications.apps` holding a
+    /// rule per app. Entries the value coercer refuses are dropped rather than
+    /// failing the key: a typo in one app's rule must not silently switch every
+    /// other app back to normal. The dropped entry is not reported here — these
+    /// are pure, and the store's issue list is per key.
+    function mapOf(valueCoerce) {
+        return function (value) {
+            const source = object(value);
+            if (source === undefined)
+                return undefined;
+
+            const out = {};
+            for (const key in source) {
+                const coerced = valueCoerce(source[key]);
+                if (coerced !== undefined)
+                    out[key] = coerced;
             }
             return out;
         };

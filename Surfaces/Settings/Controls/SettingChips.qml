@@ -1,0 +1,45 @@
+// A subset of a closed list (#54) — the array counterpart of SettingChoice.
+//
+// Built for the Ask Claude tool allowlist (#41), which is the only many-of-many
+// setting in v1: the list is closed because it is passed to `--tools`, and a
+// name the CLI does not know is a silently weaker restriction rather than an
+// error, so free text would be the wrong control.
+//
+// Order is the schema's, not the click order: what is written is the closed list
+// filtered by what is selected. Otherwise the file would record the sequence the
+// user happened to tap in, and two identical toolsets would diff.
+pragma ComponentBehavior: Bound
+import QtQuick
+import qs.Core
+
+Flow {
+    id: root
+
+    required property ConfigBinding binding
+
+    /// Every value that may be selected, in the order they are written.
+    required property var choices
+
+    readonly property var selected: Array.isArray(root.binding.value) ? root.binding.value : []
+
+    spacing: Theme.space1
+
+    function toggle(value: string): void {
+        const has = root.selected.indexOf(value) >= 0;
+        root.binding.commit(root.choices.filter(
+            choice => choice === value ? !has : root.selected.indexOf(choice) >= 0));
+    }
+
+    Repeater {
+        model: root.choices
+
+        Chip {
+            required property string modelData
+
+            label: modelData
+            mono: true   // a tool name is a literal passed to the CLI
+            selected: root.selected.indexOf(modelData) >= 0
+            onTapped: root.toggle(modelData)
+        }
+    }
+}

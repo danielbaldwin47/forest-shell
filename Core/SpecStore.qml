@@ -175,13 +175,41 @@ QtObject {
             if (value === undefined)
                 continue;
 
-            if (equals(value, leaf.def))
+            const sparse = sparseValue(leaf, value);
+            if (equals(value, leaf.def) || isEmptyGroup(leaf, sparse))
                 unsetPath(out, path);
             else
-                setPath(out, path, json.deepCopy(value));
+                setPath(out, path, sparse);
         }
 
         return out;
+    }
+
+    // Sparseness reaches *inside* a leaf that declares its knobs. A theme-
+    // flagged group is one key so that a preset can replace it atomically, and
+    // the resolved value is therefore always the complete group — which would
+    // put all of it in the file the moment one slider moved, freezing every
+    // other knob at the value it happened to have that day. Since the group's
+    // coercer merges what is on disk over the group's defaults, writing only
+    // what differs round-trips to the same thing and lets a later change to a
+    // shipped default still reach the user (#21).
+    //
+    // Keys the spec does not know are kept, exactly as elsewhere: a group
+    // written by a newer shell is not pruned by an older one.
+    function sparseValue(leaf, value) {
+        if (!leaf.knobs || !json.isPlainObject(value) || !json.isPlainObject(leaf.def))
+            return json.deepCopy(value);
+
+        const out = {};
+        for (const key in value)
+            if (!equals(value[key], leaf.def[key]))
+                out[key] = json.deepCopy(value[key]);
+        return out;
+    }
+
+    function isEmptyGroup(leaf, sparse) {
+        return leaf.knobs !== undefined && json.isPlainObject(sparse)
+            && Object.keys(sparse).length === 0;
     }
 
     // Which leaves moved between two resolved value sets. Compared by value,

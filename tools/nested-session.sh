@@ -22,8 +22,10 @@
 #
 #   source "$(dirname "${BASH_SOURCE[0]}")/nested-session.sh"
 #   nested_up
+#   NESTED_ENV=("XDG_CONFIG_HOME=$NESTED_WORK/config")  # optional
 #   nested_shell lock-harness.qml 'harness: lock harness ready'
 #   nested_ipc some target call
+#   nested_hyprctl dispatch workspace 2       # drive the compositor, not the shell
 #   nested_await "$NESTED_SHELL_LOG" 'the line that proves it' 15
 #   nested_key escape                      # a keystroke, into the focused window
 #
@@ -49,13 +51,30 @@
 # window on the *outer* session, so capturing that window's region from outside
 # (`grim -g` over its geometry from `hyprctl clients`) should get the pixels
 # without screencopy being involved at all.
+#
+# AND FRAME COUNTS, for the same underlying reason.
+#
+# `QSG_RENDER_TIMING=1` does reach the shell log in here — the entry point can
+# be launched with it through NESTED_ENV, and `syncAndRender: frame
+# rendered in Nms` lines appear during startup. But they stop once the window
+# settles: measured while driving five workspace switches 450 ms apart, the
+# shell logged every switch (`compositor: workspace N focused`) and rendered
+# **zero** frames for any of them. Nothing is throttling the shell; the nested
+# compositor's own window is not being displayed by anything on the outer
+# session, so no frame callbacks come back and Qt never repaints.
+#
+# So "does it animate" cannot be asked here as a frame count — a broken
+# animation and a working one both measure zero. #75's acceptance (~14 frames
+# per workspace switch at ~16 ms) still needs a real session. What the seam
+# *can* answer is whether the shell was told, which is the half that had no
+# evidence at all when #75 was diagnosed.
 
 # --- state, all owned by this file ------------------------------------------
 
 NESTED_DISPLAY=""       # the wayland-N socket the nested compositor is on
-NESTED_SIGNATURE=""     # the nested Hyprland's instance signature, for hyprctl
+NESTED_SIGNATURE=""     # the nested Hyprland's instance signature — see nested_up
 NESTED_WORK=""          # scratch dir: configs, logs, captures
-NESTED_ENV=()           # extra `env` assignments for the shell under test
+NESTED_ENV=()           # extra `KEY=value` for the shell — see nested_shell
 NESTED_HYPR_LOG=""
 NESTED_HYPR_PID=""
 NESTED_SHELL_LOG=""
@@ -94,17 +113,22 @@ nested_sockets() {
         -name 'wayland-[0-9]*' ! -name '*.lock' -printf '%f\n' 2>/dev/null | sort
 }
 
-nested_signatures() {
-    find "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" -mindepth 1 -maxdepth 1 -type d \
-        -printf '%f\n' 2>/dev/null | sort
+## Hyprland's per-instance directories. One appears per running instance, named
+## by its signature — which is the handle `hyprctl` and Quickshell's Hyprland
+## module both take from `HYPRLAND_INSTANCE_SIGNATURE`.
+nested_instances() {
+    find "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" -maxdepth 1 -mindepth 1 \
+        -type d -printf '%f\n' 2>/dev/null | sort
 }
 
-## Start a nested Hyprland and set NESTED_DISPLAY to the socket it opened.
+## Start a nested Hyprland and set NESTED_DISPLAY to the socket it opened, plus
+## NESTED_SIGNATURE to the instance it registered.
 ##
-## `env -u HYPRLAND_INSTANCE_SIGNATURE` is load-bearing in every launch below:
-## with it inherited, Hyprland and every client attach to the *outer* instance
-## instead — which for a lock means locking the real session, the exact thing
-## this file exists to prevent.
+## `env -u HYPRLAND_INSTANCE_SIGNATURE` is load-bearing here: with it inherited,
+## Hyprland comes up as a client of the *outer* instance rather than as its own,
+## and so does everything launched after it — which for a lock means locking the
+## real session, the exact thing this file exists to prevent. Clients are then
+## pointed at the new instance explicitly, by `nested_env`.
 nested_up() {
     NESTED_WORK="${TMPDIR:-/tmp}/forest-nested.$$"
     mkdir -p "$NESTED_WORK"
@@ -123,9 +147,9 @@ EOF
     # Which socket is ours, by set difference rather than "the newest one" —
     # two of these run in parallel often enough (one per worktree) that picking
     # by mtime eventually attaches a harness to somebody else's compositor.
-    local before after sig_before sig_after
+    local before after before_instances
     before=$(nested_sockets)
-    sig_before=$(nested_signatures)
+    before_instances=$(nested_instances)
 
     env -u HYPRLAND_INSTANCE_SIGNATURE Hyprland -c "$NESTED_WORK/hyprland.conf" \
         > "$NESTED_HYPR_LOG" 2>&1 &
@@ -148,22 +172,58 @@ EOF
     # reason: `hyprctl` talks to whichever instance the environment names, and
     # the environment names the *outer* one. Getting this wrong is not a failed
     # assertion — it is a keystroke delivered to the session you are working in.
-    sig_after=$(nested_signatures)
-    NESTED_SIGNATURE=$(comm -13 <(printf '%s\n' "$sig_before") <(printf '%s\n' "$sig_after") \
-        | head -1)
+    for _ in $(seq 1 100); do
+        NESTED_SIGNATURE=$(comm -13 <(printf '%s\n' "$before_instances") \
+                                    <(printf '%s\n' "$(nested_instances)") | head -1)
+        [[ -n "$NESTED_SIGNATURE" ]] && break
+        sleep 0.1
+    done
+    [[ -n "$NESTED_SIGNATURE" ]] \
+        || nested_note "no instance signature yet — the facade will be inert in there"
 
     nested_note "nested compositor on $NESTED_DISPLAY"
 }
 
-## Drive the nested compositor: `nested_hyprctl dispatch sendshortcut ", escape, activewindow"`.
+## Run something as a client of the nested session.
 ##
-## Keys are the only way to test a surface the way it is actually used — #77 was
-## a window with no keyboard path at all, and nothing about that is checkable by
-## calling functions on it. Fails loudly rather than falling back to the outer
-## instance.
+## Both variables are load-bearing, and the signature is the subtler of the two.
+## Inherited from the *outer* session it aims every `hyprctl` and every dispatch
+## at the real compositor — which for a lock means locking the session doing the
+## testing. Unset, the shell's Hyprland facade reads no session at all and
+## degrades to a logged no-op, so anything that goes through the compositor
+## (`Compositor.setLayerRule`, #78) is never exercised. Pointed at the nested
+## instance, both problems are the same fix: real calls, contained.
+nested_env() {
+    nested_env_argv
+    "${NESTED_ENV_ARGV[@]}" "$@"
+}
+
+## The `env` argv nested_env runs things under, left in a global so
+## nested_shell can launch its client as a *simple command*. `nested_env cmd &`
+## backgrounds a subshell, and killing that subshell pid leaves the client
+## alive — measured as a "restarted" shell whose notification daemon kept
+## serving, ids continuing where the old run left off. `env … cmd &` is
+## fork+exec, so $! is the client itself.
+nested_env_argv() {
+    if [[ -n "$NESTED_SIGNATURE" ]]; then
+        NESTED_ENV_ARGV=(env HYPRLAND_INSTANCE_SIGNATURE="$NESTED_SIGNATURE"
+                             WAYLAND_DISPLAY="$NESTED_DISPLAY")
+    else
+        NESTED_ENV_ARGV=(env -u HYPRLAND_INSTANCE_SIGNATURE
+                             WAYLAND_DISPLAY="$NESTED_DISPLAY")
+    fi
+}
+
+## Drive the nested compositor directly, as a harness does when it needs the
+## *compositor* to do something rather than the shell — including keys, which
+## are the only way to test a surface the way it is actually used (#77 was a
+## window with no keyboard path at all, and nothing about that is checkable by
+## calling functions on it). Fails loudly rather than falling back to the outer
+## instance: a keystroke aimed at the wrong one lands in the session you are
+## working in.
 nested_hyprctl() {
     [[ -n "$NESTED_SIGNATURE" ]] || { echo "no nested instance signature" >&2; return 1; }
-    HYPRLAND_INSTANCE_SIGNATURE="$NESTED_SIGNATURE" hyprctl "$@" 2>&1
+    nested_env hyprctl "$@" 2>&1
 }
 
 ## Send one key to the focused window inside the nested session, by its Hyprland
@@ -183,9 +243,11 @@ nested_shell() {
 
     # NESTED_ENV is how a harness keeps the shell under test off the user's own
     # files: `NESTED_ENV=(XDG_CONFIG_HOME=… XDG_STATE_HOME=…)` before this call
-    # means a test that toggles a setting toggles a scratch one.
-    env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED_DISPLAY" \
-        "${NESTED_ENV[@]}" "$NESTED_QS" -p "$entry" > "$NESTED_SHELL_LOG" 2>&1 &
+    # means a test that toggles a setting toggles a scratch one. It is also the
+    # door for QSG_RENDER_TIMING, when frames are what is being counted.
+    nested_env_argv
+    "${NESTED_ENV_ARGV[@]}" "${NESTED_ENV[@]}" \
+        "$NESTED_QS" -p "$entry" > "$NESTED_SHELL_LOG" 2>&1 &
     NESTED_SHELL_PID=$!
 
     if [[ -n "$ready" ]] && ! nested_await "$NESTED_SHELL_LOG" "$ready" "$timeout"; then
@@ -205,8 +267,7 @@ nested_shell() {
 ## a `default` config it will not find and fails with a message about
 ## `shell.qml` that has nothing to do with what went wrong.
 nested_ipc() {
-    env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED_DISPLAY" \
-        "$NESTED_QS" -p "$NESTED_ENTRY" ipc "$@" 2>&1
+    nested_env "$NESTED_QS" -p "$NESTED_ENTRY" ipc "$@" 2>&1
 }
 
 # --- teardown ----------------------------------------------------------------

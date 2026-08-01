@@ -51,6 +51,19 @@ Scope {
     //
     // Deferred: the first frame does not wait on a subprocess. The shell must
     // look correct with blur off, so there is nothing to gate on it.
+    //
+    // #78 asked whether a runtime `hyprctl keyword layerrule` is the right
+    // mechanism at all, or whether this belongs in the user's own
+    // hyprland.conf. Kept, for two reasons and one caveat. The transport is not
+    // in doubt — a windowrule pushed the identical way applied instantly on the
+    // same machine, and the layerrule now returns `ok` rather than the syntax
+    // error it returned for four PRs. And a line in hyprland.conf cannot be a
+    // setting: #10 ships this as a Bar-tab toggle and #22 §7 makes it the first
+    // rung of the `reducedEffects` ladder, both of which have to take effect
+    // while the shell is running. The caveat is that "accepted" and "blurred"
+    // are still different claims: #78 could not tell them apart on a machine
+    // where blur renders nowhere, so the first session on a machine where it
+    // does is what confirms the rule has the effect it asks for.
     Connections {
         target: Startup
         function onDeferredStage() { bar.applyBlurRule(); }
@@ -69,10 +82,13 @@ Scope {
         // `reducedEffects` turns the compositor blur off first, at the top of
         // its cost ladder (#22 §7).
         const wanted = bar.settings.surface.blur && !Config.values.appearance.reducedEffects;
-        // `unset` clears every layer rule on the namespace, not only ours —
-        // which is right, because the namespace is ours. A rule a user wants to
-        // keep belongs on a namespace they own.
-        Compositor.setLayerRule(wanted ? "blur" : "unset", bar.layerNamespace);
+        // Off is `blur 0`, not a rule being taken away: Hyprland's 0.5x syntax
+        // has no clearing verb (`unset` answers `invalid field unset`), and a
+        // boolean rule needs its value spelled out either way. Rules accumulate
+        // and the later one is what applies, so pushing the opposite is how the
+        // setting is turned off. The value belongs here rather than inside the
+        // facade because only this file knows what off means for blur.
+        Compositor.setLayerRule(wanted ? "blur 1" : "blur 0", bar.layerNamespace);
     }
 
     Variants {

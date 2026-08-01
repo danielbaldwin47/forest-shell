@@ -44,6 +44,35 @@ TestCase {
         compare(policy.rearmWhen("error", false), "onInput");
     }
 
+    // --- Enter (#81) ---------------------------------------------------------
+
+    function test_enter_answers_a_live_prompt() {
+        compare(policy.submitOutcome(true, true, true, false), "send");
+    }
+
+    function test_enter_is_held_until_the_prompt_arrives() {
+        // The conversation is open but has not asked yet: milliseconds, in
+        // practice. Discarding the password to say "not ready" would eat the
+        // first attempt of every unlock.
+        compare(policy.submitOutcome(true, false, false, false), "hold");
+        // Between attempts, after a refusal re-armed the conversation.
+        compare(policy.submitOutcome(true, true, false, false), "hold");
+    }
+
+    function test_enter_does_not_queue_a_second_answer() {
+        compare(policy.submitOutcome(true, true, true, true), "wait");
+        compare(policy.submitOutcome(true, false, false, true), "wait");
+    }
+
+    function test_enter_with_no_conversation_is_never_silent() {
+        // The #81 lockout: the lock never opened a conversation, so every
+        // Enter — right password, wrong password — returned without a word,
+        // and a secure lock has no other way out. "stalled" is what puts
+        // something on screen.
+        compare(policy.submitOutcome(false, false, false, false), "stalled");
+        verify(policy.stalledText() !== "");
+    }
+
     function test_success_asks_nothing_further() {
         compare(policy.rearmWhen("success", true), "never");
         compare(policy.rearmWhen("success", false), "never");

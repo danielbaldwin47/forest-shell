@@ -41,6 +41,11 @@ Scope {
     /// timeout is held open while this is true.
     readonly property alias busy: priv.busy
 
+    /// PAM has spoken to us at least once since `begin()` — the conversation is
+    /// real and Enter has somewhere to go. False here after `begin()` is the
+    /// #81 failure: a lock that looks right and cannot be answered.
+    readonly property alias conversing: priv.conversing
+
     /// The last thing PAM said about the password, shown verbatim under the
     /// field. Empty means say nothing.
     readonly property alias message: priv.message
@@ -86,8 +91,16 @@ Scope {
         priv.lockedOut = false;
         priv.rearmOnInput = false;
         priv.answered = false;
+        priv.conversing = false;
+        priv.pendingSubmit = false;
         root.clear();
+        // Logged either side of the call, because #81 could not tell from the
+        // logs whether the conversation had failed to start or had never been
+        // asked to: three silent steps produced one silent lock.
+        Logger.log("lock", "opening pam conversation (config "
+                   + Config.values.system.lock.pamConfig + ")");
         password.start();
+        conversationWatchdog.restart();
         if (Config.values.system.lock.fingerprint)
             fingerprintProbe.running = true;
     }
@@ -97,6 +110,9 @@ Scope {
     /// that no longer has a lock on it.
     function end() {
         priv.begun = false;
+        priv.conversing = false;
+        priv.pendingSubmit = false;
+        conversationWatchdog.stop();
         fingerprintRetry.stop();
         password.abort();
         fingerprint.abort();
@@ -105,18 +121,55 @@ Scope {
         root.clear();
     }
 
-    /// Answer the password prompt. A no-op unless PAM is actually asking —
-    /// pressing Enter into a conversation that is mid-answer must not queue a
-    /// second response.
+    /// Answer the password prompt. Every outcome is visible: this is the
+    /// function that used to return silently when PAM had not asked yet, which
+    /// is how #81 turned a lock into a lockout — Enter did nothing, said
+    /// nothing, and the only door out of a secure lock is through here.
     function submit() {
-        if (!priv.responseRequired || priv.busy)
+        switch (policy.submitOutcome(priv.begun, priv.conversing,
+                                     priv.responseRequired, priv.busy)) {
+        case "send":
+            root.send();
             return;
+        case "hold":
+            // Keep the attempt and answer the prompt when it arrives. The
+            // field shows busy meanwhile, so Enter visibly did *something*,
+            // and the watchdog below turns a prompt that never comes into a
+            // message rather than into silence.
+            priv.pendingSubmit = true;
+            priv.busy = true;
+            conversationWatchdog.restart();
+            Logger.log("lock", "enter held — no prompt open yet");
+            return;
+        case "stalled":
+            root.stall("enter with no conversation at all");
+            return;
+        }
+        // "wait" — an answer is already in flight. The field is read-only and
+        // the horizon is lit; pressing Enter again is not a second attempt.
+    }
+
+    // The actual send, shared by Enter and by a held attempt being flushed.
+    function send() {
         const response = root.buffer;
         root.clear();
+        priv.pendingSubmit = false;
         priv.busy = true;
         priv.answered = true;
         priv.message = "";
+        conversationWatchdog.stop();
         password.respond(response);
+    }
+
+    // A lock that cannot authenticate is the one bug that strands a user, so it
+    // is never allowed to look like a lock that is thinking.
+    function stall(why: string) {
+        priv.pendingSubmit = false;
+        priv.busy = false;
+        priv.message = policy.stalledText();
+        priv.messageIsError = true;
+        Logger.warn("lock", "no pam conversation to answer — " + why);
+        root.failed();
     }
 
     /// Called by the surface on every keystroke. Almost always a no-op — the
@@ -131,6 +184,7 @@ Scope {
         priv.rearmOnInput = false;
         priv.answered = false;
         password.start();
+        conversationWatchdog.restart();
     }
 
     function clear() {
@@ -167,8 +221,23 @@ Scope {
         configDirectory: "/etc/pam.d"
 
         onPamMessage: {
+            if (!priv.conversing) {
+                priv.conversing = true;
+                Logger.log("lock", "pam conversation open");
+            }
             priv.responseRequired = password.responseRequired;
             priv.responseVisible = password.responseVisible;
+            if (password.responseRequired) {
+                conversationWatchdog.stop();
+                // An Enter that arrived before the prompt did. Sending it here
+                // rather than making the user type it again is the difference
+                // between a lock that feels instant and one that eats the first
+                // attempt of every unlock.
+                if (priv.pendingSubmit) {
+                    root.send();
+                    return;
+                }
+            }
             // The prompt itself ("Password: ") is not worth showing — the field
             // is the prompt. Anything else PAM says is.
             if (password.message && (password.messageIsError || !password.responseRequired)) {
@@ -182,6 +251,9 @@ Scope {
         onCompleted: result => {
             priv.busy = false;
             priv.responseRequired = false;
+            // The next attempt needs its own prompt, so this is a fresh
+            // conversation again as far as Enter is concerned.
+            priv.conversing = false;
 
             if (result === PamResult.Success) {
                 Logger.log("lock", "authenticated (password)");
@@ -208,10 +280,12 @@ Scope {
                 return;
             const rearm = policy.rearmWhen(kind, priv.answered);
             priv.answered = false;
-            if (rearm === "now")
+            if (rearm === "now") {
                 password.start();
-            else
+                conversationWatchdog.restart();
+            } else {
                 priv.rearmOnInput = rearm === "onInput";
+            }
         }
 
         onError: error => {
@@ -289,6 +363,22 @@ Scope {
         }
     }
 
+    // The lock's own dead-man's switch (#81). A conversation that opens and is
+    // never asked anything looks exactly like a conversation that is thinking,
+    // and the user has no way to tell them apart and nowhere to go if they
+    // guess wrong. Started whenever a conversation is opened or an attempt is
+    // held; stopped by the first prompt.
+    Timer {
+        id: conversationWatchdog
+
+        interval: policy.conversationTimeoutMs
+        onTriggered: {
+            if (!priv.begun || priv.conversing)
+                return;
+            root.stall("no prompt within " + policy.conversationTimeoutMs + "ms of starting");
+        }
+    }
+
     Timer {
         id: fingerprintRetry
         interval: policy.fingerprintRetryDelayMs
@@ -300,6 +390,7 @@ Scope {
 
         property bool begun: false
         property bool busy: false
+        property bool conversing: false
         property bool responseRequired: false
         property bool responseVisible: false
         property string message: ""
@@ -310,6 +401,10 @@ Scope {
         // last one ended unanswered and is waiting for a keystroke to reopen.
         property bool answered: false
         property bool rearmOnInput: false
+
+        // An Enter that landed before PAM had asked anything, waiting for the
+        // prompt it will answer.
+        property bool pendingSubmit: false
 
         property bool fingerprintActive: false
         property string fingerprintMessage: ""

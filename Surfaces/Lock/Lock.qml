@@ -31,6 +31,10 @@ Scope {
     // their own PAM context or their own half-typed password.
     LockAuth { id: pamAuth }
 
+    /// The conversation, for the harness in tools/ to drive. Nothing in the
+    /// shell reads it: the surfaces are handed `pamAuth` directly below.
+    readonly property alias auth: pamAuth
+
     WlSessionLock {
         id: sessionLock
 
@@ -46,16 +50,6 @@ Scope {
                 Logger.log("lock", "compositor confirms all screens covered");
         }
 
-        // Opening and closing the PAM conversations is tied to the lock being
-        // raised rather than to any one surface being built, because there are
-        // as many surfaces as there are screens and exactly one conversation.
-        onLockedChanged: {
-            if (sessionLock.locked)
-                pamAuth.begin();
-            else
-                pamAuth.end();
-        }
-
         WlSessionLockSurface {
             id: lockSurface
 
@@ -68,6 +62,30 @@ Scope {
                 screen: lockSurface.screen
                 auth: pamAuth
             }
+        }
+    }
+
+    // Opening and closing the PAM conversations is tied to the session being
+    // locked rather than to any one surface being built, because there are as
+    // many surfaces as there are screens and exactly one conversation.
+    //
+    // Driven off the *service* rather than off `sessionLock.locked`, and that
+    // is not a style choice (#81). `WlSessionLock.locked` reads correctly but
+    // does not notify when it goes true: Quickshell 0.3.0's `setLocked()` hands
+    // off to `realizeLockTarget()`, which takes the compositor lock and builds
+    // the surfaces without emitting `lockStateChanged` — only the *unlock* path
+    // emits. So a handler hung on it fires on unlock and never on lock, which
+    // is how #47 shipped a lock that never opened a PAM conversation and could
+    // not be answered. `SessionLock.locked` is an ordinary QML property and
+    // notifies both ways.
+    Connections {
+        target: SessionLock
+
+        function onLockedChanged() {
+            if (SessionLock.locked)
+                pamAuth.begin();
+            else
+                pamAuth.end();
         }
     }
 

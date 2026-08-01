@@ -31,9 +31,14 @@ Surfaces get a log line for each state change worth asserting on. #81 was a
 silent lifecycle: nothing logged, so a lock that could not be unlocked had two
 candidate causes for a week and cost a session to narrow.
 
-Known gap: this seam cannot take screenshots — `grim` does not complete against
-Hyprland's nested backend. Visual and contrast checks (#79, #80) still need a
-real session. See the header of `tools/nested-session.sh`.
+Known gap: this seam cannot take screenshots or count frames — the nested
+compositor never presents after its first commit (upstream aquamarine bug,
+diagnosed in #85; see the header of `tools/nested-session.sh`). Visual checks
+go through `tools/capture-harness.sh` instead: the real surface components
+rendered offscreen, client-side, and grabbed pixel-exact — layout and contrast
+checks (#79, #80) run there (`--contrast` is the #79 measurement). What still
+needs a real session: `MultiEffect` surfaces and compositor composition (blur,
+layer stacking, frame pacing).
 
 ### Why this is a rule
 

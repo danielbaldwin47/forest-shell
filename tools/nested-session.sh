@@ -32,42 +32,44 @@
 # Sourcing installs an EXIT trap that tears the nested session down. See
 # tools/lock-harness.sh and tools/settings-harness.sh for the worked examples.
 #
-# WHAT THIS SEAM CANNOT DO YET — screenshots.
+# WHAT THIS SEAM CANNOT DO — screenshots and frame counts. Diagnosed in #85:
+# both are one bug, and it is upstream.
 #
-# `grim` does not complete against Hyprland's nested Wayland backend: measured
-# here, it blocks indefinitely and is killed by the timeout, both bare and as
-# `grim -o WAYLAND-1` (the nested output is named `WAYLAND-1` — `WL-1` is
-# rejected as unknown). wlr-screencopy appears never to deliver a frame for a
-# nested output. So this seam can *drive* a surface and *read its logs*, but it
-# cannot yet look at one.
+# The nested compositor never presents a frame after its first commit. The
+# protocol trace (WAYLAND_DEBUG=client on the nested Hyprland) shows the
+# last buffer go out with a wl_surface.frame request, the outer session answer
+# wl_callback.done — and then nothing, ever again. aquamarine 0.14.0's frame
+# scheduler drops a frame request that arrives while a frame is being run;
+# upstream fixed exactly that the day after the 0.14.0 tag (hyprwm/aquamarine
+# 5ea27f81, "frame: reschedule one more idle frame if requested"), but the
+# stall reproduces with that fix applied, so something deeper in the nested
+# present path is still wedged on this stack (Hyprland 0.56.1 + aq 0.14.0).
 #
-# That gap matters more than it sounds: #79 (bar contrast at the opacity floor)
-# and #80 (a settings row pushing its control off-screen) were both found by
-# measuring pixels out of a capture, and #73's "MultiEffect surfaces visually
-# judged" is still unchecked because nothing has ever rendered them anywhere.
-# Until it is closed, those checks still need a real session.
+# Everything downstream follows from that one stall:
+#   - the nested window on the outer session shows black — nothing was ever
+#     composited into it (confirmed visually and by capturing its region from
+#     the outer session, which works fine and shows a black rectangle);
+#   - every capture protocol on the nested socket waits for a present that
+#     never comes: grim blocks (both bare and `-o WAYLAND-1`; the output
+#     really is named WAYLAND-1 — `WL-1` is rejected), and so does a raw
+#     zwlr-screencopy client, and so does a capture of an added headless
+#     output. `hyprctl dispatch forcerendererreload` makes the copy *complete*
+#     but the delivered buffer is transparent black — the sentinel test shows
+#     the compositor really writes zeros, it is not a stuck buffer;
+#   - Qt clients inside stop rendering once their first frame's callback never
+#     returns, which is why QSG_RENDER_TIMING measures zero frames per
+#     workspace switch. A broken animation and a working one both measure
+#     zero, so #75-class acceptance (~14 frames per switch) still needs a
+#     real session. What the seam *can* answer is whether the shell was told,
+#     which is the half that had no evidence when #75 was diagnosed.
 #
-# The promising route, untried: the nested compositor paints into an ordinary
-# window on the *outer* session, so capturing that window's region from outside
-# (`grim -g` over its geometry from `hyprctl clients`) should get the pixels
-# without screencopy being involved at all.
-#
-# AND FRAME COUNTS, for the same underlying reason.
-#
-# `QSG_RENDER_TIMING=1` does reach the shell log in here — the entry point can
-# be launched with it through NESTED_ENV, and `syncAndRender: frame
-# rendered in Nms` lines appear during startup. But they stop once the window
-# settles: measured while driving five workspace switches 450 ms apart, the
-# shell logged every switch (`compositor: workspace N focused`) and rendered
-# **zero** frames for any of them. Nothing is throttling the shell; the nested
-# compositor's own window is not being displayed by anything on the outer
-# session, so no frame callbacks come back and Qt never repaints.
-#
-# So "does it animate" cannot be asked here as a frame count — a broken
-# animation and a working one both measure zero. #75's acceptance (~14 frames
-# per workspace switch at ~16 ms) still needs a real session. What the seam
-# *can* answer is whether the shell was told, which is the half that had no
-# evidence at all when #75 was diagnosed.
+# What closes the visual gap instead: tools/capture-harness.sh — the shell's
+# real surface components rendered client-side on QT_QPA_PLATFORM=offscreen
+# and grabbed with Item.grabToImage, which does not involve a compositor at
+# all. #79's contrast measurement runs there (tools/measure-contrast.py).
+# Still needing a real session: MultiEffect surfaces (blank on the offscreen
+# scenegraph — Widgets/Icon.qml) and anything about compositor composition
+# (blur behind the bar, layer stacking, frame pacing).
 
 # --- state, all owned by this file ------------------------------------------
 

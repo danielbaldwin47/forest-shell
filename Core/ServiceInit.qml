@@ -28,7 +28,12 @@ Singleton {
     //
     //   report("deferred", [SystemTray, Weather]);
     function initDeferred() {
-        report("deferred", []);
+        // ShellState is not a service, but it has the same problem: it is
+        // written by whoever touches it and read by nobody at startup, so
+        // without a name here its file would only be read the first time some
+        // surface happened to ask (#33). Deferred, because nothing in it is
+        // worth a frame.
+        report("deferred", [ShellState]);
     }
 
     function report(stage: string, services) {

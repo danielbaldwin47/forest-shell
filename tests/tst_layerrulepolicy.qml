@@ -97,6 +97,19 @@ TestCase {
         verify(!policy.accepted(127, "ok"));
     }
 
+    function test_the_two_log_lines_cannot_be_mistaken_for_each_other() {
+        // The whole of #78's second half. A harness reads these, and so does
+        // whoever is looking at a startup log wondering whether the bar's blur
+        // is on — so the refusal must not contain the success line as a
+        // substring, and neither must be writable without an answer to check.
+        const good = policy.applied("blur 1", "forest-shell:bar");
+        const bad = policy.complaint("blur 1", "forest-shell:bar", 0,
+                                     "invalid field blur: missing a value", "");
+        verify(good.indexOf("blur 1") >= 0);
+        verify(good.indexOf("forest-shell:bar") >= 0);
+        verify(bad.indexOf(good) < 0, "a refusal reads as a success line: " + bad);
+    }
+
     function test_the_complaint_carries_the_rule_and_hyprlands_own_words() {
         // A warning that says only "layerrule failed" costs the next session
         // the same hour this one cost: the compositor's reply is the whole

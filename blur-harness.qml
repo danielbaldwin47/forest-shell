@@ -44,6 +44,18 @@ ShellRoot {
             return true;
         }
 
+        /// Push two rules in the same tick, which is what a settings change
+        /// that moves two keys does — and the case one `Process` would drop
+        /// half of, since giving it a second command kills the first mid-run.
+        /// Two IPC calls from a script would not do it: the first `hyprctl` is
+        /// finished long before a second round trip arrives.
+        function pushTwo(ruleA: string, namespaceA: string,
+                         ruleB: string, namespaceB: string): bool {
+            Compositor.setLayerRule(ruleA, namespaceA);
+            Compositor.setLayerRule(ruleB, namespaceB);
+            return true;
+        }
+
         /// Flip `bar.surface.blur`, exactly as the settings window does:
         /// `bar.surface` is one grouped key, so the knob is a read-modify-write
         /// of the group and never a bare `{ blur: … }`, which would drop every

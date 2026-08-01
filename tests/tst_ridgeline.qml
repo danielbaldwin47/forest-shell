@@ -91,8 +91,6 @@ TestCase {
         compare(strata[11].extent, ridge.minHeight);
         compare(strata[11].haze, ridge.minHaze);
         verify(strata[11].extent > 0);
-
-        ridge.cells = sample;
     }
 
     function test_nothing_focused_yet_picks_no_winner() {
@@ -106,8 +104,6 @@ TestCase {
         compare(strata[0].active, false);
         compare(strata[0].extent, ridge.occupiedHeight);
         compare(strata[1].extent, ridge.emptyHeight);
-
-        ridge.cells = sample;
     }
 
     function test_ids_are_carried_through_untouched() {
@@ -115,8 +111,6 @@ TestCase {
         // hands back with `cellActivated`.
         ridge.cells = [{ id: "scratch", occupied: true, active: true }];
         compare(ridge.strata[0].id, "scratch");
-
-        ridge.cells = sample;
     }
 
     function test_the_row_reserves_the_tallest_form_it_could_draw() {
@@ -150,8 +144,6 @@ TestCase {
         ridge.cells = [];
         compare(ridge.strata.length, 0);
         compare(ridge.implicitWidth, 0);
-
-        ridge.cells = sample;
     }
 
     // --- the row as an item tree, not as an encoding -------------------------
@@ -287,8 +279,6 @@ TestCase {
         compare(shrunk.length, 3);
         compare(drawn(shrunk[0]).height, ridge.activeHeight);
         compare(drawn(shrunk[2]).height, ridge.occupiedHeight - ridge.falloff);
-
-        ridge.cells = sample;
     }
 
     function test_a_live_workspace_past_the_slot_range_still_draws() {
@@ -309,7 +299,5 @@ TestCase {
         compare(built.length, 6);
         compare(drawn(built[5]).height, ridge.activeHeight);
         compare(built[5].modelData.id, 9);
-
-        ridge.cells = sample;
     }
 }

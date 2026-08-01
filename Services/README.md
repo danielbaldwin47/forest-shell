@@ -29,7 +29,9 @@ Three of them exist so far:
   but QtQuick so `tests/` can reach them; the singleton next door is the wiring.
 - `Compositor/` (#35, #42) — the Hyprland facade. It reports workspaces as
   plain data, focuses them, owns the one `hyprctl` call the shell makes — the
-  layer rule that asks Hyprland to blur behind the bar — and answers the two
+  layer rule that asks Hyprland to blur behind the bar, spelled and read by
+  `LayerRulePolicy.qml` on the QtQuick-only side of the line so `tests/` can
+  reach both halves of it (#78) — and answers the two
   questions the popups ask: the focused screen, and whether that screen is
   showing a fullscreen window. Everything above it speaks in workspace ids and
   intentions, which is what keeps Hyprland's two awkward facts (empty

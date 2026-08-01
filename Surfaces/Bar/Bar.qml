@@ -51,6 +51,19 @@ Scope {
     //
     // Deferred: the first frame does not wait on a subprocess. The shell must
     // look correct with blur off, so there is nothing to gate on it.
+    //
+    // #78 asked whether a runtime `hyprctl keyword layerrule` is the right
+    // mechanism at all, or whether this belongs in the user's own
+    // hyprland.conf. Kept, for two reasons and one caveat. The transport is not
+    // in doubt — a windowrule pushed the identical way applied instantly on the
+    // same machine, and the layerrule now returns `ok` rather than the syntax
+    // error it returned for four PRs. And a line in hyprland.conf cannot be a
+    // setting: #10 ships this as a Bar-tab toggle and #22 §7 makes it the first
+    // rung of the `reducedEffects` ladder, both of which have to take effect
+    // while the shell is running. The caveat is that "accepted" and "blurred"
+    // are still different claims: #78 could not tell them apart on a machine
+    // where blur renders nowhere, so the first session on a machine where it
+    // does is what confirms the rule has the effect it asks for.
     Connections {
         target: Startup
         function onDeferredStage() { bar.applyBlurRule(); }

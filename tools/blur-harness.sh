@@ -11,14 +11,17 @@
 # reply. So the checks below are as much about the *reporting* as the rule:
 #
 #   1. the facade is talking to a compositor at all
-#   2. the bar's own rule is accepted on startup
+#   2. the bar's own rule is accepted on startup, and the old syntax is not
 #   3. a rule Hyprland refuses is logged as a warning, not as a success
-#   4. flipping `bar.surface.blur` pushes the opposing rule, live
+#   4. changing `bar.surface.blur` pushes the opposing rule, live
+#   5. two rules pushed at once are both applied, not one killing the other
 #
 # What it still cannot check is the picture: whether the bar looks blurred. That
 # is the screenshot gap in the header of tools/nested-session.sh, and #78's "by
-# eye" acceptance is the part of it a real session still owns. What is checked
-# here is everything up to the compositor's own `ok`.
+# eye" acceptance is the part of it a real session still owns — the more so
+# after #78's own comment found that blur renders nowhere on the test machine,
+# so even a real session there answered "is the rule taken", not "is it blurred".
+# What is checked here is everything up to the compositor's own `ok`.
 set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
@@ -100,6 +103,17 @@ fi
 
 # 4 — the setting is live, and off is a rule of its own now that 0.5x has no
 # clearing verb.
+#
+# Driven through `Config.set` rather than by editing settings.json, which is
+# how #78 words it ("flipping `bar.surface.blur` in `settings.json` changes it
+# live"), because a hand edit changes nothing in a running shell **at all**:
+# measured here, the shell holds zero inotify descriptors, so no external edit
+# to settings.json is ever noticed, while an independent Quickshell FileView
+# watching the same file in the same nested session sees every one of them.
+# That is a bug in Core/ and a separate ticket — Core/Paths.qml calls
+# settings.json "hand-editable, hot-reloaded" — and not one this ticket can
+# quietly fix under a blur rule. What is checked here is everything downstream
+# of the config having changed: the key dispatch, the bar, the rule.
 ipc layerrule blur false > /dev/null
 if nested_await "$NESTED_SHELL_LOG" "compositor: layerrule blur 0 → $NAMESPACE" 10; then
     nested_pass "turning bar.surface.blur off pushed blur 0, accepted"
@@ -113,6 +127,18 @@ if await_count "layerrule blur 1 → $NAMESPACE" $((was + 1)) 10; then
     nested_pass "turning it back on pushed blur 1 again, accepted"
 else
     nested_fail "turning blur back on did not re-push the rule"
+fi
+
+# 5 — two rules in the air at once. There is one hyprctl process, and handing
+# it a second command while the first is running kills the first mid-run, which
+# would drop a rule exactly as silently as the bug this ticket is about. Both
+# replies have to come back.
+ipc layerrule pushTwo "blur 0" "forest-shell:probe-a" "blur 1" "forest-shell:probe-b" > /dev/null
+if await_count "layerrule blur 0 → forest-shell:probe-a" 1 10 \
+   && await_count "layerrule blur 1 → forest-shell:probe-b" 1 10; then
+    nested_pass "two rules pushed together were both applied and both reported"
+else
+    nested_fail "a rule pushed while another was in flight was lost — $(grep -a 'layerrule' "$NESTED_SHELL_LOG" | tail -3)"
 fi
 
 echo

@@ -68,17 +68,6 @@ Item {
         return out;
     }
 
-    /// What a form reads while it is being taken off the end of a shorter row —
-    /// see the delegate below. An empty form, which is the nearest thing to
-    /// "not there" this widget draws.
-    readonly property var vanishing: ({
-        id: null,
-        active: false,
-        occupied: false,
-        extent: root.emptyHeight,
-        haze: root.emptyHaze
-    })
-
     // --- geometry ------------------------------------------------------------
     // These mirror the decided defaults in `bar.ridgeline`
     // (Core/SettingsSchema.qml), which is the one place the widget-kit rule
@@ -172,9 +161,16 @@ Item {
                 // `strata` shortens before the Repeater has dropped the
                 // delegates the shorter row no longer has, so an out-of-range
                 // index is a state a delegate really passes through on its way
-                // out rather than a fault. It is given a form to draw for that
-                // instant, not an undefined to throw on.
-                readonly property var modelData: root.strata[index] ?? root.vanishing
+                // out rather than a fault. It is given an empty form to draw
+                // for that instant — the nearest thing to "not there" this
+                // widget has — rather than an undefined to throw on.
+                readonly property var modelData: root.strata[index] ?? ({
+                    id: null,
+                    active: false,
+                    occupied: false,
+                    extent: root.emptyHeight,
+                    haze: root.emptyHaze
+                })
 
                 width: root.vertical ? root.extent : root.unitWidth
                 height: root.vertical ? root.unitWidth : root.extent

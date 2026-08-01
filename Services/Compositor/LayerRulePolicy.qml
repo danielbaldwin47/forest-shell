@@ -39,7 +39,7 @@ QtObject {
 
     /// A namespace is a name, not a pattern — anchored, so `forest-shell:bar`
     /// does not also claim a future `forest-shell:barsomething`, and escaped,
-    /// so the `.`s and `-`s a namespace may hold match themselves.
+    /// so a `.` in a namespace matches a dot rather than anything at all.
     function literal(text: string): string {
         return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
@@ -47,6 +47,15 @@ QtObject {
     /// Did the compositor apply it? `ok` is the whole of Hyprland's yes.
     function accepted(exitCode: int, output: string): bool {
         return exitCode === 0 && String(output ?? "").trim() === "ok";
+    }
+
+    /// What to say when it did. Both log lines live here rather than at the
+    /// call site because a harness asserts on them (tools/blur-harness.sh) —
+    /// and because the pair is the decision: for four PRs the shell wrote this
+    /// line unconditionally, which is what made a refusal read as evidence of
+    /// working.
+    function applied(rule: string, namespace: string): string {
+        return "layerrule " + rule + " → " + namespace;
     }
 
     /// What to say when it did not. The compositor's own words are the

@@ -22,8 +22,10 @@
 #
 #   source "$(dirname "${BASH_SOURCE[0]}")/nested-session.sh"
 #   nested_up
+#   NESTED_SHELL_ENV=("XDG_CONFIG_HOME=$NESTED_WORK/config")  # optional
 #   nested_shell lock-harness.qml 'harness: lock harness ready'
 #   nested_ipc some target call
+#   nested_hyprctl dispatch workspace 2       # drive the compositor, not the shell
 #   nested_await "$NESTED_SHELL_LOG" 'the line that proves it' 15
 #
 # Sourcing installs an EXIT trap that tears the nested session down. See
@@ -178,10 +180,6 @@ EOF
     nested_note "nested compositor on $NESTED_DISPLAY"
 }
 
-## Run a shell entry point inside the nested session, and wait for it to say it
-## is up. The ready pattern is the caller's, because only the caller knows what
-## its entry point logs — shell.qml's staged startup (#32) ends with a line, and
-## a purpose-built harness root should log one of its own.
 ## Run something as a client of the nested session.
 ##
 ## Both variables are load-bearing, and the signature is the subtler of the two.
@@ -206,6 +204,10 @@ nested_hyprctl() {
     nested_env hyprctl "$@" 2>&1
 }
 
+## Run a shell entry point inside the nested session, and wait for it to say it
+## is up. The ready pattern is the caller's, because only the caller knows what
+## its entry point logs — shell.qml's staged startup (#32) ends with a line, and
+## a purpose-built harness root should log one of its own.
 nested_shell() {
     local entry="${1:-shell.qml}" ready="${2:-}" timeout="${3:-20}"
     NESTED_SHELL_LOG="$NESTED_WORK/shell.log"

@@ -169,22 +169,30 @@ Singleton {
                         + rule + " for " + namespace);
             return;
         }
-        // One process, so a rule pushed while another is in flight waits rather
-        // than replacing it mid-run — two arriving together is what a settings
-        // toggle looks like from here.
-        root.pendingRules = root.pendingRules.concat([{ rule: rule, namespace: namespace }]);
+        // Queued rather than pushed, because there is one Process and giving it
+        // a new `command` while it is running **kills the run in progress**:
+        // measured, the first command's output never arrives and only the
+        // second one's does. A rule silently discarded that way is exactly the
+        // failure this ticket is about, and two rules at once is not exotic —
+        // it is what flipping `bar.surface.blur` while `reducedEffects` also
+        // changes looks like from here.
+        root.queuedRules = root.queuedRules.concat([{ rule: rule, namespace: namespace }]);
         root.pushNextRule();
     }
 
-    property var pendingRules: []
+    /// Rules waiting on the one `hyprctl` process. Empty almost always: rules
+    /// are pushed at startup and on a settings change, never per frame.
+    property var queuedRules: []
 
+    /// Hand the next queued rule to the process, if it is free. Called on
+    /// arrival and again when a run finishes, which is what drains the queue.
     function pushNextRule() {
-        if (keyword.running || root.pendingRules.length === 0)
+        if (keyword.running || root.queuedRules.length === 0)
             return;
-        const next = root.pendingRules[0];
-        root.pendingRules = root.pendingRules.slice(1);
+        const next = root.queuedRules[0];
+        root.queuedRules = root.queuedRules.slice(1);
         keyword.rule = next.rule;
-        keyword.namespace_ = next.namespace;
+        keyword.ruleNamespace = next.namespace;
         keyword.command = layerRules.command(next.rule, next.namespace);
         keyword.running = true;
     }
@@ -197,20 +205,22 @@ Singleton {
         // What is in flight, kept for the log line: the reply arrives long
         // after the call and says nothing about which rule it is answering.
         property string rule: ""
-        property string namespace_: ""
+        property string ruleNamespace: ""
 
         stdout: StdioCollector { id: keywordOut }
         stderr: StdioCollector { id: keywordErr }
 
         // hyprctl exits 0 whether it applied the rule or refused it, so the
         // reply text is the evidence and the exit code only catches a hyprctl
-        // that could not run at all. Both are in `accepted`.
+        // that could not run at all. Both are in `accepted`. Which line is
+        // written, and what it says, is the policy's — a harness reads these,
+        // and a log format nothing owns is one nothing can check.
         onExited: (exitCode, exitStatus) => {
             if (layerRules.accepted(exitCode, keywordOut.text))
-                Logger.log("compositor", "layerrule " + keyword.rule + " → " + keyword.namespace_);
+                Logger.log("compositor", layerRules.applied(keyword.rule, keyword.ruleNamespace));
             else
                 Logger.warn("compositor",
-                            layerRules.complaint(keyword.rule, keyword.namespace_, exitCode,
+                            layerRules.complaint(keyword.rule, keyword.ruleNamespace, exitCode,
                                                  keywordOut.text, keywordErr.text));
             root.pushNextRule();
         }

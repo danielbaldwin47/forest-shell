@@ -43,11 +43,103 @@ QtObject {
     readonly property string versionKey: "settingsVersion"
     readonly property int version: 2
 
+    // --- field tables for the whole-sub-object leaves ------------------------
+    //
+    // A themed group is one leaf so a preset can replace it atomically (#56),
+    // which leaves nowhere for per-key defaults and ranges to live — so they
+    // live here, and `c.shape` turns the table into both (Core/Coerce.qml).
+    //
+    // Every number below is a measured decision from the bar prototype (#10),
+    // not a taste call made at this keyboard. What is *not* here is as
+    // deliberate: no ridgeline shape key (`peaks` and `pills` were built and
+    // rejected — shipping them as settings would ship the rejected designs),
+    // no horizon rule and no workspace id under the active peak (both measured
+    // as not working at a 32px bar).
+
+    readonly property var barSurfaceFields: ({
+        // 86% of `surface` over the wallpaper. Measured 7.12:1 for
+        // text-secondary under the right-hand cluster — the worst case, since
+        // that cluster sits over the brightest part of the sky. The floor is
+        // 0.65: 0.60 measured 4.44:1 and fails the body-text rule (#10).
+        opacity: { def: 0.86, coerce: c.number(0.65, 1.0) },
+        // Blur is the compositor's job — a Hyprland layerrule on this bar's
+        // namespace, which costs the shell nothing per frame. #22 §6 forbids
+        // QML-side full-screen blur outright, and the shell must look correct
+        // with it off.
+        blur: { def: true, coerce: c.boolean },
+        // The brief's pale mist wash, §6.1.
+        mistWash: { def: 0.10, coerce: c.number(0, 0.5) },
+        // "Barely-perceptible top-edge lightening" — the vertical luminance
+        // gradient every board pin has, compressed into 32px.
+        topLight: { def: true, coerce: c.boolean },
+        topLightAmount: { def: 0.05, coerce: c.number(0, 0.4) },
+        // 1px border-subtle bottom hairline: the bar's bottom edge is a
+        // horizon, and the horizon motif wants a line.
+        hairline: { def: true, coerce: c.boolean },
+        // 2-4% monochrome noise kills gradient banding (brief §3.5).
+        grain: { def: 0.03, coerce: c.number(0, 0.1) },
+        // Less translucency as the wallpaper brightens. Off by default, and
+        // costs nothing while off — the wallpaper is not even quantized.
+        adaptiveOpacity: { def: false, coerce: c.boolean }
+    })
+
+    readonly property var barRidgelineFields: ({
+        // Width is the whole ballgame (#10): at w14/gap4 the units read as
+        // receding strata; narrower and it reads as a bar chart, wider and it
+        // reads as a row of buttons. Locked taste call.
+        unitWidth: { def: 14, coerce: c.integer(4, 40) },
+        gap: { def: 4, coerce: c.integer(0, 20) },
+        // Heights: active tallest, occupied falling away by distance, empty at
+        // the vanishing height regardless.
+        activeHeight: { def: 14, coerce: c.integer(2, 48) },
+        occupiedHeight: { def: 9, coerce: c.integer(1, 48) },
+        emptyHeight: { def: 3, coerce: c.integer(0, 48) },
+        falloff: { def: 2, coerce: c.integer(0, 12) },
+        minHeight: { def: 4, coerce: c.integer(0, 48) },
+        // Haze: the same encoding again, in opacity, so distance reads twice.
+        occupiedHaze: { def: 0.62, coerce: c.number(0, 1) },
+        emptyHaze: { def: 0.22, coerce: c.number(0, 1) },
+        hazeFalloff: { def: 0.10, coerce: c.number(0, 1) },
+        minHaze: { def: 0.15, coerce: c.number(0, 1) },
+        // Hyprland destroys empty workspaces, so a fixed slot range is unioned
+        // with whatever live workspaces exist beyond it — otherwise the row
+        // grows and shrinks as you work.
+        slots: { def: 5, coerce: c.integer(1, 20) },
+        // The single-lamplight rule, resolved (#10): amber is reserved for
+        // attention, so the active workspace is teal and the bar at rest
+        // carries no warm element at all. This is the escape hatch for the
+        // other reading, not the default.
+        amberActive: { def: false, coerce: c.boolean }
+    })
+
+    // Which modules the bar carries, in which cluster, in what order. Presence
+    // *is* enablement: there is no separate `enabled` flag, because a module
+    // that is off is a module that is not in a list.
+    //
+    // Unknown names are dropped by the registry with a warning rather than
+    // here: the schema's business is "a list of names", and which names exist
+    // is the bar's (Surfaces/Bar/BarRegistry.qml).
+    //
+    // The consequence of a sparse file: a user who never touched this key picks
+    // up modules that later versions ship, and one who reordered the bar does
+    // not. That is the same trade the whole config makes, and the visible half
+    // is the one worth having.
+    readonly property var barModuleFields: ({
+        left: { def: ["workspaces"], coerce: c.arrayOf(c.string, "bar.modules.left") },
+        center: { def: ["clock"], coerce: c.arrayOf(c.string, "bar.modules.center") },
+        right: { def: [], coerce: c.arrayOf(c.string, "bar.modules.right") }
+    })
+
     readonly property var spec: ({
         appearance: {
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
+            // The one degrade knob (#22 §7): manual, never auto-detected, and
+            // a fully supported look rather than a broken mode. In cost order
+            // it turns off the compositor blur, then decorative effects, then
+            // collapses every transition to a 140ms opacity fade.
+            reducedEffects: { def: false, coerce: c.boolean },
             // Role → colour, read by Core/Theme.qml (#34): an unknown role or
             // an unparseable colour is dropped with a warning rather than
             // painted, because this arrives hand-edited.
@@ -58,9 +150,34 @@ QtObject {
         },
 
         bar: {
-            surface: { def: ({}), coerce: c.object, themed: true },
-            ridgeline: { def: ({}), coerce: c.object, themed: true }
-            // Position, height, module layout land with #35 and #37.
+            // Top horizontal is the v1 bar (#9). Left/right are absent rather
+            // than accepted-and-ignored: the widgets are built axis-agnostic so
+            // a vertical bar can land post-v1 without rewrites, but a position
+            // the shell cannot actually lay out is a dead setting.
+            position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
+            // 32 logical px — 48 device px at the T480's 1.5 scale. 26 crowds
+            // the icons, 36+ reads as a title bar (#10).
+            height: { def: 32, coerce: c.integer(20, 64) },
+            padding: { def: 12, coerce: c.integer(0, 48) },
+            moduleGap: { def: 14, coerce: c.integer(0, 48) },
+
+            // Flush full-width is the default; floating insets the bar into a
+            // rounded slab. The margins and radius only apply while floating.
+            floating: { def: false, coerce: c.boolean },
+            floatMarginH: { def: 12, coerce: c.integer(0, 64) },
+            floatMarginV: { def: 8, coerce: c.integer(0, 64) },
+            floatRadius: { def: 10, coerce: c.integer(0, 32) },
+
+            // The window is never destroyed to hide it (#12 §2, #22 §5) — it
+            // drops its content and keeps a reveal strip.
+            autoHide: { def: false, coerce: c.boolean },
+
+            surface: { def: c.shapeDefaults(schema.barSurfaceFields),
+                       coerce: c.shape(schema.barSurfaceFields, "bar.surface"), themed: true },
+            ridgeline: { def: c.shapeDefaults(schema.barRidgelineFields),
+                         coerce: c.shape(schema.barRidgelineFields, "bar.ridgeline"), themed: true },
+            modules: { def: c.shapeDefaults(schema.barModuleFields),
+                       coerce: c.shape(schema.barModuleFields, "bar.modules") }
         },
 
         launcher: {

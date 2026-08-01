@@ -102,6 +102,23 @@ ShellRoot {
             { label: "stone", role: Theme.accentStone }
         ]
 
+        // The prototype's pinned state — 1, 2, 3 and 5 occupied — so the
+        // falloff is visible without opening windows across a live session.
+        // Clicking a form moves the peak, which is the only way to see that
+        // height and haze animate rather than snap.
+        property int ridgeActive: 3
+        readonly property var ridgeOccupied: [1, 2, 3, 5]
+        readonly property var ridgeCells: {
+            const out = [];
+            for (let id = 1; id <= 5; id++)
+                out.push({
+                    id: id,
+                    occupied: win.ridgeOccupied.indexOf(id) >= 0,
+                    active: id === win.ridgeActive
+                });
+            return out;
+        }
+
         readonly property var oversampleCases: [
             { label: "oversample 1.0", value: 1.0 },
             { label: "oversample 3.0 — the default", value: 3.0 }
@@ -341,6 +358,37 @@ ShellRoot {
                         }
 
                         Item { Layout.fillWidth: true }
+                    }
+                }
+
+                // --- the ridgeline ------------------------------------------------
+                CapsLabel { text: "RIDGELINE — HEIGHT AND HAZE BOTH FALL AWAY FROM THE PEAK" }
+
+                Note {
+                    Layout.fillWidth: true
+                    text: "Click a form to move the peak. The active workspace is teal on "
+                          + "purpose: amber is reserved for attention, so the bar at rest "
+                          + "carries no warm element and amber anywhere on it means "
+                          + "something wants you."
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 32
+                    color: Theme.surface
+                    radius: Theme.radiusMd
+
+                    Ridgeline {
+                        anchors.left: parent.left
+                        anchors.leftMargin: Theme.space3
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        cells: win.ridgeCells
+                        color: Theme.textSecondary
+                        activeColor: Theme.accentPrimary
+                        easingCurve: Theme.fogEase
+
+                        onCellActivated: id => win.ridgeActive = id
                     }
                 }
 

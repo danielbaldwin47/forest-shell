@@ -58,6 +58,25 @@ TestCase {
         verify(store.leafAt(settings.spec, "system.nightLight.enabled") !== null);
     }
 
+    function test_notification_timeouts_are_settings_exposed_per_urgency() {
+        // #42 asks for urgency-aware timeouts with authored defaults, reachable
+        // from settings.json. Critical's 0 is the load-bearing one: it means
+        // "until acknowledged", not "no timeout configured".
+        compare(store.leafAt(settings.spec, "notifications.timeouts.low").def, 5000);
+        compare(store.leafAt(settings.spec, "notifications.timeouts.normal").def, 8000);
+        compare(store.leafAt(settings.spec, "notifications.timeouts.critical").def, 0);
+    }
+
+    function test_per_app_rules_are_a_free_form_map() {
+        // The keys are the user's apps, so the spec table cannot name them:
+        // this is one leaf holding an object, not a section (#42, #43).
+        const leaf = store.leafAt(settings.spec, "notifications.apps");
+        verify(leaf !== null, "notifications.apps is not a leaf");
+        compare(leaf.def, ({}));
+        // Not theme-flagged: a preset has no business silencing an app (#56).
+        compare(leaf.themed, undefined);
+    }
+
     function test_a_fresh_config_is_only_a_version_stamp() {
         // Sparse: defaults are never written out, so a first-run file is one
         // line and every later default change reaches the user.
@@ -90,7 +109,7 @@ TestCase {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.
         for (const section of ["launcher", "controlCenter", "dashboard",
-                               "notifications", "weatherTime"]) {
+                               "weatherTime"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
             compare(store.leafPathsUnder(settings.spec, section).length, 0);
         }

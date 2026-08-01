@@ -18,6 +18,7 @@ import QtQuick
 import Quickshell
 import qs.Core
 import qs.Surfaces.Background
+import qs.Surfaces.Notifications
 
 ShellRoot {
     id: shell
@@ -35,10 +36,21 @@ ShellRoot {
     Background {}
 
     // Stage two. Surfaces and services added by later tickets hook in here.
+    //
+    // Notification popups are a surface, not a service: the daemon behind them
+    // starts with ServiceInit below, and these are the windows it draws into
+    // (#42). Held in a LazyLoader so their per-screen layer surfaces are created
+    // after the first frame rather than on the way to it.
+    LazyLoader {
+        id: notificationPopups
+        component: Popups {}
+    }
+
     Connections {
         target: Startup
         function onDeferredStage() {
             ServiceInit.initDeferred();
+            notificationPopups.active = true;
         }
     }
 }

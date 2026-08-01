@@ -77,7 +77,41 @@ QtObject {
 
         notifications: {
             // DND is not here — it is situational, so it is state (#21).
-            // Timeouts, history and per-app rules land with #42 and #43.
+
+            // How long a popup stays up, per urgency, in ms. 0 means "until it
+            // is dismissed", which is why critical is 0: an urgent notification
+            // that times out unseen is the one failure the level exists to
+            // prevent (#42).
+            timeouts: {
+                low: { def: 5000, coerce: c.integer(0, 300000) },
+                normal: { def: 8000, coerce: c.integer(0, 300000) },
+                critical: { def: 0, coerce: c.integer(0, 300000) }
+            },
+
+            // Off by default: nearly every client passes a hardcoded 5000 it
+            // never thought about, so honouring it would make the table above
+            // dead settings. On, a client's own expire-timeout hint wins.
+            honorClientTimeout: { def: false, coerce: c.boolean },
+
+            // Popups on screen at once. Past this the oldest leaves early to
+            // make room — it is already in history, and an uncapped stack is a
+            // screen a notification storm can fill top to bottom.
+            maxVisible: { def: 3, coerce: c.integer(1, 10) },
+
+            // Rows kept in the history the center renders (#43). 0 turns
+            // history off, which is also "do not write my notifications to
+            // disk".
+            historyLimit: { def: 100, coerce: c.integer(0, 1000) },
+
+            // App key → "normal" | "silent" (history only) | "blocked"
+            // (nothing at all). The app key is the desktop entry where a client
+            // supplies one and the app name otherwise, lower-cased.
+            //
+            // A free-form object rather than a section because the keys are the
+            // user's apps, not ours: the spec table cannot name them ahead of
+            // time. Enforced by Services/Notifications (#42); the three-way UI
+            // that writes it arrives with the settings window (#43, #55).
+            apps: { def: ({}), coerce: c.object }
         },
 
         weatherTime: {

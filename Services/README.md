@@ -6,6 +6,7 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | Directory | Owns |
 | --- | --- |
 | `Compositor/` | The Hyprland facade — the only place `hyprctl` / dispatch lives |
+| `Notifications/` | The freedesktop daemon, popups, DND, history and per-app rules |
 | `Media/` | MPRIS players, volume, sinks |
 | `Hardware/` | Battery, brightness, sensors, input devices |
 | `Networking/` | Wi-Fi, Bluetooth, VPN |
@@ -20,5 +21,13 @@ Two rules that hold across all of them:
 - A service that only one surface uses is not a service: it lives with its
   surface (`Surfaces/Drawers/Launcher/services/`), not here.
 
-Empty until the first service ticket lands; the directory exists so nothing has
-to move when it does.
+Two of them exist so far, both landed by the notification ticket (#42):
+
+- `Notifications/` — `NotificationServer`, the live popup list, do-not-disturb
+  and the persisted history. The rules about an arriving notification are split
+  into `NotificationPolicy.qml`, which imports nothing but QtQuick so `tests/`
+  can reach them; the singleton next door is the wiring.
+- `Compositor/` — deliberately thin, and only as wide as its callers: the
+  focused screen and whether that screen is showing a fullscreen window. The
+  workspace model and `dispatch()` land with the ridgeline (#35) and the shared
+  drawer window (#38).

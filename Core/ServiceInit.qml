@@ -14,6 +14,7 @@ pragma Singleton
 // line to the right list and touch nothing else.
 import QtQuick
 import Quickshell
+import qs.Services.Notifications
 
 Singleton {
     id: root
@@ -34,7 +35,13 @@ Singleton {
         // without a name here its file would only be read the first time some
         // surface happened to ask (#33). Deferred, because nothing in it is
         // worth a frame.
-        report("deferred", [ShellState]);
+        //
+        // Notifications is the archetype the list exists for: it is a daemon.
+        // Nothing references it until something has already been notified, so
+        // without this line the shell would take the bus name only once a
+        // surface asked — which is to say, after the first notification had
+        // already been lost (#42).
+        report("deferred", [ShellState, Notifications]);
     }
 
     function report(stage: string, services) {

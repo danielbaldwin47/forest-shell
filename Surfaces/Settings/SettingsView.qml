@@ -21,6 +21,7 @@ import QtQuick.Layouts
 import Quickshell
 import qs.Core
 import qs.Widgets
+import qs.Surfaces.Settings.Controls
 import qs.Surfaces.Settings.Tabs
 
 FloatingWindow {
@@ -132,13 +133,7 @@ FloatingWindow {
                                       Theme.accentDeep.b, 0.18)
                             : (railHover.hovered ? Theme.surfaceOverlay : "transparent")
 
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: Theme.motionFast
-                                easing.type: Easing.Bezier
-                                easing.bezierCurve: Theme.fogEase
-                            }
-                        }
+                        FogColorBehavior on color {}
 
                         Rectangle {
                             width: Theme.rail
@@ -230,7 +225,15 @@ FloatingWindow {
 
     // Which page an id opens. Held here rather than in the tab registry because
     // the registry is pure data that tests load, and a page imports Quickshell.
+    //
+    // `built` is asked first so that "which tabs are implemented" is answered in
+    // one place: the registry marks the rail with the same flag, and a page
+    // added here without flipping it — or the reverse — would show a built tab
+    // with a placeholder in it, or a placeholder with no dot beside it.
     function pageFor(id: string): Component {
+        if (!(tabs.find(id)?.built ?? false))
+            return placeholderPage;
+
         switch (id) {
         case "appearance": return appearancePage;
         case "bar": return barPage;

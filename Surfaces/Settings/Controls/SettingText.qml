@@ -45,13 +45,7 @@ Rectangle {
     border.color: !root.valid ? Theme.accentEmber
                               : (field.activeFocus ? Theme.borderStrong : Theme.borderSubtle)
 
-    Behavior on border.color {
-        ColorAnimation {
-            duration: Theme.motionFast
-            easing.type: Easing.Bezier
-            easing.bezierCurve: Theme.fogEase
-        }
-    }
+    FogColorBehavior on border.color {}
 
     function commitText(): void {
         if (root.valid && field.text !== root.configured)

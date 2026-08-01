@@ -129,6 +129,41 @@ TestCase {
         compare(surface.bottomHairline, true);
     }
 
+    function test_moving_one_knob_writes_only_that_knob() {
+        // A themed group is one key, so the resolved value is always the whole
+        // group — and writing all of it back would freeze every knob the user
+        // never touched at whatever the default was that day. Only what differs
+        // goes in the file; the coercer merges the rest back on read (#21).
+        const values = store.resolve(settings.spec, {}).values;
+        values.bar.surface.opacity = 0.7;
+
+        const out = store.serialize(settings.spec, values, {});
+        compare(Object.keys(out.bar.surface).length, 1);
+        compare(out.bar.surface.opacity, 0.7);
+
+        // And it round-trips: the knobs that were left out come back.
+        const again = store.resolve(settings.spec, out).values.bar.surface;
+        compare(again.opacity, 0.7);
+        compare(again.grain, 0.03);
+    }
+
+    function test_a_group_back_at_its_defaults_leaves_the_file() {
+        const raw = { bar: { surface: { opacity: 0.7 } } };
+        const values = store.resolve(settings.spec, raw).values;
+        values.bar.surface.opacity = 0.86;
+
+        compare(store.serialize(settings.spec, values, raw).bar, undefined);
+    }
+
+    function test_a_group_keeps_keys_written_by_a_newer_shell() {
+        const raw = { bar: { surface: { sheen: 3 } } };
+        const values = store.resolve(settings.spec, raw).values;
+
+        const out = store.serialize(settings.spec, values, raw);
+        compare(out.bar.surface.sheen, 3);
+        compare(out.bar.surface.opacity, undefined);
+    }
+
     function test_bar_opacity_cannot_be_set_below_the_contrast_floor() {
         // Not taste: secondary text over the brightest wallpaper measures
         // 4.44:1 at 0.60, under the design system's 4.5:1 body floor (#10).

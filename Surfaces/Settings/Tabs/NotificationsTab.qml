@@ -32,18 +32,11 @@ TabPage {
 
     SectionHeader { text: "Per-app rules" }
 
-    Text {
-        Layout.fillWidth: true
+    SectionNote {
         visible: page.apps.length === 0
-        text: "No rules yet. Every app is normal until told otherwise — name one below to "
+        note: "No rules yet. Every app is normal until told otherwise — name one below to "
               + "change that. Once the notification service lands, every app that has ever "
               + "notified will be listed here without being named."
-        color: Theme.textMuted
-        font.family: Theme.fontUi
-        font.pointSize: Theme.pt(11.5)
-        lineHeight: Theme.lineHeightBody
-        lineHeightMode: Text.ProportionalHeight
-        wrapMode: Text.WordWrap
     }
 
     Repeater {

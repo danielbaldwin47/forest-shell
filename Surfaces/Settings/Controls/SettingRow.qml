@@ -18,7 +18,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Core
-import qs.Widgets
 
 RowLayout {
     id: root
@@ -43,7 +42,7 @@ RowLayout {
     // landed yet does both halves of the job: the control stops taking input,
     // and this greys the row. Greyed and inert beats hidden — the key exists in
     // the file, and the tab is the place that says so.
-    opacity: root.enabled ? 1 : 0.45
+    opacity: root.enabled ? 1 : Theme.opacityInert
 
     ColumnLayout {
         Layout.fillWidth: true
@@ -59,27 +58,21 @@ RowLayout {
             elide: Text.ElideRight
         }
 
-        Text {
-            Layout.fillWidth: true
+        SectionNote {
             visible: root.hint !== ""
-            text: root.hint
-            color: Theme.textMuted
-            font.family: Theme.fontUi
-            font.pointSize: Theme.pt(11.5)
-            lineHeight: Theme.lineHeightBody
-            lineHeightMode: Text.ProportionalHeight
-            wrapMode: Text.WordWrap
+            note: root.hint
         }
     }
 
     // Reset. Present in the layout only when it has something to undo, so rows
     // do not shift sideways as values change — it is the icon's opacity that
     // moves, not the geometry.
-    Item {
-        implicitWidth: 20
-        implicitHeight: 20
+    IconButton {
+        name: "rotate-ccw"
+        size: 14
         opacity: (root.binding?.modified ?? false) ? 1 : 0
         visible: opacity > 0
+        onTapped: root.binding?.resetValue()
 
         Behavior on opacity {
             NumberAnimation {
@@ -88,16 +81,6 @@ RowLayout {
                 easing.bezierCurve: Theme.fogEase
             }
         }
-
-        Icon {
-            anchors.centerIn: parent
-            name: "rotate-ccw"
-            size: 14
-            color: resetHover.hovered ? Theme.accentPrimary : Theme.textMuted
-        }
-
-        HoverHandler { id: resetHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: root.binding?.resetValue() }
     }
 
     Item {

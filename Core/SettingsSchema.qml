@@ -77,6 +77,12 @@ QtObject {
 
     /// Rounded-top strata (locked in #10); `peaks` and `pills` were built and
     /// rejected, so they are not offered.
+    ///
+    /// The same line is why the ridgeline group has no horizon rule and no
+    /// workspace-id toggle: the prototype had both on sliders, #10 decided
+    /// against both, and a decided-against variant is not a setting any more
+    /// than `pills` is. What ships as settings is the *chosen* parameters —
+    /// including, explicitly, whether the active workspace is teal or amber.
     readonly property var ridgeShapes: ["strata"]
 
     /// #10 resolved the active workspace to teal, reserving amber for
@@ -141,21 +147,38 @@ QtObject {
                  themed: true, knobs: knobs };
     }
 
-    function coercerFor(knob) {
+    /// What kind of knob this is: `choice`, `range` or `toggle`. One answer,
+    /// read by both things that need it — the coercer below, and the control
+    /// the settings GUI renders (Surfaces/Settings/Controls/KnobRow.qml). Asking
+    /// the same three questions in two places is how a knob ends up validated
+    /// as one thing and edited as another.
+    ///
+    /// Integer or real is not part of the kind: it follows from the default,
+    /// since a knob whose default is `14` is not one anybody wants at `14.3`.
+    function knobKind(knob): string {
         if (knob.values !== undefined)
-            return c.oneOf(knob.values);
+            return "choice";
         if (knob.min !== undefined || knob.max !== undefined)
-            return Number.isInteger(knob.def) ? c.integer(knob.min, knob.max)
-                                              : c.number(knob.min, knob.max);
+            return "range";
         if (typeof knob.def === "boolean")
-            return c.boolean;
-        if (typeof knob.def === "string")
-            return c.string;
+            return "toggle";
         // Reached only by a knob line that declares nothing this understands —
         // a schema bug, and one worth failing loudly on rather than admitting
         // an uncoerced value into a hand-edited file.
-        throw new Error("SettingsSchema: cannot derive a coercer for knob "
+        throw new Error("SettingsSchema: cannot tell what kind of knob this is: "
                         + JSON.stringify(knob));
+    }
+
+    function coercerFor(knob) {
+        switch (knobKind(knob)) {
+        case "choice":
+            return c.oneOf(knob.values);
+        case "range":
+            return Number.isInteger(knob.def) ? c.integer(knob.min, knob.max)
+                                              : c.number(knob.min, knob.max);
+        default:
+            return c.boolean;
+        }
     }
 
     readonly property var spec: ({
@@ -231,6 +254,7 @@ QtObject {
                 occupiedHeight: { def: 9, min: 2, max: 24, label: "Occupied height" },
                 emptyHeight: { def: 3, min: 0, max: 24, label: "Empty height" },
                 heightFalloff: { def: 2, min: 0, max: 8, label: "Height falloff" },
+                activeHaze: { def: 1.0, min: 0, max: 1, label: "Active haze" },
                 occupiedHaze: { def: 0.62, min: 0, max: 1, label: "Occupied haze" },
                 emptyHaze: { def: 0.22, min: 0, max: 1, label: "Empty haze" },
                 hazeFalloff: { def: 0.10, min: 0, max: 1, label: "Haze falloff" },

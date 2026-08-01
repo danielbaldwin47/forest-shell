@@ -10,7 +10,6 @@
 // user happened to tap in, and two identical toolsets would diff.
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import qs.Core
 
 Flow {
@@ -34,42 +33,13 @@ Flow {
     Repeater {
         model: root.choices
 
-        Rectangle {
-            id: chip
-
+        Chip {
             required property string modelData
 
-            readonly property bool on: root.selected.indexOf(chip.modelData) >= 0
-
-            implicitWidth: chipLabel.implicitWidth + Theme.space3 * 2
-            implicitHeight: 26
-            radius: Theme.radiusSm
-
-            color: chip.on ? Theme.accentDeep
-                           : (chipHover.hovered ? Theme.surfaceOverlay : Theme.surfaceRaised)
-            border.width: Theme.hairline
-            border.color: chip.on ? Theme.accentDeep : Theme.borderSubtle
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.motionFast
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
-
-            Text {
-                id: chipLabel
-
-                anchors.centerIn: parent
-                text: chip.modelData
-                color: chip.on ? Theme.textPrimary : Theme.textMuted
-                font.family: Theme.fontMono
-                font.pointSize: Theme.pt(11)
-            }
-
-            HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: root.toggle(chip.modelData) }
+            label: modelData
+            mono: true   // a tool name is a literal passed to the CLI
+            selected: root.selected.indexOf(modelData) >= 0
+            onTapped: root.toggle(modelData)
         }
     }
 }

@@ -76,7 +76,14 @@ Singleton {
     readonly property color accentWarm: palette.accentWarm         // lamplight — attention, rare
     readonly property color accentEmber: palette.accentEmber       // campfire — urgent
     readonly property color accentLichen: palette.accentLichen     // success
-    readonly property color accentStone: palette.accentStone       // dormant
+    readonly property color accentStone: palette.accentStone
+
+    /// Whether a value is a colour literal the palette will accept. Exposed
+    /// because the settings GUI has to answer the same question *before* a
+    /// write (#54): an override the palette drops is only a line on stderr, and
+    /// a field that lets you type one is worse than one that says no. Two
+    /// copies of the pattern would silently drift, so there is one.
+    function isColor(value: var): bool { return tokenData.isColor(value); }       // dormant
 
     // --- material ------------------------------------------------------------
     readonly property color fogWash: palette.fogWash
@@ -97,6 +104,7 @@ Singleton {
     readonly property alias space10: tokenData.space10
     readonly property alias hairline: tokenData.hairline
     readonly property alias rail: tokenData.rail
+    readonly property alias opacityInert: tokenData.opacityInert
 
     // --- radii ---------------------------------------------------------------
     readonly property alias radiusSm: tokenData.radiusSm

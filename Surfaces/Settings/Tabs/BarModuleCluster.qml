@@ -122,53 +122,23 @@ ColumnLayout {
                         { icon: "arrow-down", delta: 1 }
                     ]
 
-                    Item {
-                        id: nudge
-
+                    IconButton {
                         required property var modelData
 
-                        readonly property bool possible: {
-                            const target = moduleRow.index + nudge.modelData.delta;
+                        name: modelData.icon
+                        color: Theme.textSecondary
+                        possible: {
+                            const target = moduleRow.index + modelData.delta;
                             return target >= 0 && target < root.modules.length;
                         }
-
-                        implicitWidth: 22
-                        implicitHeight: 22
-                        opacity: nudge.possible ? 1 : 0.25
-
-                        Icon {
-                            anchors.centerIn: parent
-                            name: nudge.modelData.icon
-                            size: 13
-                            color: nudgeHover.hovered ? Theme.accentPrimary : Theme.textSecondary
-                        }
-
-                        HoverHandler {
-                            id: nudgeHover
-                            enabled: nudge.possible
-                            cursorShape: Qt.PointingHandCursor
-                        }
-
-                        TapHandler {
-                            enabled: nudge.possible
-                            onTapped: root.move(moduleRow.index, nudge.modelData.delta)
-                        }
+                        onTapped: root.move(moduleRow.index, modelData.delta)
                     }
                 }
 
-                Item {
-                    implicitWidth: 22
-                    implicitHeight: 22
-
-                    Icon {
-                        anchors.centerIn: parent
-                        name: "x"
-                        size: 13
-                        color: removeHover.hovered ? Theme.accentEmber : Theme.textMuted
-                    }
-
-                    HoverHandler { id: removeHover; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: root.remove(moduleRow.index) }
+                IconButton {
+                    name: "x"
+                    hoverColor: Theme.accentEmber
+                    onTapped: root.remove(moduleRow.index)
                 }
             }
         }

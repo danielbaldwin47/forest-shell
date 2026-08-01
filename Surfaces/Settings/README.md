@@ -9,8 +9,12 @@ builds the other six).
 | `SettingsWindow.qml` | Singleton: who may open the window, and the `settings` IPC target |
 | `SettingsView.qml` | The `FloatingWindow` — tab rail on the left, one page on the right |
 | `SettingsTabs.qml` | The ten tabs as pure data. No Quickshell imports; `tests/` loads it |
-| `Controls/` | The config-bound form kit |
-| `Tabs/` | One file per implemented tab |
+| `Controls/` | The config-bound form kit, shared by every tab |
+| `Tabs/` | The implemented tabs, plus the parts only one tab uses |
+
+`BarModuleCluster.qml` and `NotificationRuleRow.qml` live in `Tabs/` rather than
+`Controls/` on purpose: each is one tab's editor for one key, not a form control
+anything else could hold. A second caller is what moves a file up to `Controls/`.
 
 ## Opening it
 

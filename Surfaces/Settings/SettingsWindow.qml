@@ -33,7 +33,10 @@ import qs.Core
 Singleton {
     id: root
 
-    readonly property bool open: loader.active
+    /// Whether the window exists. Named `shown` and not `open` because `open()`
+    /// is one of the verbs below, and a property and a function that differ only
+    /// by parentheses are a bug waiting for a hurried reader.
+    readonly property bool shown: loader.active
 
     /// Opens the window, or brings the caller's tab to the front of one that is
     /// already open. An unknown tab id opens the first tab rather than failing:
@@ -41,8 +44,21 @@ Singleton {
     /// a worse answer than the wrong one.
     function show(tab: string): void {
         loader.active = true;
-        if (tab !== "" && loader.item)
+        if (!loader.item)
+            return;
+
+        if (tab !== "")
             loader.item.selectTab(tab);
+
+        // Pressing the gear with the window already open but buried under other
+        // windows has to bring it forward, or it reads as a dead button. Asking
+        // is all the shell may do — whether the request is honoured is the
+        // compositor's call, and under Hyprland's focus rules it may not be.
+        // Guarded because raising a toplevel is not part of the surface's
+        // documented API; where it is absent this degrades to what it did
+        // before, which is nothing.
+        if (typeof loader.item.requestActivate === "function")
+            loader.item.requestActivate();
     }
 
     function close(): void {
@@ -50,7 +66,7 @@ Singleton {
     }
 
     function toggle(): void {
-        if (root.open)
+        if (root.shown)
             close();
         else
             show("");

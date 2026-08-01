@@ -38,15 +38,16 @@ SettingRow {
         knob: root.knob
     }
 
-    // One of three, decided by what the knob declares — the same three cases
-    // `SettingsSchema.coercerFor` derives its coercer from.
+    // One of three. The schema decides which — the same call its coercer is
+    // derived from — so a knob cannot be validated as one kind and edited as
+    // another.
     Loader {
         sourceComponent: {
-            if ((knobBinding.spec?.values ?? null) !== null)
-                return choiceControl;
-            if (knobBinding.spec?.min !== undefined || knobBinding.spec?.max !== undefined)
-                return sliderControl;
-            return switchControl;
+            switch (Config.schema.knobKind(knobBinding.spec)) {
+            case "choice": return choiceControl;
+            case "range": return sliderControl;
+            default: return switchControl;
+            }
         }
     }
 

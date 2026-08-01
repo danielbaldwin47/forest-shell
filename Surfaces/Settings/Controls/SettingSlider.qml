@@ -81,13 +81,7 @@ Item {
             x: (groove.width - width) * root.fraction
             color: drag.active || hover.hovered ? Theme.accentPrimary : Theme.textSecondary
 
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.motionFast
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
+            FogColorBehavior on color {}
         }
 
         HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }

@@ -77,8 +77,13 @@ QtObject {
 
     /// Writes the value. False when the config engine refused it — an unknown
     /// key, a value the coercer will not take, or a `settings.json` that cannot
-    /// currently be read (a half-typed hand edit). Controls surface that rather
-    /// than snapping back silently.
+    /// currently be read (a half-typed hand edit).
+    ///
+    /// Controls do not handle that return, and do not need to: what they draw is
+    /// `value`, which is a binding on the config, so a refused write leaves the
+    /// control exactly where it was. There is no local state to snap back from.
+    /// The refusal itself is a warning from the config engine, and the notice
+    /// the *user* gets is #42's job, not a per-control one.
     function commit(next: var): bool {
         if (root.knob === "")
             return Config.set(root.path, next);

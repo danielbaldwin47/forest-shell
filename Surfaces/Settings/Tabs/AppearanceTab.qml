@@ -16,7 +16,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Core
-import qs.Widgets
 import qs.Surfaces.Settings.Controls
 
 TabPage {
@@ -60,18 +59,11 @@ TabPage {
 
     SectionHeader { text: "Palette overrides" }
 
-    Text {
-        Layout.fillWidth: true
-        text: "One colour per role, over the current mode. Blank means the shipped value. "
+    SectionNote {
+        note: "One colour per role, over the current mode. Blank means the shipped value. "
               + "`#RGB`, `#RRGGBB` and `#AARRGGBB` are the forms Qt parses — a name like "
               + "\"teal\" is refused, so an override cannot smuggle in a hue the palette "
               + "never sampled."
-        color: Theme.textMuted
-        font.family: Theme.fontUi
-        font.pointSize: Theme.pt(11.5)
-        lineHeight: Theme.lineHeightBody
-        lineHeightMode: Text.ProportionalHeight
-        wrapMode: Text.WordWrap
     }
 
     Repeater {
@@ -116,26 +108,16 @@ TabPage {
                 placeholder: "default"
                 // Empty is how a role is *un*-overridden — the key leaves the
                 // map rather than being set to a colour that does not parse.
-                validate: text => text === "" || page.isColor(text)
+                validate: text => text === "" || Theme.isColor(text)
                 submit: text => text === "" ? roleBinding.removeKnob()
                                             : roleBinding.commit(text)
             }
 
-            Item {
-                implicitWidth: 20
-                implicitHeight: 20
-                opacity: roleBinding.value === undefined ? 0 : 1
-                visible: opacity > 0
-
-                Icon {
-                    anchors.centerIn: parent
-                    name: "x"
-                    size: 13
-                    color: clearHover.hovered ? Theme.accentEmber : Theme.textMuted
-                }
-
-                HoverHandler { id: clearHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: roleBinding.removeKnob() }
+            IconButton {
+                name: "x"
+                hoverColor: Theme.accentEmber
+                visible: roleBinding.value !== undefined
+                onTapped: roleBinding.removeKnob()
             }
         }
     }
@@ -143,12 +125,4 @@ TabPage {
     /// The token set, from the resolved palette — a role that is not in it does
     /// not exist (Core/Tokens.qml).
     readonly property var roles: Object.keys(Theme.palette)
-
-    /// The same three forms `Tokens.isColor` accepts, checked before the write
-    /// rather than after: an override the palette drops is only a line on
-    /// stderr, and a settings window that lets you type one is worse than one
-    /// that says no.
-    function isColor(text: string): bool {
-        return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text);
-    }
 }

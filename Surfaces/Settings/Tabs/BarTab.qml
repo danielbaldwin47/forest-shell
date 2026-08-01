@@ -16,7 +16,6 @@
 // is no live preview, which is what the note at the top says.
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import qs.Core
 import qs.Surfaces.Settings.Controls
 
@@ -73,18 +72,11 @@ TabPage {
 
     SectionHeader { text: "Surface" }
 
-    Text {
-        Layout.fillWidth: true
-        text: "Fill opacity stops at 0.65 on purpose. Secondary text over the brightest "
+    SectionNote {
+        note: "Fill opacity stops at 0.65 on purpose. Secondary text over the brightest "
               + "wallpaper measured 7.12:1 at 0.86 and 4.44:1 at 0.60 — below the design "
               + "system's 4.5:1 floor — so the range ends where the bar stops being "
               + "readable, not where it stops looking good."
-        color: Theme.textMuted
-        font.family: Theme.fontUi
-        font.pointSize: Theme.pt(11.5)
-        lineHeight: Theme.lineHeightBody
-        lineHeightMode: Text.ProportionalHeight
-        wrapMode: Text.WordWrap
     }
 
     Repeater {
@@ -100,18 +92,11 @@ TabPage {
 
     SectionHeader { text: "Ridgeline" }
 
-    Text {
-        Layout.fillWidth: true
-        text: "Workspaces as receding strata: height and haze both fall away with distance "
+    SectionNote {
+        note: "Workspaces as receding strata: height and haze both fall away with distance "
               + "from the active one, and that double encoding is what reads as a range "
               + "instead of a progress bar. Unit width decides it — much wider and the "
               + "units read as buttons."
-        color: Theme.textMuted
-        font.family: Theme.fontUi
-        font.pointSize: Theme.pt(11.5)
-        lineHeight: Theme.lineHeightBody
-        lineHeightMode: Text.ProportionalHeight
-        wrapMode: Text.WordWrap
     }
 
     Repeater {
@@ -127,18 +112,11 @@ TabPage {
 
     SectionHeader { text: "Modules" }
 
-    Text {
-        Layout.fillWidth: true
-        text: "Three ordered clusters. A module is on when it is in one of them, so "
+    SectionNote {
+        note: "Three ordered clusters. A module is on when it is in one of them, so "
               + "removing it here parks it in the pool rather than losing it. `status` is "
               + "one module and not four — network, bluetooth, volume and mic are a single "
               + "quiet icon group."
-        color: Theme.textMuted
-        font.family: Theme.fontUi
-        font.pointSize: Theme.pt(11.5)
-        lineHeight: Theme.lineHeightBody
-        lineHeightMode: Text.ProportionalHeight
-        wrapMode: Text.WordWrap
     }
 
     BarModuleCluster { cluster: "left"; label: "Left"; pool: page.pool }

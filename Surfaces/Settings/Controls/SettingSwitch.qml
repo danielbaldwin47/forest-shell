@@ -25,13 +25,7 @@ Rectangle {
     border.color: root.checked ? Theme.accentDeep
                                : (hover.hovered ? Theme.borderStrong : Theme.borderSubtle)
 
-    Behavior on color {
-        ColorAnimation {
-            duration: Theme.motionFast
-            easing.type: Easing.Bezier
-            easing.bezierCurve: Theme.fogEase
-        }
-    }
+    FogColorBehavior on color {}
 
     Rectangle {
         id: dot
@@ -51,13 +45,7 @@ Rectangle {
             }
         }
 
-        Behavior on color {
-            ColorAnimation {
-                duration: Theme.motionFast
-                easing.type: Easing.Bezier
-                easing.bezierCurve: Theme.fogEase
-            }
-        }
+        FogColorBehavior on color {}
     }
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }

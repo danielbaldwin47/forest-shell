@@ -64,64 +64,22 @@ RowLayout {
                 { value: "blocked", label: "Blocked" }
             ]
 
-            Rectangle {
-                id: chip
-
+            Chip {
                 required property var modelData
 
-                readonly property bool selected: root.rule === chip.modelData.value
-
-                implicitWidth: chipLabel.implicitWidth + Theme.space3 * 2
-                implicitHeight: 26
-                radius: Theme.radiusSm
-                color: chip.selected ? Theme.accentDeep
-                                     : (chipHover.hovered ? Theme.surfaceOverlay
-                                                          : Theme.surfaceRaised)
-                border.width: Theme.hairline
-                border.color: chip.selected ? Theme.accentDeep : Theme.borderSubtle
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: Theme.motionFast
-                        easing.type: Easing.Bezier
-                        easing.bezierCurve: Theme.fogEase
-                    }
-                }
-
-                Text {
-                    id: chipLabel
-
-                    anchors.centerIn: parent
-                    text: chip.modelData.label
-                    color: chip.selected ? Theme.textPrimary : Theme.textSecondary
-                    font.family: Theme.fontUi
-                    font.pointSize: Theme.pt(11.5)
-                }
-
-                HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
-
-                TapHandler {
-                    onTapped: chip.modelData.value === "normal"
-                        ? root.binding.removeKnob()
-                        : root.binding.commit(chip.modelData.value)
-                }
+                label: modelData.label
+                selected: root.rule === modelData.value
+                onTapped: modelData.value === "normal"
+                    ? root.binding.removeKnob()
+                    : root.binding.commit(modelData.value)
             }
         }
     }
 
-    Item {
-        implicitWidth: 20
-        implicitHeight: 20
+    IconButton {
+        name: "x"
+        hoverColor: Theme.accentEmber
         visible: root.dismissable && root.rule === "normal"
-
-        Icon {
-            anchors.centerIn: parent
-            name: "x"
-            size: 13
-            color: dismissHover.hovered ? Theme.accentEmber : Theme.textMuted
-        }
-
-        HoverHandler { id: dismissHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: root.dismissed() }
+        onTapped: root.dismissed()
     }
 }

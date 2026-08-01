@@ -18,10 +18,9 @@ import qs.Surfaces.Settings.Controls
 TabPage {
     id: page
 
-    /// The ticket that builds this tab, for the line that says so.
-    property string ticket: "#55"
-
-    blurb: "Not built yet — " + page.ticket + ". The keys below are live: edit "
+    // Every unbuilt tab is #55's — the ticket list is not a per-tab property,
+    // because there is exactly one ticket and it builds all six.
+    blurb: "Not built yet — #55. The keys below are live: edit "
            + "`~/.config/forest-shell/settings.json` and the shell picks them up as you "
            + "save."
 

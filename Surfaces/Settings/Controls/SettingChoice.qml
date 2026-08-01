@@ -32,54 +32,13 @@ RowLayout {
     Repeater {
         model: root.options
 
-        Rectangle {
-            id: chip
-
+        Chip {
             required property var modelData
 
-            readonly property bool selected: root.binding.value === chip.modelData.value
-            readonly property bool available: chip.modelData.enabled ?? true
-
-            implicitWidth: chipLabel.implicitWidth + Theme.space4 * 2
-            implicitHeight: 28
-            radius: Theme.radiusSm
-            opacity: chip.available ? 1 : 0.4
-
-            color: chip.selected ? Theme.accentDeep
-                                 : (chipHover.hovered && chip.available ? Theme.surfaceOverlay
-                                                                        : Theme.surfaceRaised)
-            border.width: Theme.hairline
-            border.color: chip.selected ? Theme.accentDeep : Theme.borderSubtle
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.motionFast
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
-
-            Text {
-                id: chipLabel
-
-                anchors.centerIn: parent
-                text: chip.modelData.label ?? chip.modelData.value
-                color: chip.selected ? Theme.textPrimary : Theme.textSecondary
-                font.family: Theme.fontUi
-                font.pointSize: Theme.pt(12)
-                font.weight: chip.selected ? Theme.weightMedium : Theme.weightRegular
-            }
-
-            HoverHandler {
-                id: chipHover
-                enabled: chip.available
-                cursorShape: Qt.PointingHandCursor
-            }
-
-            TapHandler {
-                enabled: chip.available
-                onTapped: root.binding.commit(chip.modelData.value)
-            }
+            label: modelData.label ?? modelData.value
+            selected: root.binding.value === modelData.value
+            available: modelData.enabled ?? true
+            onTapped: root.binding.commit(modelData.value)
         }
     }
 }

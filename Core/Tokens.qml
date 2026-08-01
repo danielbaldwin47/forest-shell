@@ -163,6 +163,14 @@ QtObject {
     readonly property int hairline: 1   // rules and borders
     readonly property int rail: 2       // the accent rail on a selected row
 
+    // --- state ---------------------------------------------------------------
+    // One opacity for "here, readable, and not available" — a control whose
+    // feature has not landed, an option that cannot be chosen yet, an action
+    // that would do nothing. Greying is the shell's whole vocabulary for it:
+    // nothing is ever hidden to say it is unavailable, because a control that
+    // appears later is a worse surprise than one that waits in place (#54).
+    readonly property real opacityInert: 0.4
+
     // --- radii ---------------------------------------------------------------
     // Nothing sharp (brief §5).
     readonly property int radiusSm: 6     // buttons, chips

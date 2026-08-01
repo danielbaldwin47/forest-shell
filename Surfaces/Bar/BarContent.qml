@@ -2,9 +2,9 @@
 // order `bar.modules` names (#35).
 //
 // This is the whole of the bar's layout. Everything about *which* modules and
-// *where* is config (Core/SettingsSchema.qml → Surfaces/Bar/BarSpec.qml), so
-// re-ordering the bar never touches QML — and because Config hot-reloads, the
-// list re-evaluates and the clusters re-fill while the shell runs.
+// *where* is config (Core/SettingsSchema.qml → BarSpec.qml), so re-ordering the
+// bar never touches QML — and because Config hot-reloads, the list
+// re-evaluates and the clusters re-fill while the shell runs.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -15,58 +15,50 @@ Item {
     required property var barScreen
     required property bool vertical
 
-    property int padding: 12
-    property int moduleGap: 14
+    // Required rather than defaulted: the shipped values are the schema's
+    // (`bar.padding`, `bar.moduleGap`), and restating them here would give
+    // them two homes.
+    required property int padding
+    required property int moduleGap
 
-    readonly property var layout: ModuleRegistry.spec.modules(Config.values.bar.modules)
+    readonly property QtObject spec: BarSpec {}
+    readonly property var layout: content.spec.modules(Config.values.bar.modules)
 
-    BarCluster {
-        id: leading
-
-        moduleIds: content.layout.left
+    // Everything the three clusters share. What is left at each call site is
+    // the only thing that actually differs between them: which end they sit
+    // at, and which list they draw.
+    component Cluster: BarCluster {
         barScreen: content.barScreen
         vertical: content.vertical
         spacing: content.moduleGap
+
+        height: content.vertical ? implicitHeight : content.height
+        width: content.vertical ? content.width : implicitWidth
+    }
+
+    Cluster {
+        moduleIds: content.layout.left
 
         anchors.left: content.vertical ? undefined : parent.left
         anchors.top: content.vertical ? parent.top : undefined
         anchors.verticalCenter: content.vertical ? undefined : parent.verticalCenter
         anchors.horizontalCenter: content.vertical ? parent.horizontalCenter : undefined
         anchors.margins: content.padding
-
-        height: content.vertical ? implicitHeight : parent.height
-        width: content.vertical ? parent.width : implicitWidth
     }
 
-    BarCluster {
-        id: middle
-
+    Cluster {
         moduleIds: content.layout.center
-        barScreen: content.barScreen
-        vertical: content.vertical
-        spacing: content.moduleGap
 
         anchors.centerIn: parent
-
-        height: content.vertical ? implicitHeight : parent.height
-        width: content.vertical ? parent.width : implicitWidth
     }
 
-    BarCluster {
-        id: trailing
-
+    Cluster {
         moduleIds: content.layout.right
-        barScreen: content.barScreen
-        vertical: content.vertical
-        spacing: content.moduleGap
 
         anchors.right: content.vertical ? undefined : parent.right
         anchors.bottom: content.vertical ? parent.bottom : undefined
         anchors.verticalCenter: content.vertical ? undefined : parent.verticalCenter
         anchors.horizontalCenter: content.vertical ? parent.horizontalCenter : undefined
         anchors.margins: content.padding
-
-        height: content.vertical ? implicitHeight : parent.height
-        width: content.vertical ? parent.width : implicitWidth
     }
 }

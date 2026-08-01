@@ -21,6 +21,10 @@ import qs.Core
 Singleton {
     id: root
 
+    // Held only for the consistency check below — the registry is an id →
+    // component map, and callers that want the spec instantiate their own
+    // rather than reaching through this one for knobs it has nothing to do
+    // with.
     readonly property QtObject spec: BarSpec {}
 
     readonly property var components: ({

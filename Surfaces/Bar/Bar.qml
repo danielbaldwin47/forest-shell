@@ -64,7 +64,8 @@ Scope {
             readonly property bool atBottom: window.cfg.position === "bottom"
             readonly property bool vertical: window.cfg.position === "left"
                                           || window.cfg.position === "right"
-            readonly property var surfaceKnobs: ModuleRegistry.spec.surface(window.cfg.surface)
+            readonly property QtObject spec: BarSpec {}
+            readonly property var surfaceKnobs: window.spec.surface(window.cfg.surface)
 
             screen: modelData
 

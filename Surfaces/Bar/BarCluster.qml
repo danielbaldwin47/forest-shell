@@ -16,7 +16,9 @@ Item {
     required property var barScreen
     required property bool vertical
 
-    property int spacing: 14
+    // Required rather than defaulted to 14: the shipped value is the schema's
+    // (`bar.moduleGap`), and restating it here would give it two homes.
+    required property int spacing
 
     implicitWidth: cluster.vertical ? column.implicitWidth : row.implicitWidth
     implicitHeight: cluster.vertical ? column.implicitHeight : row.implicitHeight

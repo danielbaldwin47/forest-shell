@@ -2,10 +2,19 @@
 // row of workspaces into a receding range.
 //
 // The shape is settled and not a knob — **strata**, w14/gap4, the taste call
-// #10 locked after putting peaks and pills on the same screen. Peaks lose the
-// flat top edge that makes strata read as strata, and pills are the generic
-// idiom forest-shell is choosing not to ship; neither is a preference the
-// config should carry.
+// #35 locked after #10 put peaks, pills and strata on the same screen. Peaks
+// lose the flat top edge that makes strata read as strata, and pills are the
+// generic idiom forest-shell is choosing not to ship; neither is a preference
+// the config should carry, and neither is the width.
+//
+// w14/gap4 is a decision *against* the prototype's own leaning, recorded here
+// so nobody re-derives it: #10 found w14 reads as blocks — "a row of buttons,
+// not a ridge" — and that at w9 gap3 "the horizontal rhythm outruns the
+// vertical and the range appears". #35 locked w14 anyway. The prototype was
+// judging the ridge alone at full attention; the bar is judged at a glance,
+// beside a clock, where the narrower units read as a chart rather than as
+// ground. A locked call is exactly the kind that has to survive somebody
+// finding the sheet later and thinking it was a mistake.
 //
 // Height *and* opacity encode distance from the active workspace: active
 // tallest and fully present, occupied neighbours progressively shorter and
@@ -26,19 +35,27 @@ QtObject {
     /// row with no near edge for everything else to fall away from.
     readonly property real activeHaze: 1.0
 
+    /// The locked width and rhythm. Constants, not knobs, for the reason the
+    /// header gives: this is the taste call, and a config key would quietly
+    /// re-open it.
+    readonly property int unitWidth: 14
+    readonly property int gap: 4
+
     /// `bar.ridgeline` → the resolved knob set. Defaults are #10's measured
     /// sheet: 14/9/3 px with a 2px falloff, haze 1.0/0.62/0.22.
+    ///
+    /// The locked pair above is folded in here rather than read separately, so
+    /// a caller has one object to bind against and cannot half-configure a
+    /// ridge.
     function knobs(value) {
         const raw = k.group(value);
         return {
+            unitWidth: spec.unitWidth,
+            gap: spec.gap,
+
             // How many workspaces the ridge always shows, whether or not they
             // exist (Services/Compositor/WorkspaceSlots.qml unions the rest in).
-            slots: k.integer(raw.slots, 5, 1, 20),
-
-            // w14/gap4 — at w9 the horizontal rhythm outruns the vertical and
-            // the range reads as a chart; at w6 it reads as spikes.
-            unitWidth: k.integer(raw.unitWidth, 14, 2, 48),
-            gap: k.integer(raw.gap, 4, 0, 24),
+            slotCount: k.integer(raw.slotCount, 5, 1, 20),
 
             activeHeight: k.integer(raw.activeHeight, 14, 2, 64),
             occupiedHeight: k.integer(raw.occupiedHeight, 9, 1, 64),

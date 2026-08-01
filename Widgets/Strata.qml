@@ -62,6 +62,15 @@ Item {
     /// what a workspace is.
     signal activated(int index)
 
+    /// The one transition, declared once and instantiated per animated
+    /// property. A `Behavior` needs its own animation object, so this is what
+    /// "the same curve everywhere" looks like when it cannot be shared.
+    component Settle: NumberAnimation {
+        duration: root.animationMs
+        easing.type: root.animationCurve.length > 0 ? Easing.BezierSpline : Easing.InOutQuad
+        easing.bezierCurve: root.animationCurve
+    }
+
     readonly property int count: root.model ? root.model.length : 0
     readonly property int run: count > 0 ? count * unitWidth + (count - 1) * gap : 0
     readonly property int cross: {
@@ -112,27 +121,15 @@ Item {
 
                 Behavior on height {
                     enabled: root.animationMs > 0
-                    NumberAnimation {
-                        duration: root.animationMs
-                        easing.type: root.animationCurve.length > 0 ? Easing.BezierSpline : Easing.InOutQuad
-                        easing.bezierCurve: root.animationCurve
-                    }
+                    Settle {}
                 }
                 Behavior on width {
                     enabled: root.animationMs > 0
-                    NumberAnimation {
-                        duration: root.animationMs
-                        easing.type: root.animationCurve.length > 0 ? Easing.BezierSpline : Easing.InOutQuad
-                        easing.bezierCurve: root.animationCurve
-                    }
+                    Settle {}
                 }
                 Behavior on opacity {
                     enabled: root.animationMs > 0
-                    NumberAnimation {
-                        duration: root.animationMs
-                        easing.type: root.animationCurve.length > 0 ? Easing.BezierSpline : Easing.InOutQuad
-                        easing.bezierCurve: root.animationCurve
-                    }
+                    Settle {}
                 }
                 Behavior on color {
                     enabled: root.animationMs > 0

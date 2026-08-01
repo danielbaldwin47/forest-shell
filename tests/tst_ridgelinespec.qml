@@ -22,8 +22,8 @@ TestCase {
     // --- knobs ---------------------------------------------------------------
 
     function test_the_shipped_ridge_is_the_measured_one() {
-        // #10's sheet: strata w14/gap4, heights 14/9/3, 2px falloff,
-        // haze 1.0/0.62/0.22.
+        // #35's locked call over #10's sheet: strata w14/gap4, heights 14/9/3,
+        // 2px falloff, haze 1.0/0.62/0.22.
         compare(knobs.unitWidth, 14);
         compare(knobs.gap, 4);
         compare(knobs.activeHeight, 14);
@@ -33,13 +33,20 @@ TestCase {
         compare(spec.activeHaze, 1.0);
         compare(knobs.occupiedHaze, 0.62);
         compare(knobs.emptyHaze, 0.22);
-        compare(knobs.slots, 5);
+        compare(knobs.slotCount, 5);
+    }
+
+    function test_the_width_and_the_rhythm_are_not_config() {
+        // The locked taste call (#35). A knob here would quietly re-open the
+        // decision the ticket closed — so the config cannot reach it.
+        compare(spec.knobs({ unitWidth: 9, gap: 3 }).unitWidth, 14);
+        compare(spec.knobs({ unitWidth: 9, gap: 3 }).gap, 4);
     }
 
     function test_hand_edited_knobs_are_salvaged() {
-        compare(spec.knobs({ unitWidth: "20" }).unitWidth, 20);
-        compare(spec.knobs({ unitWidth: "wide" }).unitWidth, 14);
-        compare(spec.knobs({ slots: 0 }).slots, 1);
+        compare(spec.knobs({ slotCount: "8" }).slotCount, 8);
+        compare(spec.knobs({ slotCount: "many" }).slotCount, 5);
+        compare(spec.knobs({ slotCount: 0 }).slotCount, 1);
         compare(spec.knobs({ occupiedHaze: 4 }).occupiedHaze, 1.0);
         compare(spec.knobs(null).activeHeight, 14);
     }

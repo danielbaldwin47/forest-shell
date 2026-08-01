@@ -33,7 +33,7 @@ Item {
 
     /// The row, live. Re-evaluates on `Compositor.revision`, which moves only
     /// on real compositor events — nothing here polls.
-    readonly property var cells: Compositor.workspaceRow(root.screen, root.knobs.slots)
+    readonly property var cells: Compositor.workspaceRow(root.screen, root.knobs.slotCount)
 
     /// The same row with the falloff applied and a colour per stratum. Teal
     /// marks where you are; everything else is ordinary chrome. Distance is

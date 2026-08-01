@@ -35,10 +35,13 @@ Item {
         precision: SystemClock.Minutes
     }
 
+    // Sizes go through `font.pointSize` and `Theme.pt`, like every other text
+    // node in the shell: `font.pixelSize` is an int, and the type scale has
+    // half-pixel steps it cannot express (Core/Tokens.qml).
     component Face: Text {
         color: Theme.textPrimary
         font.family: Theme.fontDisplay
-        font.pixelSize: 14
+        font.pointSize: Theme.pt(14)
         font.weight: Theme.weightDisplay
     }
 
@@ -55,7 +58,7 @@ Item {
             text: root.dateText
             color: Theme.textMuted
             font.family: Theme.fontUi
-            font.pixelSize: 12
+            font.pointSize: Theme.pt(12)
             font.weight: Theme.weightRegular
         }
 

@@ -78,7 +78,7 @@ ShellRoot {
 
         function ridgeRow(active, occupied) {
             const live = occupied.map(id => ({ id: id, windows: 1 }));
-            const cells = win.ridgeSlots.cells(win.ridgeKnobs.slots, live, active);
+            const cells = win.ridgeSlots.cells(win.ridgeKnobs.slotCount, live, active);
             return win.ridgeSpec.strata(cells, win.ridgeKnobs);
         }
 

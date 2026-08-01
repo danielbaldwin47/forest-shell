@@ -19,6 +19,13 @@ import QtQuick
 import qs.Core
 import qs.Services.Compositor
 import qs.Widgets
+// Own directory, explicitly — `WorkspaceSlots` lives next door and there is no
+// implicit sibling resolution to lean on. A file Quickshell loads by URL is
+// read through its interceptor rather than off disk, so neither the containing
+// directory nor `import "."` offers up its siblings; the `qs.` module is the
+// only handle on them. See the note in BarContent.qml for why that module has
+// to be spoken for from inside the import graph as well.
+import qs.Surfaces.Bar.Modules
 
 Ridgeline {
     id: root

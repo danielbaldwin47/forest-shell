@@ -15,6 +15,14 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Core
+// Nothing below names a type from `Modules/`, and the import still has to be
+// here. Quickshell turns a directory into a `qs.` module only when it walks an
+// import naming it, and that walk happens once, before any Loader runs — so a
+// directory reached exclusively by URL, as `Modules/` is by the Loader further
+// down, never becomes a module at all. A module that loads a sibling then finds
+// its own directory does not exist and drops out of the bar with a warning.
+// This line is what puts `Modules/` in front of the scanner (#73).
+import qs.Surfaces.Bar.Modules
 
 Item {
     id: root

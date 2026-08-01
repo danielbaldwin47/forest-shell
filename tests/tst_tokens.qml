@@ -141,6 +141,35 @@ TestCase {
         compare(tokens.palette(true, null).bgBase, "#0b100d");
     }
 
+    // --- fog, veil -----------------------------------------------------------
+
+    function test_the_fog_is_a_wash_not_a_dim() {
+        // Brief §3.1: a scrim reads as pale mist, not as black at 50%. The
+        // colour is the mist and the opacity is what keeps it a wash.
+        // The mist is a colour *role* — it recolours with the palette like
+        // every other one — and the opacity is what keeps it a wash.
+        compare(tokens.dark.fogWash, "#beced1");
+        compare(tokens.fogWashOpacity, 0.10);
+        verify(tokens.fogWashOpacity < 0.25);
+    }
+
+    function test_the_fog_pulse_thickens_the_same_fog() {
+        // A refusal thickens the mist for a moment (#30's failure UX). Opacity
+        // only — the blur never animates (#8) — and it has to be a visible step
+        // up from resting without becoming a dim.
+        verify(tokens.fogPulseOpacity > tokens.fogWashOpacity);
+        verify(tokens.fogPulseOpacity < 0.5);
+    }
+
+    function test_the_veil_runs_dark_at_the_bottom() {
+        // Brief §3.2: every pin is dark at the bottom and bright at the top,
+        // and the veil is that gradient. Inverting it would light the surface
+        // from below, which is the one thing the board never does.
+        verify(tokens.veilBottom > tokens.veilTop);
+        for (const alpha of [tokens.veilTop, tokens.veilBottom])
+            verify(alpha >= 0 && alpha <= 1, alpha + " is not an alpha");
+    }
+
     // --- spacing, radii ------------------------------------------------------
 
     function test_spacing_is_a_4px_grid() {

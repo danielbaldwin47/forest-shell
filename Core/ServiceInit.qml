@@ -14,6 +14,7 @@ pragma Singleton
 // line to the right list and touch nothing else.
 import QtQuick
 import Quickshell
+import qs.Services.Notifications
 import qs.Services.Compositor
 
 Singleton {
@@ -36,11 +37,17 @@ Singleton {
         // surface happened to ask (#33). Deferred, because nothing in it is
         // worth a frame.
         //
+        // Notifications is the archetype the list exists for: it is a daemon.
+        // Nothing references it until something has already been notified, so
+        // without this line the shell would take the bus name only once a
+        // surface asked — which is to say, after the first notification had
+        // already been lost (#42).
+        //
         // Compositor is here because the bar's Hyprland layerrule has to be
         // pushed whether or not anything on the bar is currently reading
         // workspaces — a bar carrying only a clock would otherwise never
         // construct the facade, and would sit unblurred (#35).
-        report("deferred", [ShellState, Compositor]);
+        report("deferred", [ShellState, Notifications, Compositor]);
     }
 
     function report(stage: string, services) {

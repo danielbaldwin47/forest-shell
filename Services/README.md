@@ -20,5 +20,12 @@ Two rules that hold across all of them:
 - A service that only one surface uses is not a service: it lives with its
   surface (`Surfaces/Drawers/Launcher/services/`), not here.
 
-Empty until the first service ticket lands; the directory exists so nothing has
-to move when it does.
+`Compositor/Compositor.qml` is the first of them (#35). It reports workspaces as
+plain data, focuses them, and owns the one `hyprctl` call the shell makes — the
+layer rule that asks Hyprland to blur behind the bar. Everything above it speaks
+in workspace ids and intentions, which is what keeps Hyprland's two awkward
+facts (empty workspaces do not exist; window counts are a stale snapshot until
+you ask again) in one file.
+
+The rest are empty until their ticket lands; the directories exist so nothing
+has to move when they do.

@@ -86,6 +86,69 @@ TestCase {
         compare(out.settingsVersion, 2);
     }
 
+    // --- the bar section (#35) ----------------------------------------------
+
+    function test_the_bar_defaults_are_the_decided_ones() {
+        // #10's resolution table. If one of these changes, the decision
+        // changed — this is not a formatting preference.
+        const bar = store.defaults(settings.spec).bar;
+        compare(bar.position, "top");
+        compare(bar.height, 32);
+        compare(bar.padding, 12);
+        compare(bar.moduleGap, 14);
+        compare(bar.floating, false);
+        compare(bar.surface.opacity, 0.86);
+        compare(bar.surface.hairline, true);
+        compare(bar.surface.grain, 0.03);
+        compare(bar.surface.adaptiveOpacity, false);
+        compare(bar.ridgeline.unitWidth, 14);
+        compare(bar.ridgeline.gap, 4);
+        compare(bar.ridgeline.activeHeight, 14);
+        compare(bar.ridgeline.occupiedHeight, 9);
+        compare(bar.ridgeline.emptyHeight, 3);
+        compare(bar.ridgeline.falloff, 2);
+        compare(bar.ridgeline.occupiedHaze, 0.62);
+        compare(bar.ridgeline.emptyHaze, 0.22);
+        // Amber is reserved for attention; the active workspace is teal, so
+        // the bar at rest carries no warm element (#10).
+        compare(bar.ridgeline.amberActive, false);
+    }
+
+    function test_a_hand_edited_bar_opacity_cannot_go_illegible() {
+        // The one number in the file that can make the bar unreadable rather
+        // than merely ugly: 20% fill measured 1.25:1 (#10).
+        const values = store.resolve(settings.spec, { bar: { surface: { opacity: 0.2 } } }).values;
+        compare(values.bar.surface.opacity, 0.65);
+    }
+
+    function test_a_partly_written_themed_group_still_resolves_whole() {
+        // A preset or a hand edit may name one key; every consumer still reads
+        // a complete group.
+        const values = store.resolve(settings.spec, { bar: { ridgeline: { slots: 9 } } }).values;
+        compare(values.bar.ridgeline.slots, 9);
+        compare(values.bar.ridgeline.unitWidth, 14);
+        compare(Object.keys(values.bar.ridgeline).length,
+                Object.keys(settings.barRidgelineFields).length);
+    }
+
+    function test_module_order_is_three_lists_of_names() {
+        const modules = store.defaults(settings.spec).bar.modules;
+        compare(modules.left, ["workspaces"]);
+        compare(modules.center, ["clock"]);
+        compare(modules.right, []);
+    }
+
+    function test_a_reordered_bar_writes_back_only_the_module_key() {
+        // Sparse: changing the bar layout must not freeze every other bar
+        // default into the user's file.
+        const values = store.defaults(settings.spec);
+        values.bar.modules.left = ["clock", "workspaces"];
+        const out = store.serialize(settings.spec, values, {});
+        compare(out.bar.modules.left, ["clock", "workspaces"]);
+        compare(out.bar.height, undefined);
+        compare(out.bar.surface, undefined);
+    }
+
     function test_empty_sections_are_sections_and_not_leaves() {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.

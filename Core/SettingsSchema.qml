@@ -248,6 +248,26 @@ QtObject {
                 from: { def: "20:00", coerce: c.string },
                 to: { def: "07:00", coerce: c.string },
                 temperature: { def: 4000, coerce: c.integer(1000, 6500) }
+            },
+
+            // The lock screen (#30, #47). Four keys, and deliberately no fifth:
+            // there is no retry limit, no lockout duration and no failed-attempt
+            // count here, because faillock owns all three and the shell keeps no
+            // counts of its own. The idle timeouts that *reach* the lock are the
+            // idle ladder's (#48), not the lock's.
+            lock: {
+                // Count only, never contents (#9). Off is for a machine that
+                // locks in front of other people.
+                notificationCount: { def: true, coerce: c.boolean },
+                // The system stack, so the lock inherits faillock and whatever
+                // else the distro already trusts, and the shell writes nothing
+                // to /etc. "login" is an Arch/Debian assumption rather than a
+                // law, which is the only reason this is a key at all.
+                pamConfig: { def: "login", coerce: c.string },
+                // Fingerprint is latent: this permits it, fprintd decides. Off
+                // means do not even probe.
+                fingerprint: { def: true, coerce: c.boolean },
+                fingerprintPamConfig: { def: "fprintd", coerce: c.string }
             }
         }
     })

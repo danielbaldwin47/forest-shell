@@ -19,6 +19,7 @@ import QtQuick
 import Quickshell
 import qs.Core
 import qs.Surfaces.Background
+import qs.Surfaces.Lock
 import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
 
@@ -54,7 +55,20 @@ ShellRoot {
         target: Startup
         function onDeferredStage() {
             ServiceInit.initDeferred();
+            lock.active = true;
             notificationPopups.active = true;
         }
+    }
+
+    // The lock (#47). It maps no Wayland surface and opens no PAM conversation
+    // until something locks the session, so what is being deferred here is only
+    // the cost of building it — but it is also what registers the `lock` IPC
+    // target, so it must be up by the time the shell calls itself interactive
+    // (#22 §4). `active` rather than `loading`: interactive is a claim about
+    // what is reachable, and a target still loading in a frame gap is not.
+    LazyLoader {
+        id: lock
+        active: false
+        Lock {}
     }
 }

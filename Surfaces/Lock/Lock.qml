@@ -1,0 +1,97 @@
+// The lock, as the compositor sees it (#30, #47).
+//
+// `WlSessionLock` is real `ext-session-lock-v1`, not a fullscreen window
+// pretending: the compositor stops delivering input to anything else, covers
+// every output itself, and — this is the part a fake overlay can never do —
+// keeps the screen locked if the shell process dies without unlocking. That
+// last property is why `secure` is read-only here and why nothing in this file
+// tries to set it: it is the protocol's guarantee, reported back to us, not a
+// mode we opt into.
+//
+// Everything about *when* to lock lives in Services/System/SessionLock.qml.
+// This file binds to it and reports back what the compositor confirmed, so the
+// idle ladder and the pre-suspend hook (#48) never have to know a lock surface
+// exists.
+//
+// The IPC target is declared here rather than in a central IPC file, per #12 §7
+// — each surface owns its own, named after itself, lowercase.
+pragma ComponentBehavior: Bound
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+import qs.Core
+import qs.Services.System
+
+Scope {
+    id: root
+
+    // One conversation for the whole session, outside the surface component:
+    // the per-screen surfaces come and go with the lock and must not each get
+    // their own PAM context or their own half-typed password.
+    LockAuth { id: pamAuth }
+
+    WlSessionLock {
+        id: sessionLock
+
+        locked: SessionLock.locked
+
+        // The compositor confirming every output is covered. #48's pre-suspend
+        // hook waits on this before releasing its sleep inhibitor — `locked` is
+        // our intent, this is the guarantee — so it is mirrored back onto the
+        // service where that hook can see it without reaching in here.
+        onSecureChanged: {
+            SessionLock.secure = sessionLock.secure;
+            if (sessionLock.secure)
+                Logger.log("lock", "compositor confirms all screens covered");
+        }
+
+        // Opening and closing the PAM conversations is tied to the lock being
+        // raised rather than to any one surface being built, because there are
+        // as many surfaces as there are screens and exactly one conversation.
+        onLockedChanged: {
+            if (sessionLock.locked)
+                pamAuth.begin();
+            else
+                pamAuth.end();
+        }
+
+        WlSessionLockSurface {
+            id: lockSurface
+
+            // Painted before the content loads, so an output that comes up
+            // mid-lock is never a flash of white (the default is white).
+            color: Theme.bgBase
+
+            LockSurface {
+                anchors.fill: parent
+                screen: lockSurface.screen
+                auth: pamAuth
+            }
+        }
+    }
+
+    // Scripting and keybinds:
+    //
+    //   qs ipc call lock lock
+    //   qs ipc call lock isLocked
+    //
+    // A Hyprland bind uses the survival idiom from #12 §7, so the compositor
+    // stays usable when the shell is down:
+    //
+    //   bind = SUPER, L, exec, qs ipc call lock lock || loginctl lock-session
+    //
+    // No `unlock` target, and there will not be one: the only way out of this
+    // surface is through PAM.
+    IpcHandler {
+        target: "lock"
+
+        function lock(): bool {
+            return SessionLock.lock("ipc");
+        }
+
+        function isLocked(): bool {
+            return SessionLock.locked;
+        }
+    }
+}

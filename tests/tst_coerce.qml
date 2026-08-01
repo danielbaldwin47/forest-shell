@@ -91,4 +91,82 @@ TestCase {
         compare(c.array({}), undefined);
     }
 
+    // --- collections ---------------------------------------------------------
+    //
+    // The rule at the top of this file needs a level below the key for these:
+    // one key holds many independent things, and a typo in one of them must not
+    // take the rest of them with it.
+
+    function test_map_of_drops_only_the_bad_entry() {
+        const rules = c.mapOf(c.oneOf(["normal", "silent", "blocked"]));
+        const out = rules({ firefox: "silent", slack: "screaming", mail: "blocked" });
+
+        compare(out.firefox, "silent");
+        compare(out.mail, "blocked");
+        // Not "normal" — an entry that cannot be read is absent, and absent is
+        // what normal already means.
+        compare(out.slack, undefined);
+    }
+
+    function test_map_of_still_rejects_a_non_object() {
+        compare(c.mapOf(c.string)(["silent"]), undefined);
+        compare(c.mapOf(c.string)("silent"), undefined);
+    }
+
+    function test_list_of_drops_only_the_bad_entry() {
+        const modules = c.listOf(c.oneOf(["clock", "battery", "tray"]));
+        const out = modules(["clock", "aquarium", "tray"]);
+
+        compare(out.length, 2);
+        compare(out[0], "clock");
+        compare(out[1], "tray");
+    }
+
+    function test_list_of_still_rejects_a_non_array() {
+        compare(c.listOf(c.string)({ a: "b" }), undefined);
+    }
+
+    // --- theme-flagged groups ------------------------------------------------
+
+    function test_shape_fills_in_the_knobs_a_hand_edit_left_out() {
+        // The trap `shape` exists to close: a themed group is one key, so
+        // without the merge, naming one knob would drop the rest.
+        const surface = c.shape({ opacity: 0.86, blur: true, grain: 0.03 },
+                                { opacity: c.number(0.65, 1) });
+        const out = surface({ opacity: 0.7 });
+
+        compare(out.opacity, 0.7);
+        compare(out.blur, true);
+        compare(out.grain, 0.03);
+    }
+
+    function test_shape_clamps_a_knob_without_touching_its_neighbours() {
+        const surface = c.shape({ opacity: 0.86, blur: true },
+                                { opacity: c.number(0.65, 1) });
+        const out = surface({ opacity: 0.2, blur: false });
+
+        // 0.2 is unreadable text over a bright wallpaper, so it comes back at
+        // the floor — and the blur the user turned off stays off.
+        compare(out.opacity, 0.65);
+        compare(out.blur, false);
+    }
+
+    function test_shape_falls_back_one_knob_at_a_time() {
+        const ridge = c.shape({ shape: "strata", unitWidth: 14 },
+                              { shape: c.oneOf(["strata"]), unitWidth: c.integer(4, 24) });
+        const out = ridge({ shape: "pills", unitWidth: 9 });
+
+        compare(out.shape, "strata");   // unreadable name → this knob's default
+        compare(out.unitWidth, 9);      // the knob next to it is untouched
+    }
+
+    function test_shape_keeps_keys_it_does_not_know() {
+        // A group written by a newer shell must not be pruned by an older one.
+        const out = c.shape({ opacity: 0.86 }, {})({ opacity: 0.9, sheen: 3 });
+        compare(out.sheen, 3);
+    }
+
+    function test_shape_still_rejects_a_non_object() {
+        compare(c.shape({ opacity: 1 }, {})(0.5), undefined);
+    }
 }

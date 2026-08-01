@@ -89,11 +89,89 @@ TestCase {
     function test_empty_sections_are_sections_and_not_leaves() {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["launcher", "controlCenter", "dashboard",
-                               "notifications", "weatherTime"]) {
+        for (const section of ["controlCenter", "dashboard", "weatherTime"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
             compare(store.leafPathsUnder(settings.spec, section).length, 0);
         }
+    }
+
+    // --- the keys the settings window is built on (#54) ----------------------
+
+    function test_the_four_built_tabs_have_keys_to_edit() {
+        // Appearance, Bar, Launcher and Notifications are implemented in #54, so
+        // an empty section there is a tab with nothing in it.
+        for (const section of ["appearance", "bar", "launcher", "notifications"])
+            verify(store.leafPathsUnder(settings.spec, section).length > 0,
+                   section + " has no keys");
+    }
+
+    function test_a_themed_group_knows_what_its_knobs_are() {
+        // The knob table is what the GUI renders its controls from, and what the
+        // coercer was derived from — one declaration, so a range cannot drift
+        // away from the control that offers it.
+        for (const path of ["bar.surface", "bar.ridgeline"]) {
+            const leaf = store.leafAt(settings.spec, path);
+            const knobs = Object.keys(leaf.knobs);
+            verify(knobs.length > 0, path + " has no knob table");
+            for (const knob of knobs)
+                verify(store.equals(leaf.def[knob], leaf.knobs[knob].def),
+                       path + "." + knob + " is not the default the group carries");
+        }
+    }
+
+    function test_a_hand_edited_group_keeps_the_knobs_it_did_not_name() {
+        // The whole reason `themed: true` groups are safe to hand-edit.
+        const raw = { bar: { surface: { opacity: 0.7 } } };
+        const surface = store.resolve(settings.spec, raw).values.bar.surface;
+
+        compare(surface.opacity, 0.7);
+        compare(surface.grain, 0.03);
+        compare(surface.bottomHairline, true);
+    }
+
+    function test_bar_opacity_cannot_be_set_below_the_contrast_floor() {
+        // Not taste: secondary text over the brightest wallpaper measures
+        // 4.44:1 at 0.60, under the design system's 4.5:1 body floor (#10).
+        const raw = { bar: { surface: { opacity: 0.2 } } };
+        compare(store.resolve(settings.spec, raw).values.bar.surface.opacity, 0.65);
+    }
+
+    function test_an_unknown_bar_module_costs_that_module_only() {
+        const raw = { bar: { modules: { left: ["launcher", "aquarium", "clock"] } } };
+        const left = store.resolve(settings.spec, raw).values.bar.modules.left;
+
+        compare(left.length, 2);
+        compare(left[1], "clock");
+    }
+
+    function test_every_default_bar_module_is_one_the_registry_knows() {
+        const modules = store.leafAt(settings.spec, "bar.modules.left").def
+            .concat(store.leafAt(settings.spec, "bar.modules.center").def)
+            .concat(store.leafAt(settings.spec, "bar.modules.right").def);
+
+        for (const id of modules)
+            verify(settings.barModules.indexOf(id) >= 0, id + " is not in the registry");
+        // A module in two clusters at once is a layout bug the file can express
+        // and the GUI cannot, so the defaults must not model it.
+        compare(modules.filter((id, i) => modules.indexOf(id) !== i).length, 0);
+    }
+
+    function test_ask_claude_ships_read_only_plus_web() {
+        // #9's decision, and the reason the default is safe to widen from rather
+        // than to: nothing here can write, run or install anything.
+        const tools = store.leafAt(settings.spec, "launcher.claude.tools").def;
+        compare(tools.join(","), "WebSearch,WebFetch,Read,Grep,Glob");
+        compare(store.leafAt(settings.spec, "launcher.claude.permissionMode").def, "default");
+    }
+
+    function test_a_notification_rule_the_shell_cannot_read_costs_one_app() {
+        const raw = { notifications: { appRules: {
+            firefox: "silent", slack: "screaming", mail: "blocked" } } };
+        const rules = store.resolve(settings.spec, raw).values.notifications.appRules;
+
+        compare(rules.firefox, "silent");
+        compare(rules.mail, "blocked");
+        compare(rules.slack, undefined);
     }
 
     // --- state.json ----------------------------------------------------------
@@ -108,6 +186,10 @@ TestCase {
         verify(store.leafAt(state.spec, "claude.sessionId") !== null);
         verify(store.leafAt(state.spec, "dashboard.lastTab") !== null);
         verify(store.leafAt(state.spec, "seen.changelogVersion") !== null);
+
+        // Which settings tab you had open is not part of your setup (#54).
+        verify(store.leafAt(state.spec, "settings.lastTab") !== null);
+        compare(store.leafAt(settings.spec, "settings"), null);
     }
 
     function test_state_leaves_are_specified_like_settings_leaves() {

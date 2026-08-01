@@ -37,7 +37,18 @@ Singleton {
         report("deferred", [ShellState]);
     }
 
+    // Surfaces have the same problem for a different reason: a window nothing
+    // has opened yet still has to *exist* enough to register its IPC target and
+    // its global shortcut, or the keybind that would open it has nothing to
+    // call. Passed in by the caller rather than named here, because these live
+    // under `Surfaces/` and Core does not import upwards.
+    //
+    //   ServiceInit.initSurfaces([SettingsWindow]);
+    function initSurfaces(surfaces) {
+        report("surface", surfaces);
+    }
+
     function report(stage: string, services) {
-        Logger.log("services", stage + " stage: " + services.length + " service(s) constructed");
+        Logger.log("services", stage + " stage: " + services.length + " object(s) constructed");
     }
 }

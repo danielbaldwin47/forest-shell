@@ -35,10 +35,17 @@ Known gap: this seam cannot take screenshots or count frames — the nested
 compositor never presents after its first commit (upstream aquamarine bug,
 diagnosed in #85; see the header of `tools/nested-session.sh`). Visual checks
 go through `tools/capture-harness.sh` instead: the real surface components
-rendered offscreen, client-side, and grabbed pixel-exact — layout and contrast
-checks (#79, #80) run there (`--contrast` is the #79 measurement). What still
-needs a real session: `MultiEffect` surfaces and compositor composition (blur,
-layer stacking, frame pacing).
+rendered client-side and grabbed pixel-exact, one surface per run
+(`--surface bar|bar-full|lock|settings`). Layout and contrast checks (#79, #80)
+run there, and `--contrast` is the #79 measurement.
+
+It renders offscreen by default, which needs no session — but `MultiEffect`
+draws nothing on the offscreen scenegraph, so every Lucide glyph is missing
+from such a capture (`Widgets/Icon.qml`). `--session` renders the same
+components on the caller's own Wayland session, where they draw; that is the
+seam for anything with an icon in it, and how #73's lock status strip and
+settings chrome were finally judged. What still needs a real session by eye:
+compositor composition — blur behind the bar, layer stacking, frame pacing.
 
 ### Why this is a rule
 

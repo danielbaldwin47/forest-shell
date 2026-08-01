@@ -17,6 +17,11 @@
 // Some have no caller yet only because their section's ticket has not landed —
 // they are what the schema is written *in*, so they stay.
 //
+// `shape` and `arrayOf` at the bottom are **combinators over that vocabulary**,
+// not additions to it: they exist because a few leaves are whole sub-objects
+// that may not be split (#56 — a theme preset replaces a group atomically), and
+// those still have to be validated key by key.
+//
 // Pure functions, no Quickshell imports, so tests/ can reach them.
 import QtQuick
 
@@ -94,5 +99,82 @@ QtObject {
 
     function array(value) {
         return Array.isArray(value) ? value : undefined;
+    }
+
+    // --- combinators ---------------------------------------------------------
+
+    /// A whole sub-object, validated key by key.
+    ///
+    /// `fields` is `{ key: { def, coerce } }` — the same two slots a spec-table
+    /// leaf carries, one level down. The result is always **complete**: a key
+    /// the file omits gets its default, and a key that cannot be salvaged gets
+    /// its default and a warning, so one bad value inside a group costs one
+    /// key rather than the group.
+    ///
+    /// Needed because the theme-flagged groups (`bar.surface`,
+    /// `bar.ridgeline`) are single leaves so a preset can replace them
+    /// atomically (#56), and the plain `object` coercer waves whatever is
+    /// inside them straight through. That is how a hand-edited bar opacity of
+    /// `"loud"` — or of 0.2, which #10 measured at 1.25:1 against the
+    /// wallpaper — would reach the screen.
+    ///
+    /// Keys the shape does not name are dropped rather than carried: the
+    /// resolved values are what the shell reads, and an unknown key there could
+    /// only ever be noise. The *file* keeps them regardless — sparse
+    /// serialization never rewrites a key it was not asked about.
+    function shape(fields, label) {
+        return function (value) {
+            if (object(value) === undefined)
+                return undefined;
+
+            const out = {};
+            for (const key in fields) {
+                const field = fields[key];
+                const raw = value[key];
+                if (raw === undefined) {
+                    out[key] = field.def;
+                    continue;
+                }
+                const coerced = field.coerce(raw);
+                if (coerced === undefined) {
+                    console.warn("settings: ignoring " + (label ? label + "." : "") + key
+                                 + " = " + JSON.stringify(raw));
+                    out[key] = field.def;
+                } else {
+                    out[key] = coerced;
+                }
+            }
+            return out;
+        };
+    }
+
+    /// The defaults of a `shape` field table, as the leaf's `def`. Derived
+    /// rather than written twice — a group whose default and whose validation
+    /// disagreed would resolve differently on the first run than on the second.
+    function shapeDefaults(fields) {
+        const out = {};
+        for (const key in fields)
+            out[key] = fields[key].def;
+        return out;
+    }
+
+    /// A homogeneous list. Entries that do not coerce are **dropped** with a
+    /// warning, because a list has no per-slot default to fall back to — a hole
+    /// in a module order is not a thing the bar can render.
+    function arrayOf(item, label) {
+        return function (value) {
+            if (array(value) === undefined)
+                return undefined;
+            const out = [];
+            for (const entry of value) {
+                const coerced = item(entry);
+                if (coerced === undefined)
+                    console.warn("settings: dropping " + (label ? label + " " : "")
+                                 + "entry " + JSON.stringify(entry));
+                else
+                    out.push(coerced);
+            }
+            return out;
+        };
     }
 }

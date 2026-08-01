@@ -8,10 +8,14 @@
 // measurements settled live in Core/SettingsSchema.qml.
 import QtQuick
 import QtTest
+import "../Core"
 import "../Widgets"
 
 TestCase {
     name: "Ridgeline"
+
+    SettingsSchema { id: settings }
+    SpecStore { id: store }
 
     // The state the prototype's screenshots were taken in: workspaces 1, 2, 3
     // and 5 occupied with 3 focused, so the falloff is visible in both
@@ -114,6 +118,25 @@ TestCase {
         compare(ridge.extent, ridge.activeHeight);
         compare(ridge.implicitHeight, ridge.activeHeight);
         compare(ridge.implicitWidth, 5 * ridge.unitWidth + 4 * ridge.gap);
+    }
+
+    function test_the_widgets_own_defaults_are_the_decided_ones() {
+        // The geometry lives in two places — here as the widget's fallback,
+        // and in `bar.ridgeline` as what the bar actually passes. Both are the
+        // measured taste call from #10, and this is what stops the copies
+        // drifting apart in silence.
+        const decided = store.defaults(settings.spec).bar.ridgeline;
+        compare(ridge.unitWidth, decided.unitWidth);
+        compare(ridge.gap, decided.gap);
+        compare(ridge.activeHeight, decided.activeHeight);
+        compare(ridge.occupiedHeight, decided.occupiedHeight);
+        compare(ridge.emptyHeight, decided.emptyHeight);
+        compare(ridge.falloff, decided.falloff);
+        compare(ridge.minHeight, decided.minHeight);
+        compare(ridge.occupiedHaze, decided.occupiedHaze);
+        compare(ridge.emptyHaze, decided.emptyHaze);
+        compare(ridge.hazeFalloff, decided.hazeFalloff);
+        compare(ridge.minHaze, decided.minHaze);
     }
 
     function test_an_empty_row_has_no_size_and_does_not_throw() {

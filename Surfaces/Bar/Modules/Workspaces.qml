@@ -3,10 +3,10 @@
 // Three files meet here and each keeps its own business. The widget
 // (Widgets/Ridgeline.qml) knows how a range of hills is drawn and nothing about
 // workspaces. The facade (Services/Compositor/) knows what Hyprland is doing
-// and nothing about how it looks. Surfaces/Bar/WorkspaceSlots.qml turns a
-// compositor that destroys empty workspaces into a row that holds still. This
-// module is the twenty lines that join them, and is where the settings and the
-// theme roles are read.
+// and nothing about how it looks. `WorkspaceSlots.qml`, next to this file,
+// turns a compositor that destroys empty workspaces into a row that holds
+// still. This module is the twenty lines that join them, and is where the
+// settings and the theme roles are read.
 //
 // The colour is the one decision worth restating: **the active workspace is
 // teal.** The brief allows exactly one lamplight-amber element at a time and

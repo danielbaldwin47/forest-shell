@@ -19,6 +19,7 @@
 // Axis-agnostic (#9: a vertical bar lands post-v1 without rewrites) — the whole
 // encoding is in `strata`, which has no axis at all, and `vertical` only picks
 // which way the positioner runs and which edge the forms grow from.
+pragma ComponentBehavior: Bound
 import QtQuick
 
 Item {
@@ -68,9 +69,17 @@ Item {
     }
 
     // --- geometry ------------------------------------------------------------
-    // Defaults are the widget's own, not the shell's: the bar passes the
-    // decided values from `bar.ridgeline`. They are chosen to be *visible* so a
-    // Ridgeline with nothing bound looks unfinished rather than invisible.
+    // These mirror the decided defaults in `bar.ridgeline`
+    // (Core/SettingsSchema.qml), which is the one place the widget-kit rule
+    // "defaults are visible rather than correct" is better served by the
+    // correct ones: the geometry *is* the design, and a Ridgeline that drew a
+    // plausible-looking row of the wrong proportions would be a worse fault
+    // than one that drew nothing.
+    //
+    // The bar never relies on them — it passes every value from the config —
+    // so the copy exists for the gallery and for a Ridgeline used somewhere
+    // that has no settings of its own. tests/tst_ridgeline.qml pins the two
+    // tables together, which is what stops them drifting apart in silence.
     property int unitWidth: 14
     property int gap: 4
     property int activeHeight: 14

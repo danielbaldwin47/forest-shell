@@ -43,15 +43,23 @@ Item {
     /// is the bar's horizon. Top bar: the bottom edge.
     property bool hairlineAtBottom: true
 
-    // The pale mist a scrim is made of (brief §3.1), under the fill rather than
-    // over it: what it lightens is the blurred wallpaper showing through, which
-    // is the whole of its job. Over the fill it would just tint the bar.
-    Rectangle {
-        anchors.fill: parent
-        radius: root.radius
-        color: Theme.fogWash
-        opacity: root.settings.mistWash
-    }
+    // Which layers sit inside the fill and which sit above it is not a detail:
+    // the fill is translucent, so anything parented to it is painted at 86% of
+    // its own strength and moves whenever adaptive opacity moves the fill. So
+    // the rule is what each layer is *about*.
+    //
+    //   inside — the top-light, which is a lightening of the fill itself and
+    //            has no meaning apart from it;
+    //   above  — the mist wash, the grain and the hairline, each of which is
+    //            specified as an absolute (0.10, 3%, 1px `border-subtle`) and
+    //            each of which is about the *band*, not about the fill.
+    //
+    // The mist wash in particular has to be above: under an 86% fill it would
+    // contribute about 1.4% and the setting would do nothing at all, which is
+    // not what "86% fill over blurred wallpaper, **plus** the mist wash" (#10)
+    // describes. It costs a little contrast — text-secondary over the band
+    // measures ~6.9:1 rather than the fill's own 7.12:1 — against a 4.5:1
+    // floor, so the headroom is still most of the way to double.
 
     Rectangle {
         id: fill
@@ -70,8 +78,14 @@ Item {
         }
 
         // "Barely-perceptible top-edge lightening" — the luminance gradient
-        // every board pin has, compressed into the bar's 32px. Fades out by
-        // just past halfway so the bottom half stays flat.
+        // every board pin has, compressed into the bar's 32px.
+        //
+        // The two numbers are the prototype's, kept so this renders what was
+        // captured: `Qt.lighter` takes a factor rather than a delta, so the
+        // 0-0.4 setting is scaled by 4 to reach a useful range (0.05 → a 1.2
+        // factor, which is the "barely perceptible" the brief asks for), and
+        // the stop at 0.55 puts the fade out just past halfway so the bottom
+        // half of the bar stays flat.
         Rectangle {
             anchors.fill: parent
             radius: fill.radius
@@ -84,34 +98,44 @@ Item {
                 GradientStop { position: 0.55; color: "transparent" }
             }
         }
+    }
 
-        // 2-4% monochrome noise (brief §3.5). Without it the gradient above
-        // bands visibly on an 8-bit panel, because it is a very small
-        // luminance change spread over very few pixels.
-        //
-        // Tiled from a 64px source, so it costs one small texture for the whole
-        // bar however wide the screen is.
-        Image {
-            anchors.fill: parent
-            visible: root.settings.grain > 0
-            opacity: root.settings.grain
-            source: Qt.resolvedUrl("../../assets/noise.png")
-            fillMode: Image.Tile
-        }
+    // The pale mist a scrim is made of (brief §3.1), over the band.
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        color: Theme.fogWash
+        opacity: root.settings.mistWash
+    }
 
-        // The bar's bottom edge *is* a horizon — the one place the brief's
-        // horizontal-band motif is load-bearing rather than decorative. Not
-        // drawn while floating: an island has no horizon, it has a shape.
-        Rectangle {
-            visible: root.settings.hairline && root.radius === 0
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: root.hairlineAtBottom ? undefined : parent.top
-                bottom: root.hairlineAtBottom ? parent.bottom : undefined
-            }
-            height: Theme.hairline
-            color: Theme.borderSubtle
+    // 2-4% monochrome noise (brief §3.5). Without it the top-light bands
+    // visibly on an 8-bit panel, because it is a very small luminance change
+    // spread over very few pixels.
+    //
+    // Tiled from a 64px source, so it costs one small texture for the whole bar
+    // however wide the screen is.
+    Image {
+        anchors.fill: parent
+        visible: root.settings.grain > 0
+        opacity: root.settings.grain
+        source: Qt.resolvedUrl("../../assets/noise.png")
+        fillMode: Image.Tile
+    }
+
+    // The bar's bottom edge *is* a horizon — the one place the brief's
+    // horizontal-band motif is load-bearing rather than decorative. At full
+    // strength, because it is an edge against the desktop rather than a mark on
+    // the fill. Not drawn while floating: an island has no horizon, it has a
+    // shape.
+    Rectangle {
+        visible: root.settings.hairline && root.radius === 0
+        anchors {
+            left: parent.left
+            right: parent.right
+            top: root.hairlineAtBottom ? undefined : parent.top
+            bottom: root.hairlineAtBottom ? parent.bottom : undefined
         }
+        height: Theme.hairline
+        color: Theme.borderSubtle
     }
 }

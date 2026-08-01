@@ -61,21 +61,20 @@ Item {
 
             required property string modelData
 
-            readonly property bool isCenter: cluster.modelData === "center"
-
             anchors {
                 verticalCenter: parent.verticalCenter
                 left: cluster.modelData === "left" ? parent.left : undefined
                 right: cluster.modelData === "right" ? parent.right : undefined
-                horizontalCenter: cluster.isCenter ? parent.horizontalCenter : undefined
+                horizontalCenter: cluster.modelData === "center" ? parent.horizontalCenter : undefined
                 leftMargin: root.settings.padding
                 rightMargin: root.settings.padding
             }
 
-            // The centre cluster reads as one group at a wider rhythm — it is
-            // the only one not braced against an edge.
-            spacing: cluster.isCenter ? Math.round(root.settings.moduleGap * 1.5)
-                                      : root.settings.moduleGap
+            // One gap everywhere. The prototype ran the centre cluster at 1.5x
+            // for rhythm, but #10's table settled "12px inner horizontal, 14px
+            // between modules" flat — and a second, wider gap that no setting
+            // reaches is a taste call nobody measured.
+            spacing: root.settings.moduleGap
 
             Repeater {
                 model: root.layout[cluster.modelData]

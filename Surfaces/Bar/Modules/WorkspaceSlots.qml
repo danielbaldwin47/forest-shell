@@ -1,5 +1,10 @@
 // A stable row of workspaces, out of a compositor that does not have one.
 //
+// A helper, not a bar module, despite living in `Modules/` — it sits next to
+// its only caller. Nothing here is reachable from settings.json: the bar loads
+// a module only when the registry names its file, so a helper alongside them is
+// never mistaken for one.
+//
 // Hyprland creates a workspace when something lands on it and destroys it when
 // the last window leaves, so the live list is not a row — it is whatever you
 // happen to be using. Rendered directly, the indicator would grow and shrink as

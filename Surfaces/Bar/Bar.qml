@@ -41,6 +41,14 @@ Scope {
     // measured on a fresh install — and re-pushed when the setting changes,
     // because the fill is translucent enough that turning it off is visible.
     //
+    // #35 asks for the layerrule "unconditionally", which is about *this*: the
+    // shell ships the rule itself instead of asking the user to paste a line
+    // into their compositor config, and it does not condition the rule on the
+    // wallpaper the way the rejected fog band would have. It is still subject
+    // to the two switches the same ticket's own sources define — #10 ships the
+    // blur as a Bar-tab setting, and #22 §7 makes turning it off the first rung
+    // of the `reducedEffects` ladder.
+    //
     // Deferred: the first frame does not wait on a subprocess. The shell must
     // look correct with blur off, so there is nothing to gate on it.
     Connections {
@@ -145,6 +153,14 @@ Scope {
 
             // No handler: the timer *running* is the state, and it stopping is
             // what re-evaluates `revealed`.
+            //
+            // Not a motion step — the ladder in Core/Tokens.qml is for things
+            // that move, and this is a dwell. It is how long the bar waits
+            // before believing you meant to leave, which wants to be longer
+            // than any of the three animation durations and is a feel rather
+            // than a measurement. It is deliberately not a setting: a knob for
+            // it would be the kind of long-tail option #9 leaves in JSON, and
+            // it has no JSON to be in until someone asks.
             Timer {
                 id: linger
                 interval: 400

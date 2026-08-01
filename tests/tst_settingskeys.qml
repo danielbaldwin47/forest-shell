@@ -79,19 +79,24 @@ TestCase {
     }
 
     function test_nudge_moves_one_step_and_clamps() {
-        compare(keys.nudge(0.86, 1, 0.65, 1, 0.01), 0.87);
-        compare(keys.nudge(0.86, -1, 0.65, 1, 0.01), 0.85);
-        compare(keys.nudge(1, 1, 0.65, 1, 0.01), 1);
-        compare(keys.nudge(0.65, -1, 0.65, 1, 0.01), 0.65);
+        compare(keys.nudge(0.86, 1, 0.65, 1, 0.01, false), 0.87);
+        compare(keys.nudge(0.86, -1, 0.65, 1, 0.01, false), 0.85);
+        compare(keys.nudge(1, 1, 0.65, 1, 0.01, false), 1);
+        compare(keys.nudge(0.65, -1, 0.65, 1, 0.01, false), 0.65);
     }
 
     function test_nudge_rounds_the_way_the_drag_does() {
-        // Same rounding as SettingSlider's commit: a keyboard step must not put
-        // `0.8600000000000001` in a file meant to be read by hand.
-        compare(keys.nudge(0.07, 1, 0, 1, 0.01), 0.08);
-        // A whole-number knob — bar height — stays whole.
-        compare(keys.nudge(34, 1, 24, 48, 1), 35);
-        verify(Number.isInteger(keys.nudge(34, 1, 24, 48, 1)));
+        // The drag and the arrow keys share `roundOff`, so a keyboard step
+        // cannot put `0.8600000000000001` in a file the drag would have written
+        // `0.86` to.
+        compare(keys.nudge(0.07, 1, 0, 1, 0.01, false), 0.08);
+        compare(keys.roundOff(0.8600000000000001, false), 0.86);
+
+        // A whole-number knob — bar height — stays whole, and it is the knob's
+        // default that says so, not the step size.
+        compare(keys.nudge(34, 1, 24, 48, 1, true), 35);
+        verify(Number.isInteger(keys.nudge(34, 1, 24, 48, 1, true)));
+        compare(keys.roundOff(34.4, true), 34);
     }
 
     function test_scroll_leaves_a_visible_item_alone() {

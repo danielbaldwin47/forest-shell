@@ -43,10 +43,15 @@ RowLayout {
     /// Where the control sits. Anything declared inside the row lands here.
     default property alias content: slot.data
 
-    /// What the row spends before either column gets any: the two gaps and the
-    /// reset affordance. Stated here so the ceiling below is arithmetic on real
-    /// geometry rather than on a guess.
-    readonly property real chrome: root.spacing * 2 + reset.implicitWidth
+    /// What the row spends before either column gets any: the gaps, and the
+    /// reset affordance when it is present. Stated here so the ceiling below is
+    /// arithmetic on real geometry rather than on a guess — and it follows the
+    /// reset in and out, because a row at its default value has one gap and no
+    /// icon, and reserving for one that is not there is the same over-claiming
+    /// this ticket is about.
+    readonly property real chrome: reset.visible
+        ? root.spacing * 2 + reset.implicitWidth
+        : root.spacing
 
     Layout.fillWidth: true
     spacing: Theme.space5

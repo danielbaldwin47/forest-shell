@@ -38,19 +38,8 @@ Flow {
     /// slot it sits in. Zero — no row around it — means no constraint.
     property real availableWidth: root.parent?.availableWidth ?? 0
 
-    /// What the chips would measure on one line. Read off the chips' *implicit*
-    /// widths rather than their laid-out ones, so it does not change when the
-    /// control wraps and there is nothing for the width binding below to chase.
-    readonly property real naturalWidth: {
-        let total = 0;
-        for (let i = 0; i < root.children.length; i++) {
-            const child = root.children[i];
-            if (!child.visible || child.implicitWidth <= 0)
-                continue;
-            total += child.implicitWidth + (total > 0 ? root.spacing : 0);
-        }
-        return total;
-    }
+    /// What the chips would measure on one line.
+    readonly property real naturalWidth: metrics.naturalWidth(root)
 
     /// Which option is selected, and which may be. Both are what the arrow keys
     /// walk (#77) — an inert option is stepped over, not landed on.

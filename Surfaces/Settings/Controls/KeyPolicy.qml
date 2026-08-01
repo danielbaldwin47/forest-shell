@@ -84,14 +84,23 @@ QtObject {
 
     // --- moving a number -----------------------------------------------------
 
-    /// A slider one step along, clamped to its range and rounded off the step —
-    /// the same rounding the drag does, because `0.8600000000000001` in a file
-    /// meant to be read is a bug whichever input produced it.
-    function nudge(value: real, delta: int, from: real, to: real, stepSize: real): real {
+    /// A slider value as it should be written. `integers` is the knob's own
+    /// answer to "is this a whole-number knob", taken from its shipped default:
+    /// a knob whose default is `14` is not one anybody wants at `14.3`.
+    ///
+    /// Both the drag and the arrow keys go through here, so a value typed in by
+    /// keyboard cannot differ in shape from the same value dragged to — and
+    /// `0.8600000000000001` in a file meant to be read by hand is a bug
+    /// whichever input produced it.
+    function roundOff(value: real, integers: bool): real {
+        return integers ? Math.round(value) : Math.round(value * 1000) / 1000;
+    }
+
+    /// A slider one step along, clamped to its range and rounded the same way.
+    function nudge(value: real, delta: int, from: real, to: real, stepSize: real,
+                   integers: bool): real {
         const stepped = value + delta * stepSize;
-        const clamped = Math.max(from, Math.min(to, stepped));
-        return Number.isInteger(stepSize) ? Math.round(clamped)
-                                          : Math.round(clamped * 1000) / 1000;
+        return policy.roundOff(Math.max(from, Math.min(to, stepped)), integers);
     }
 
     // --- keeping the focused thing on screen ---------------------------------

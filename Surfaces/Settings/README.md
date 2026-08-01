@@ -53,7 +53,7 @@ Every control is reachable without a pointer
 | --- | --- |
 | Tab / Shift-Tab | through the window: the rail is one stop, then the page |
 | Up / Down | the tab rail — selection follows focus |
-| Left / Right | within a chip row; one step on a slider |
+| Left / Right | the choice in a one-of-many chip row; one step on a slider |
 | Home / End | a slider's ends |
 | Space / Enter | activate: toggle a switch, pick a chip, press a button |
 | Escape | close the window |
@@ -64,7 +64,13 @@ and a call into it. Tab traversal is also what scrolls a page — a control
 focused below the fold is brought into view by `TabPage`.
 
 A `FocusRing` is drawn only for `activeFocus`, and tapping a control does not
-take focus, so a pointer user never sees one.
+take focus, so a pointer user collects no rings behind them. The rail is the one
+exception: selecting a tab rebuilds the page under whatever held the keyboard,
+so the rail takes it back — however the tab was selected — and its ring is
+around the selected row while it does.
+
+In a many-of-many chip row (`SettingChips`) Tab moves between the chips and
+Space toggles each: there is no "the choice" for an arrow key to move.
 
 ## Ground rules
 
@@ -87,6 +93,11 @@ take focus, so a pointer user never sees one.
   ([#80](https://github.com/danielbaldwin47/forest-shell/issues/80) — before
   this, three chips on the Appearance tab were off the right edge of the
   window).
+
+  `Tabs/BarModuleCluster.qml` and `Tabs/NotificationRuleRow.qml` were audited
+  for the same shape and do not have it: neither sits in a `SettingRow` slot,
+  and in both the text column is the one on `Layout.fillWidth` and elides, so
+  the controls beside it keep their width and stay on screen.
 
 ## Why `Controls/` is not in `Widgets/`
 

@@ -29,10 +29,6 @@ QtObject {
     /// is no more readable than the overflow it replaced.
     readonly property int slotFloor: 140
 
-    /// Air around the focus ring a control draws when it is tabbed to, so the
-    /// ring is not clipped by the row's own edge (#77).
-    readonly property int focusInset: 3
-
     /// The widest a control may be in a row `rowWidth` across, where `taken` is
     /// what the rest of the row already spends — the layout spacing and the
     /// reset affordance.
@@ -52,5 +48,28 @@ QtObject {
         if (ceiling <= 0)
             return naturalWidth;
         return Math.min(naturalWidth, ceiling);
+    }
+
+    /// What `container`'s children would measure laid out on one line. Read off
+    /// their *implicit* widths rather than their laid-out ones, so it does not
+    /// change when the container wraps — a wrapping control whose width is
+    /// computed from its own wrapped size chases itself down to nothing.
+    ///
+    /// Here rather than in the two wrapping controls that need it, which had
+    /// the same loop twice. Every property this touches is a bound one, so a
+    /// binding on it re-evaluates when a chip's label changes or a chip is
+    /// added.
+    function naturalWidth(container: Item): real {
+        let total = 0;
+        for (let i = 0; i < container.children.length; i++) {
+            const child = container.children[i];
+            // Anything with no width of its own is not laid out and is not a
+            // gap either — which is how the `Repeater` inside a chip row, an
+            // Item of zero width, stays out of the sum.
+            if (child.implicitWidth <= 0)
+                continue;
+            total += child.implicitWidth + (total > 0 ? container.spacing : 0);
+        }
+        return total;
     }
 }

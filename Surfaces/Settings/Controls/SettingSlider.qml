@@ -48,7 +48,7 @@ Item {
         const delta = keys.step(event.key);
         if (delta !== 0) {
             root.binding.commit(keys.nudge(root.current, delta, root.from, root.to,
-                                           root.stepSize));
+                                           root.stepSize, root.integers));
             event.accepted = true;
             return;
         }
@@ -61,7 +61,9 @@ Item {
 
     KeyPolicy { id: keys }
 
-    FocusRing { inset: 6; radius: Theme.radiusSm }
+    // Wider than the default: the drawn slider is a 4px groove inside a 24px
+    // item, so a ring on the item's own edge reads as belonging to the row.
+    FocusRing { inset: 6 }
 
     function commitAt(x: real): void {
         const span = groove.width - handle.width;
@@ -71,10 +73,11 @@ Item {
         const raw = root.from + Math.max(0, Math.min(1, (x - handle.width / 2) / span))
             * (root.to - root.from);
         const stepped = Math.round(raw / root.stepSize) * root.stepSize;
-        // Rounded off the step before writing: floating-point drag arithmetic
-        // otherwise puts `0.8600000000000001` in a file meant to be read.
-        root.binding.commit(root.integers ? Math.round(stepped)
-                                          : Math.round(stepped * 1000) / 1000);
+        // Rounded off the step before writing, by the same function the arrow
+        // keys use: floating-point drag arithmetic otherwise puts
+        // `0.8600000000000001` in a file meant to be read, and a drag and a key
+        // that land on the same value must write the same thing.
+        root.binding.commit(keys.roundOff(stepped, root.integers));
     }
 
     Rectangle {

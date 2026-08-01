@@ -83,9 +83,11 @@ Singleton {
             loader.item.requestActivate();
     }
 
+    /// Closes the window. `reason` is for the log and may be omitted by a
+    /// caller that has nothing to add — #45's gear will.
     function close(reason: string): void {
         if (root.shown)
-            Logger.log("settings", "window closed (" + (reason === "" ? "request" : reason) + ")");
+            Logger.log("settings", "window closed (" + (reason ? reason : "request") + ")");
         loader.active = false;
     }
 

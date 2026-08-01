@@ -18,6 +18,24 @@ TestCase {
 
     RowMetrics { id: metrics }
 
+    // Three chips and a gap, near enough to the theming-mode row.
+    Row {
+        id: chips
+        spacing: 4
+        Rectangle { implicitWidth: 90; implicitHeight: 26 }
+        Rectangle { implicitWidth: 110; implicitHeight: 26 }
+        Rectangle { implicitWidth: 60; implicitHeight: 26 }
+    }
+
+    // A chip row as the Repeater builds it: the Repeater itself is a child of
+    // zero width sitting among the chips.
+    Row {
+        id: withRepeater
+        spacing: 4
+        Item {}
+        Rectangle { implicitWidth: 90; implicitHeight: 26 }
+    }
+
     // The Appearance tab in the window's default size: 900 wide, less the
     // 196px rail, its hairline, and the page's 32px padding either side.
     readonly property real widePane: 900 - 196 - 1 - 32 * 2
@@ -58,6 +76,18 @@ TestCase {
         const ceiling = metrics.slotCeiling(narrowPane, taken);
         compare(metrics.slotWidth(400, ceiling), ceiling);
         verify(metrics.slotWidth(400, ceiling) >= metrics.slotFloor);
+    }
+
+    function test_natural_width_measures_one_line_of_children() {
+        // What a wrapping control asks before it decides to wrap: the width its
+        // chips would take on one line, from their implicit widths, so it does
+        // not change once the control has wrapped.
+        compare(metrics.naturalWidth(chips), 90 + 4 + 110 + 4 + 60);
+    }
+
+    function test_natural_width_ignores_a_child_with_no_width() {
+        // The zero-width Item a Repeater is: not a chip, and not a gap either.
+        compare(metrics.naturalWidth(withRepeater), 90);
     }
 
     function test_no_ceiling_means_no_constraint() {

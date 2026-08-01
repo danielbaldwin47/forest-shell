@@ -8,10 +8,12 @@
 // around a switch and a rounded rectangle around a chip without either of them
 // stating anything.
 //
-// Only shown for `activeFocus`, and only tab traversal sets that — the controls
-// activate off a `TapHandler`, which does not take focus. So the ring is the
-// keyboard's marker and a pointer user never sees one, which is the behaviour
-// the rest of the desktop has.
+// Shown for the parent's `activeFocus`, and tab traversal is what sets that —
+// the controls activate off a `TapHandler`, which does not take focus. So a
+// pointer user does not collect rings behind them, which is the behaviour the
+// rest of the desktop has. The one place that overrides `visible` is the tab
+// rail, where the keyboard is held by the pane and the ring belongs on the
+// selected row.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -19,23 +21,19 @@ import qs.Core
 Rectangle {
     id: ring
 
-    /// What the ring is around. The parent, unless a composite control wants
-    /// the ring on a different piece of itself than the item that holds focus.
-    property Item target: ring.parent
-
-    /// Air between the control's edge and the ring.
-    property real inset: metrics.focusInset
+    /// Air between the control's edge and the ring. Larger for a control whose
+    /// drawn shape is smaller than its item — a slider is a 4px groove in a
+    /// 24px box.
+    property real inset: 3
 
     anchors.fill: parent
     anchors.margins: -ring.inset
 
-    visible: ring.target?.activeFocus ?? false
+    visible: ring.parent?.activeFocus ?? false
     color: "transparent"
     border.width: Theme.rail
     border.color: Theme.accentPrimary
-    // A parent with no radius of its own — an IconButton, the tab rail's row —
-    // gets the kit's small radius, so no ring in the window is a hard corner.
+    // A parent with no radius of its own — an IconButton, a slider — gets the
+    // kit's small radius, so no ring in the window is a hard corner.
     radius: (ring.parent?.radius ?? Theme.radiusSm) + ring.inset
-
-    RowMetrics { id: metrics }
 }

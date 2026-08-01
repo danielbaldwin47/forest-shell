@@ -27,16 +27,7 @@ Flow {
     /// allowlist is a line that leaves the window.
     property real availableWidth: root.parent?.availableWidth ?? 0
 
-    readonly property real naturalWidth: {
-        let total = 0;
-        for (let i = 0; i < root.children.length; i++) {
-            const child = root.children[i];
-            if (!child.visible || child.implicitWidth <= 0)
-                continue;
-            total += child.implicitWidth + (total > 0 ? root.spacing : 0);
-        }
-        return total;
-    }
+    readonly property real naturalWidth: metrics.naturalWidth(root)
 
     width: metrics.slotWidth(root.naturalWidth, root.availableWidth)
     spacing: Theme.space1

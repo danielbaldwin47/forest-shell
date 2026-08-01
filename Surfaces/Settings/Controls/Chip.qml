@@ -76,7 +76,10 @@ Rectangle {
     activeFocusOnTab: root.available
 
     Keys.onPressed: event => {
-        if (keys.isActivate(event.key)) {
+        // Guarded like the TapHandler above, and for a live reason: a chip may
+        // stop being choosable while it holds focus, since `available` is bound
+        // (the theming modes go live when #58/#59 land).
+        if (root.available && keys.isActivate(event.key)) {
             root.tapped();
             event.accepted = true;
         }

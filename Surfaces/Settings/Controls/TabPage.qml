@@ -38,6 +38,13 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
+    // #80 also reported the pane looking scrolled away from the top on the one
+    // capture ever taken of it. Nothing here moves `contentY` on load — it is
+    // zero until something scrolls it, and the only thing that does is focus
+    // moving below the fold, which cannot happen before the window is used. The
+    // oversized row that ticket is about is the remaining explanation, and
+    // confirming that needs a capture this seam cannot take.
+
     // Whether anything in this section is currently written to the file. Reads
     // `Config.values` so that clearing the section makes the affordance go away
     // by itself.

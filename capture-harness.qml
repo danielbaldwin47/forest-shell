@@ -36,12 +36,12 @@
 //
 // Environment, all set by tools/capture-harness.sh:
 //   CAPTURE_OUT          where to save the PNG (required)
-//   CAPTURE_SURFACE      bar | lock | settings   (default bar)
+//   CAPTURE_SURFACE      bar | bar-full | lock | settings   (default bar)
 //   CAPTURE_W/CAPTURE_H  scene size in logical px (default 1280x800)
 //   CAPTURE_BAR_OPACITY  override for the bar fill opacity, e.g. "0.65"
 //                        (defaults to the configured bar.surface.opacity)
-//   CAPTURE_LOCK_STATE   quiet | summoned  (default quiet) — the lock is a
-//                        different picture before and after a key is pressed
+//   CAPTURE_LOCK_STATE   what the lock is showing, comma-separated: `quiet`,
+//                        or any of `summoned`, `caps`, `notify:N`
 //   CAPTURE_SETTINGS_TAB which settings tab to open (default: the state file's)
 //   CAPTURE_DELAY_MS     settle time before the grab (default 600)
 pragma ComponentBehavior: Bound
@@ -52,6 +52,8 @@ import qs.Surfaces.Background
 import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
+import qs.Services.System
+import Quickshell.Services.UPower
 
 ShellRoot {
     id: root
@@ -60,15 +62,19 @@ ShellRoot {
     readonly property string outPath: Quickshell.env("CAPTURE_OUT") ?? ""
     readonly property string surfaceName: Quickshell.env("CAPTURE_SURFACE") || "bar"
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
-    readonly property string lockState: Quickshell.env("CAPTURE_LOCK_STATE") || "quiet"
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
     readonly property int delayMs: parseInt(Quickshell.env("CAPTURE_DELAY_MS") || "600")
 
-    /// The settings surface is its own toplevel — it cannot be nested inside
-    /// the scene below, so it is built as itself and its content item is what
-    /// gets grabbed. Everything else renders into the scene.
+    /// What the lock is showing, as a comma-separated set — `quiet` on its own,
+    /// or any of `summoned`, `caps`, `notify:N`. Every item in the lock's status
+    /// strip is gated on something about the machine (a discharging battery, a
+    /// caps-lock key, notifications waiting), so a capture that does not pin
+    /// them photographs whatever this laptop happened to be doing. #73's
+    /// criterion is about the icons, and an empty strip answers nothing.
+    readonly property var lockState: (Quickshell.env("CAPTURE_LOCK_STATE") || "quiet").split(",")
+
     readonly property bool isSettings: root.surfaceName === "settings"
 
     /// One line describing what was rendered, appended to the saved= log line.
@@ -91,13 +97,15 @@ ShellRoot {
         implicitWidth: root.sceneWidth
         implicitHeight: root.sceneHeight
         color: "transparent"
-        visible: !root.isSettings
 
         Item {
             id: scene
 
             // Fixed, not `anchors.fill`: the capture's geometry is a property
-            // of the test, not of whatever the window manager decided.
+            // of the test, not of whatever the window manager decided. This is
+            // always the item that is grabbed, whatever the surface — the
+            // settings content is moved into it rather than photographed where
+            // it was built.
             width: root.sceneWidth
             height: root.sceneHeight
 
@@ -112,10 +120,32 @@ ShellRoot {
                     }
                 }
             }
+
+            // What the settings window paints under its content, and the reason
+            // the content is brought here rather than grabbed in place: the fill
+            // is the *window's* `color`, not part of the content item, so a grab
+            // of the content alone comes back with a transparent page — every
+            // pixel the rail does not cover reading (0,0,0,0). It looks right
+            // against a dark image viewer and is not what the shell shows.
+            Rectangle {
+                id: settingsBacking
+                anchors.fill: parent
+                visible: root.isSettings
+                color: Theme.bgBase
+            }
         }
     }
 
     // --- the pictures ---------------------------------------------------------
+
+    /// The wallpaper every bar picture sits on, so that "what is behind the bar"
+    /// is stated once. Inline components live on the file's root object.
+    component Backdrop: Item {
+        Wallpaper {
+            anchors.fill: parent
+            screen: root.screen
+        }
+    }
 
     /// #79 and #10: the bar's fill over the wallpaper, which is the composite
     /// the contrast measurement samples. Without compositor blur this is the
@@ -124,12 +154,7 @@ ShellRoot {
     Component {
         id: barScene
 
-        Item {
-            Wallpaper {
-                anchors.fill: parent
-                screen: root.screen
-            }
-
+        Backdrop {
             BarSurface {
                 anchors {
                     top: parent.top
@@ -162,12 +187,7 @@ ShellRoot {
     Component {
         id: barFullScene
 
-        Item {
-            Wallpaper {
-                anchors.fill: parent
-                screen: root.screen
-            }
-
+        Backdrop {
             BarContent {
                 anchors {
                     top: parent.top
@@ -188,30 +208,50 @@ ShellRoot {
 
     /// #73: the lock's status strip is one of the two `MultiEffect` surfaces
     /// the ticket says have never rendered anywhere. The real LockSurface and
-    /// the real shared LockAuth — the only thing standing in for the session is
-    /// the keystroke, written into the buffer the way tools/lock-harness.sh
-    /// does it.
+    /// the real shared LockAuth — what stands in for the session is the state
+    /// the strip is gated on, set the way tools/lock-harness.sh sets the buffer.
     Component {
         id: lockScene
 
         LockSurface {
+            id: lockSurface
+
             screen: root.screen
             auth: lockAuth
 
             Component.onCompleted: {
-                if (root.lockState === "summoned") {
-                    // What a keystroke does, minus the keyboard: a non-empty
-                    // buffer is what `summoned` is derived from.
-                    lockAuth.buffer = "hunter2";
+                for (const token of root.lockState) {
+                    if (token === "summoned") {
+                        // What a keystroke does, minus the keyboard: a non-empty
+                        // buffer is what `summoned` is derived from. Its
+                        // *length* is the number of dots in the field, so a
+                        // seven-character word is a seven-dot picture.
+                        lockAuth.buffer = "hunter2";
+                    } else if (token === "caps") {
+                        // Normally inferred from a keystroke — LockPolicy
+                        // .capsFromKey — which there is no keyboard to press.
+                        lockSurface.capsLock = true;
+                    } else if (token.startsWith("notify:")) {
+                        // The bell is gated on the count *and* on the setting
+                        // that allows it to be shown at all, so both are set:
+                        // pinning one and photographing the other is how #73's
+                        // strip came back empty the first time.
+                        SessionLock.notificationCount = parseInt(token.slice(7));
+                        Config.set("system.lock.notificationCount", true);
+                    }
                 }
-                root.sceneDescription = "lock=" + root.lockState;
+                root.sceneDescription = "lock=" + root.lockState.join("+");
             }
         }
     }
 
-    /// #73's other `MultiEffect` surface: the settings chrome. A toplevel of
-    /// its own, so it is grabbed through its content item rather than nested
-    /// into the scene.
+    /// #73's other `MultiEffect` surface: the settings chrome. The real
+    /// `SettingsView`, which is a toplevel of its own — so it is built as
+    /// itself and its content is then moved onto `settingsBacking`, where the
+    /// scene can be grabbed like any other surface. Grabbing it where it was
+    /// built gives a transparent page (the fill is the window's `color`) and
+    /// runs into Quickshell's `ProxyWindowContentItem`, which `grabToImage`
+    /// refuses outright: "item has no QML engine".
     Loader {
         id: settingsLoader
 
@@ -221,23 +261,26 @@ ShellRoot {
         onLoaded: {
             if (root.settingsTab.length > 0)
                 settingsLoader.item.selectTab(root.settingsTab);
+
+            const content = settingsLoader.item.contentItem;
+            if (content.children.length !== 1) {
+                // The move below takes one child. If the window ever grows a
+                // second, a silent half-capture is the worst outcome available.
+                console.warn("capture: settings content has "
+                             + content.children.length + " children, expected 1");
+            }
+            // Sized here rather than left to the window manager: the page fills
+            // its parent, so this is what makes the capture the same shape on
+            // every run and under any compositor.
+            const page = content.children[0];
+            page.parent = settingsBacking;
+            page.anchors.fill = settingsBacking;
+
             root.sceneDescription = "tab=" + settingsLoader.item.currentTab;
         }
     }
 
     // --- the grab -------------------------------------------------------------
-
-    /// The item whose subtree becomes the PNG. For the settings window that is
-    /// the layout *inside* the content item, not the content item itself:
-    /// Quickshell's `ProxyWindowContentItem` is created without a QML engine
-    /// and `grabToImage` refuses it ("item has no QML engine"). Its one child
-    /// is the window's whole content, so nothing is left out.
-    readonly property Item target: {
-        if (!root.isSettings)
-            return scene;
-        const content = settingsLoader.item ? settingsLoader.item.contentItem : null;
-        return content && content.children.length > 0 ? content.children[0] : null;
-    }
 
     // A timer rather than Component.onCompleted: the wallpaper decode is
     // synchronous (Wallpaper.qml pins it before first frame), but layout and
@@ -253,23 +296,6 @@ ShellRoot {
                 Qt.quit();
                 return;
             }
-            if (!root.target) {
-                console.log("capture: saved=false nothing to grab for surface="
-                            + root.surfaceName);
-                Qt.quit();
-                return;
-            }
-
-            // The settings window is sized by whoever is managing it. Assigning
-            // over that binding is what makes the capture the same size every
-            // run: the content fills the content item, and the grab below
-            // renders the whole item whether or not the window is that big.
-            if (root.isSettings) {
-                const content = settingsLoader.item.contentItem;
-                content.width = root.sceneWidth;
-                content.height = root.sceneHeight;
-            }
-
             // No target size: the grab renders the item at the scale the scene
             // is actually drawn at — 1:1 offscreen, the output's scale on a
             // session (1280x800 comes back as 1920x1200 at scale 1.5). That is
@@ -279,12 +305,20 @@ ShellRoot {
             // regions by it. Passing a target size instead would mean trusting
             // `Screen.devicePixelRatio`, which reports 2 on a 1.5-scale display
             // — the lie Widgets/Icon.qml documents, on this exact machine.
-            root.target.grabToImage(function (result) {
+            scene.grabToImage(function (result) {
                 const ok = result.saveToFile(root.outPath);
+                // The battery item in the lock's strip is the one thing here
+                // that cannot be posed — it reads `UPower.onBattery` off the
+                // real machine — so what it was doing is reported rather than
+                // set. Read at the grab and not at build, because UPower has
+                // not necessarily answered by the time the surface is up.
+                const battery = root.surfaceName === "lock"
+                    ? " battery=" + (UPower.onBattery ? "discharging" : "on-mains")
+                    : "";
                 console.log("capture: saved=" + ok
                             + " " + root.sceneWidth + "x" + root.sceneHeight
                             + " surface=" + root.surfaceName
-                            + " " + root.sceneDescription
+                            + " " + root.sceneDescription + battery
                             + " " + root.outPath);
                 Qt.quit();
             });

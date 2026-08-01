@@ -5,10 +5,11 @@
 # compositor cannot produce pixels on the current Hyprland/aquamarine stack
 # (see the header of tools/nested-session.sh for the diagnosis), but the
 # shell's own rendering is unaffected — so the capture is a real Qt render of
-# the real components, grabbed where the pixels are produced. Deterministic:
-# fixed capture geometry, a scratch XDG_CONFIG_HOME, and (by default) a
-# generated wallpaper, so a run does not depend on the session or the user's
-# files.
+# the real components, grabbed where the pixels are produced. A run does not
+# depend on the session or the user's files: the capture geometry is fixed in
+# logical pixels, and the config it renders from is a scratch XDG_CONFIG_HOME
+# with (by default) a generated wallpaper. The one thing the caller's machine
+# does set is the scale the file comes back at — see the two modes below.
 #
 #   tools/capture-harness.sh out.png                        # defaults
 #   tools/capture-harness.sh out.png --bar-opacity 0.65     # #79's failing floor
@@ -19,6 +20,14 @@
 #   tools/capture-harness.sh out.png --surface bar-full --session   # with modules
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
+#
+# --lock-state poses the lock: `quiet`, or any comma-separated combination of
+# `summoned` (the field revealed), `caps` (the caps-lock warning) and
+# `notify:N`. Every item in the status strip is gated on something about the
+# machine, so a capture that does not pose them photographs whatever the laptop
+# happened to be doing — the battery item is the one that cannot be posed, and
+# the saved line reports what it was instead. --delay-ms buys settle time on a
+# loaded machine.
 #
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module
@@ -64,6 +73,7 @@ SURFACE="bar"
 SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
+DELAY_MS=600
 
 while (( $# )); do
     case "$1" in
@@ -76,7 +86,8 @@ while (( $# )); do
         --session)     SESSION=1; shift ;;
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
-        --help|-h)     sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --delay-ms)    DELAY_MS="$2"; shift 2 ;;
+        --help|-h)     sed -n '2,59p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -148,6 +159,7 @@ CAPTURE_ENV=(
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
+    CAPTURE_DELAY_MS="$DELAY_MS"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.
@@ -175,21 +187,46 @@ fi
 # rendered, not what this script asked for.
 BAR_H=$(sed -n 's/.* bar=\([0-9]*\).*/\1/p' <<< "$SAVED")
 
-# The render scale, taken from the file rather than from anything that claims
-# to know it: offscreen renders 1:1, a session renders at the output's scale
-# (1280x800 comes back 1920x1200 at 1.5). Both are native renders — the check
-# is that the scene came back whole and uniformly scaled, not that it came back
-# at one particular size. It is printed because every region below is in
-# capture pixels, so a reader of a measurement needs it.
-SCALE=$(python3 - "$OUT" "$W" "$H" <<'EOF'
+# What scale the capture should have come back at. #85 asks for "pixel-for-pixel
+# … no outer-display scaling applied", so this is an assertion and not an
+# observation: offscreen renders 1:1 by construction, and a session renders at
+# the output's own scale, which the compositor is asked for rather than
+# inferred. (`Screen.devicePixelRatio` is not usable here — it reports 2 on this
+# 1.5-scale display, the lie Widgets/Icon.qml documents.) Nothing is resampled
+# in either case; the factor exists so a measurement region can be stated in
+# logical pixels and applied to the file.
+WANT_SCALE=1
+if (( SESSION )); then
+    WANT_SCALE=$(hyprctl -j monitors 2>/dev/null | python3 - <<'EOF' || true
+import json, sys
+try:
+    monitors = json.load(sys.stdin)
+except Exception:
+    sys.exit()
+focused = next((m for m in monitors if m.get("focused")), None) \
+    or (monitors[0] if monitors else None)
+if focused:
+    print(format(focused["scale"], "g"))
+EOF
+)
+    if [[ -z "$WANT_SCALE" ]]; then
+        note "no compositor scale available — the capture's own scale is taken on trust"
+        WANT_SCALE="any"
+    fi
+fi
+
+SCALE=$(python3 - "$OUT" "$W" "$H" "$WANT_SCALE" <<'EOF'
 import sys
 import importlib.util
 spec = importlib.util.spec_from_file_location("mc", "tools/measure-contrast.py")
 mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
 w, h, rows = mc.decode_png(sys.argv[1])
-want_w, want_h = int(sys.argv[2]), int(sys.argv[3])
+want_w, want_h, want_scale = int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 sx, sy = w / want_w, h / want_h
 assert abs(sx - sy) < 1e-6, f"non-uniform scale: {w}x{h} for {want_w}x{want_h}"
+if want_scale != "any":
+    assert abs(sx - float(want_scale)) < 1e-6, \
+        f"{w}x{h} is scale {sx:g}, expected {want_scale} — the scene was not captured whole"
 sample = {rows[y][x] for y in range(0, h, 16) for x in range(0, w, 16)}
 assert len(sample) > 8, f"only {len(sample)} distinct colours — nothing rendered"
 print(f"{sx:g}")
@@ -203,17 +240,28 @@ fi
 
 if (( CONTRAST )); then
     if [[ "$SURFACE" != bar ]]; then
-        fail "--contrast is the #79 bar measurement; --surface $SURFACE has no bar strip"
+        # `bar-full` has a strip too, and text drawn into it — which is why it
+        # is refused rather than measured: #79 is the contrast of the authored
+        # text colour against the *fill it sits on*, so a region containing the
+        # rendered glyphs would be measuring the text against itself.
+        fail "--contrast measures the fill the bar's text sits on; --surface $SURFACE is not that picture (use bar)"
     elif [[ -z "$SCALE" ]]; then
         fail "--contrast needs a verified capture"
+    elif [[ ! "$BAR_H" =~ ^[0-9]+$ ]]; then
+        # Parsed out of the shell's own log line, so a change to that line must
+        # not silently become a contrast failure — which is what an empty region
+        # would look like.
+        fail "--contrast could not read the bar height from: $SAVED"
     else
         # Skip the hairline row at the bottom edge of the strip: it is authored
         # `border-subtle`, not fill, and #79's numbers are about the fill. In
         # capture pixels, so scaled — the strip is a fixed number of *logical*
         # rows wherever it is rendered.
-        read -r RX RY RW RH WIN < <(python3 -c "
-s, w, bar = float('$SCALE'), $W, $BAR_H
-print(0, round(1 * s), round(w * s), round((bar - 2) * s), round(100 * s))")
+        read -r RX RY RW RH WIN < <(python3 -c '
+import sys
+s, w, bar = float(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+print(0, round(1 * s), round(w * s), round((bar - 2) * s), round(100 * s))' \
+            "$SCALE" "$W" "$BAR_H")
         REGION="${RX},${RY},${RW}x${RH}"
         # The sliding window is a run of text, so it is 100 *logical* px wide
         # whatever the capture was rendered at.

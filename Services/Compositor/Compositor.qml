@@ -70,13 +70,18 @@ Singleton {
         return ipc ? ipc.hasfullscreen === true : false;
     }
 
-    // `hasfullscreen` is part of the workspace's IPC snapshot, and a snapshot
-    // is only as current as its last refresh. These are the events after which
-    // it can have changed — a window entering or leaving fullscreen, the
-    // fullscreen window closing, and any move of focus that changes which
-    // workspace the answer is about.
+    /// `hasfullscreen` is part of the workspace's IPC snapshot, and a snapshot
+    /// is only as current as its last refresh. These are the events after which
+    /// it can have changed — a window entering or leaving fullscreen, the
+    /// fullscreen window closing or moving to another workspace, and any move
+    /// of focus that changes which workspace the answer is about.
+    ///
+    /// The refresh is a round trip, so the answer can be one tick stale: a
+    /// notification arriving in the same instant as a window going fullscreen
+    /// may still pop. Nothing is lost when it does — it is in history either
+    /// way, and the next notification is decided on the current snapshot.
     readonly property var fullscreenEvents: [
-        "fullscreen", "closewindow", "workspace", "workspacev2", "focusedmon"
+        "fullscreen", "closewindow", "movewindow", "workspace", "workspacev2", "focusedmon"
     ]
 
     Connections {

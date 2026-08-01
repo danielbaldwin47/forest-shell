@@ -38,6 +38,7 @@ pragma Singleton
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Notifications
 import qs.Core
 import qs.Services.Compositor
@@ -83,11 +84,6 @@ Singleton {
     /// one writer, and going through it is what keeps the debounce honest.
     property var history: []
 
-    /// `[{ key, name }]` for every app that has ever notified — the list #43's
-    /// per-app rules UI is built from. Derived from history, so there is no
-    /// second list to keep in step with it.
-    readonly property var apps: root.policy.appsIn(root.history)
-
     /// Do-not-disturb. Situational rather than setup, so it is state and not
     /// config (#21) — this is the property the control centre's DND tile and
     /// the bar indicator both read.
@@ -99,16 +95,16 @@ Singleton {
 
     /// Why popups are not showing right now, or "" when they are. For the bar
     /// indicator's tooltip, and for anyone asking "where did my notification
-    /// go" — the same vocabulary the log lines use.
-    readonly property string suppression: {
-        if (root.dnd)
-            return "dnd";
-        if (Compositor.focusedFullscreen)
-            return "fullscreen";
-        if (root.centerOpen)
-            return "center";
-        return "";
-    }
+    /// go" — the same vocabulary, from the same cascade, as the log lines.
+    ///
+    /// Asked at normal urgency, because this is a question about the moment
+    /// rather than about a notification: a critical one may still get through.
+    readonly property string suppression: root.policy.suppressionOf({
+        urgency: root.policy.urgencyNormal,
+        dnd: root.dnd,
+        fullscreen: Compositor.focusedFullscreen,
+        centerOpen: root.centerOpen
+    })
 
     // --- do-not-disturb ------------------------------------------------------
 
@@ -136,11 +132,12 @@ Singleton {
             return false;
         }
 
+        const current = Config.values.notifications.apps;
         const apps = {};
-        for (const key in Config.values.notifications.apps)
+        for (const key in current)
             // Drop any casing of this app's key; the one below replaces them.
             if (key.trim().toLowerCase() !== appKey)
-                apps[key] = Config.values.notifications.apps[key];
+                apps[key] = current[key];
         if (rule !== "normal")
             apps[appKey] = rule;
 
@@ -149,29 +146,39 @@ Singleton {
 
     // --- history -------------------------------------------------------------
 
-    function clearHistory() { root.setHistory([]); }
-
-    /// Everything one app has ever sent. Clear-one and clear-all are the same
-    /// operation at a different scope (#43).
-    function clearApp(appKey: string) {
-        root.setHistory(root.policy.forget(root.history, appKey));
-    }
-
-    function setHistory(next) {
+    function setHistory(next: var) {
         root.history = next;
         persist.restart();
     }
 
-    // Read back on the first settle of state.json — which is lazy and deferred,
-    // so it has usually not happened when this service is constructed — and
-    // after a genuine outside edit. Our own writes never come back through
-    // here: the store dispatches nothing for a reload that resolves to the
-    // values it already holds.
+    // Whether the file has been read yet. state.json is lazy and deferred, so
+    // this service is constructed — and can be notified — before its own
+    // history has arrived.
+    property bool loaded: false
+
+    // Read back on the first settle of state.json, and after any genuine
+    // outside edit. Our own writes never come back through here: the store
+    // dispatches nothing for a reload that resolves to the values it already
+    // holds.
     function loadHistory() {
+        const stored = root.policy.readHistory(ShellState.values.notifications.history,
+                                               Config.values.notifications.historyLimit);
+
+        if (!root.loaded) {
+            root.loaded = true;
+            // Anything already in hand arrived while the file was still being
+            // read, so it is newer than everything in it. Replacing rather than
+            // merging here would drop the whole of history the first time a
+            // notification beat the state file to the shell — which is exactly
+            // what happens when the shell restarts and clients re-post.
+            root.setHistory(root.history.concat(stored)
+                            .slice(0, Config.values.notifications.historyLimit));
+            return;
+        }
+
         if (persist.running)
             return;   // a write of ours is still queued; it is the newer copy
-        root.history = root.policy.readHistory(ShellState.values.notifications.history,
-                                               Config.values.notifications.historyLimit);
+        root.history = stored;
     }
 
     // --- arrival -------------------------------------------------------------
@@ -221,7 +228,7 @@ Singleton {
         }), Config.values.notifications.historyLimit));
     }
 
-    function show(notification: Notification, settings) {
+    function show(notification: Notification, settings: var) {
         const toast = toastComponent.createObject(root, {
             notification: notification,
             timeoutMs: root.policy.timeoutMs(notification.urgency, notification.expireTimeout,
@@ -243,9 +250,14 @@ Singleton {
     // top to bottom.
     //
     // Counted over the toasts that are not already on their way out: a leaving
-    // toast still occupies its row for the length of its exit, and dismissing
-    // it a second time does nothing, so counting those in would be a loop that
-    // never gets under the cap.
+    // toast still occupies its row for the length of its exit, and asking it to
+    // leave a second time does nothing, so counting those in would be a loop
+    // that never gets under the cap.
+    //
+    // Expired, not dismissed: over D-Bus those are different words, and
+    // "dismissed" means the user waved this away. Telling a client that about a
+    // notification nobody ever saw is a lie it may act on — several stop
+    // re-posting once something has been acknowledged.
     function capStack(maxVisible: int) {
         const showing = [];
         for (let i = 0; i < live.count; i++) {
@@ -255,10 +267,10 @@ Singleton {
         }
         // Newest first, so everything past the cap is at the tail.
         for (let i = Math.max(1, maxVisible); i < showing.length; i++)
-            showing[i].dismiss();
+            showing[i].expire();
     }
 
-    function drop(toast) {
+    function drop(toast: Toast) {
         for (let i = 0; i < live.count; i++) {
             if (live.get(i).toast === toast) {
                 live.remove(i);
@@ -268,14 +280,16 @@ Singleton {
         toast.destroy();
     }
 
-    /// Send every popup on its way. `includeCritical` is false for DND, which
-    /// critical urgency is exempt from (#9), and true for the cases where the
-    /// shell would be covering something the user is looking at.
-    function dismissAll(includeCritical: bool) {
+    /// Send every popup on its way, for the same reason and with the same word
+    /// as the cap above: the user did not act on these, the shell took them
+    /// down. `includeCritical` is false for DND, which critical urgency is
+    /// exempt from (#9), and true for the cases where the shell would be
+    /// covering something the user is looking at.
+    function clearPopups(includeCritical: bool) {
         for (let i = live.count - 1; i >= 0; i--) {
             const toast = live.get(i).toast;
             if (includeCritical || toast.notification.urgency !== NotificationUrgency.Critical)
-                toast.dismiss();
+                toast.expire();
         }
     }
 
@@ -290,8 +304,8 @@ Singleton {
     // the fullscreen video the user just started, or over the center they just
     // opened to read it in.
     readonly property bool covered: Compositor.focusedFullscreen || root.centerOpen
-    onCoveredChanged: if (root.covered) root.dismissAll(true)
-    onDndChanged: if (root.dnd) root.dismissAll(false)
+    onCoveredChanged: if (root.covered) root.clearPopups(true)
+    onDndChanged: if (root.dnd) root.clearPopups(false)
 
     Connections {
         target: ShellState
@@ -313,6 +327,32 @@ Singleton {
     Component {
         id: toastComponent
         Toast {}
+    }
+
+    // IPC lives with what it controls and there is no central IPC file (#12 §7);
+    // the target is named after the surface, lowercase.
+    //
+    // DND is the one thing here worth a keybind, and it has no control of its
+    // own until the control centre's toggle grid (#44). Until then this is how
+    // it is reached:
+    //
+    //   bind = SUPER, N, exec, qs ipc call notifications toggleDnd
+    IpcHandler {
+        target: "notifications"
+
+        function dnd(): string {
+            return root.dnd ? "on" : "off";
+        }
+
+        function toggleDnd(): string {
+            root.toggleDnd();
+            return root.dnd ? "on" : "off";
+        }
+
+        function setDnd(enabled: bool): string {
+            root.setDnd(enabled);
+            return root.dnd ? "on" : "off";
+        }
     }
 
     NotificationServer {
@@ -341,17 +381,23 @@ Singleton {
 
     // Debounced, because a burst of notifications is one write and because
     // state.json must never be the reason the shell is doing disk I/O in a
-    // frame. Longer than the store's own 250ms debounce (Core/SpecFile.qml):
+    // frame. Longer than the store's own `writeDebounceMs` (Core/SpecFile.qml):
     // this one is about the burst, that one is about the file.
+    property int writeDebounceMs: 1000
+
+    function writeHistory() {
+        ShellState.set("notifications.history", root.history);
+    }
+
     Timer {
         id: persist
-        interval: 1000
-        onTriggered: ShellState.set("notifications.history", root.history)
+        interval: root.writeDebounceMs
+        onTriggered: root.writeHistory()
     }
 
     // A queued write is the notification list the user just saw; losing it to a
     // shell reload would be the one way history is not history.
-    Component.onDestruction: if (persist.running) ShellState.set("notifications.history", root.history)
+    Component.onDestruction: if (persist.running) root.writeHistory()
 
     Component.onCompleted: {
         if (ShellState.ready)

@@ -141,6 +141,26 @@ QtObject {
 
     // --- the delivery decision -----------------------------------------------
 
+    /// What is currently stopping popups from showing, or "" if nothing is.
+    ///
+    /// Only the three *situational* reasons — the ones that are true of the
+    /// moment rather than of the notification. `context` is
+    /// `{ urgency, dnd, fullscreen, centerOpen }`, and the urgency is here for
+    /// critical's one exemption.
+    ///
+    /// Split out of `decide()` so the shell has one place that knows this
+    /// cascade: the service reports it live for the bar indicator to explain
+    /// itself with, and a fourth reason should not mean editing two files.
+    function suppressionOf(context: var): string {
+        if (context.dnd && context.urgency !== urgencyCritical)
+            return "dnd";
+        if (context.fullscreen)
+            return "fullscreen";
+        if (context.centerOpen)
+            return "center";
+        return "";
+    }
+
     /// `{ popup, history, reason }` for one notification.
     ///
     /// `context` is `{ rule, urgency, transient, dnd, fullscreen, centerOpen }`.
@@ -148,8 +168,6 @@ QtObject {
     /// the rule that stopped it — it is what the log line says, so "why did I
     /// not see that" has an answer that does not need a debugger.
     function decide(context: var): var {
-        const critical = context.urgency === urgencyCritical;
-
         // Blocked is the only outcome that leaves no trace at all (#43).
         if (context.rule === "blocked")
             return { popup: false, history: false, reason: "blocked" };
@@ -161,14 +179,9 @@ QtObject {
 
         if (context.rule === "silent")
             return { popup: false, history: history, reason: "silent" };
-        if (context.dnd && !critical)
-            return { popup: false, history: history, reason: "dnd" };
-        if (context.fullscreen)
-            return { popup: false, history: history, reason: "fullscreen" };
-        if (context.centerOpen)
-            return { popup: false, history: history, reason: "center" };
 
-        return { popup: true, history: history, reason: "" };
+        const suppressed = suppressionOf(context);
+        return { popup: suppressed === "", history: history, reason: suppressed };
     }
 
     // --- history records -----------------------------------------------------
@@ -209,33 +222,6 @@ QtObject {
         if (limit <= 0)
             return [];
         return [entry].concat(list).slice(0, limit);
-    }
-
-    /// History without one app's rows — or, for the empty key, without any of
-    /// them. Clear-one and clear-all are the same operation at a different
-    /// scope, which is what makes them one line each in the center (#43).
-    function forget(history: var, key: string): var {
-        const list = Array.isArray(history) ? history : [];
-        if (!key)
-            return [];
-        return list.filter(entry => entry.appKey !== key);
-    }
-
-    /// `[{ key, name }]` for every app in history, newest first, once each.
-    /// This is where #43's "every app that has ever notified" list comes from —
-    /// history is the record of who has, so there is no second list to keep in
-    /// step with it.
-    function appsIn(history: var): var {
-        const list = Array.isArray(history) ? history : [];
-        const seen = {};
-        const out = [];
-        for (const entry of list) {
-            if (!entry || !entry.appKey || seen[entry.appKey])
-                continue;
-            seen[entry.appKey] = true;
-            out.push({ key: entry.appKey, name: entry.appName || entry.appKey });
-        }
-        return out;
     }
 
     /// History as read back from state.json, which is disposable and

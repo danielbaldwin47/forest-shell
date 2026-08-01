@@ -239,6 +239,26 @@ TestCase {
         compare(decision.history, false);
     }
 
+    function test_the_situational_reasons_are_asked_for_on_their_own() {
+        // The service reports this one live, for the bar indicator to explain
+        // itself with — so it has to answer without a notification in hand.
+        compare(policy.suppressionOf(context({})), "");
+        compare(policy.suppressionOf(context({ dnd: true })), "dnd");
+        compare(policy.suppressionOf(context({ fullscreen: true })), "fullscreen");
+        compare(policy.suppressionOf(context({ centerOpen: true })), "center");
+        // Critical's one exemption holds here too, since this is the cascade
+        // `decide` runs.
+        compare(policy.suppressionOf(context({ dnd: true, urgency: policy.urgencyCritical })), "");
+    }
+
+    function test_dnd_is_reported_ahead_of_the_others() {
+        // One reason is reported, and it is the first that applies: the log
+        // line and the indicator both want "the reason", not a list.
+        compare(policy.suppressionOf(context({ dnd: true, fullscreen: true, centerOpen: true })),
+                "dnd");
+        compare(policy.suppressionOf(context({ fullscreen: true, centerOpen: true })), "fullscreen");
+    }
+
     // --- history records -----------------------------------------------------
 
     function test_a_record_carries_what_the_center_has_to_render() {
@@ -312,32 +332,6 @@ TestCase {
         const after = policy.remember(before, policy.record({ summary: "new" }), 10);
         compare(before.length, 1);
         compare(after.length, 2);
-    }
-
-    function test_history_can_be_cleared_for_one_app_or_entirely() {
-        const history = [
-            policy.record({ appKey: "telegram", summary: "a" }),
-            policy.record({ appKey: "spotify", summary: "b" }),
-            policy.record({ appKey: "telegram", summary: "c" })
-        ];
-        compare(policy.forget(history, "telegram").length, 1);
-        compare(policy.forget(history, "telegram")[0].appKey, "spotify");
-        compare(policy.forget(history, "").length, 0);
-    }
-
-    function test_the_apps_in_history_are_listed_once_each_newest_first() {
-        // #43's rules UI lists "every app that has ever notified", and history
-        // is where that list comes from.
-        const history = [
-            policy.record({ appKey: "telegram", appName: "Telegram" }),
-            policy.record({ appKey: "spotify", appName: "Spotify" }),
-            policy.record({ appKey: "telegram", appName: "Telegram" })
-        ];
-        const apps = policy.appsIn(history);
-        compare(apps.length, 2);
-        compare(apps[0].key, "telegram");
-        compare(apps[0].name, "Telegram");
-        compare(apps[1].key, "spotify");
     }
 
     // --- reading the state file back -----------------------------------------

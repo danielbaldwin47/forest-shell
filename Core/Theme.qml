@@ -1,3 +1,5 @@
+pragma Singleton
+
 // The single source of design tokens (#12 §6): no raw hex, no magic spacing,
 // no ad-hoc durations anywhere else in the shell.
 //
@@ -5,7 +7,6 @@
 // to render. The theme tokens & icon pipeline ticket (#34) fills this file in
 // (swappable palette data, light seed, type scale, semantic roles); consumers
 // keep the same `Theme.<token>` call sites, so nothing above it moves.
-pragma Singleton
 import QtQuick
 import Quickshell
 

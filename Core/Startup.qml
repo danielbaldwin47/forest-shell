@@ -1,3 +1,5 @@
+pragma Singleton
+
 // Staged startup (#12 §4, #22 §4).
 //
 //   stage 1, synchronous : Config → Theme → Background. Nothing may be added
@@ -9,7 +11,6 @@
 // The fallback timer exists because the chain hangs off a real frame: with zero
 // screens attached (lid closed, nothing docked — an explicit #22 test case) no
 // frame ever arrives, and the deferred stage must still run.
-pragma Singleton
 import QtQuick
 import Quickshell
 

@@ -1,0 +1,98 @@
+// The coercers the spec table's `coerce` slots are built from (#21, #33).
+//
+// Contract: a coercer takes whatever `JSON.parse` produced for a key and
+// returns a value the shell can use, or `undefined` when it cannot be salvaged
+// — the store then falls back to that key's default and records an issue. One
+// bad value costs one key, never the file.
+//
+// Coercing rather than rejecting is deliberate. `settings.json` is meant to be
+// hand-edited, and `"true"` in a bool key or `"36"` in an int is a typo, not a
+// corrupt config; losing the whole bar over it would be the wrong lesson. Where
+// there is no obvious reading — an unknown enum name — the key falls back
+// instead of guessing.
+//
+// This is a closed vocabulary, not a grab-bag: bool, string, path, number,
+// integer, enum, object, array is the whole set a schema line may use, and a
+// key whose value does not fit one of them is a sign the key wants splitting.
+// Some have no caller yet only because their section's ticket has not landed —
+// they are what the schema is written *in*, so they stay.
+//
+// Pure functions, no Quickshell imports, so tests/ can reach them.
+import QtQuick
+
+QtObject {
+    function boolean(value) {
+        if (typeof value === "boolean")
+            return value;
+        if (typeof value === "number")
+            return value !== 0;
+        if (typeof value === "string") {
+            const text = value.trim().toLowerCase();
+            if (text === "true" || text === "yes" || text === "1")
+                return true;
+            if (text === "false" || text === "no" || text === "0")
+                return false;
+        }
+        return undefined;
+    }
+
+    function string(value) {
+        if (typeof value === "string")
+            return value;
+        if (typeof value === "number" || typeof value === "boolean")
+            return String(value);
+        return undefined;
+    }
+
+    // A leading `~` is left alone on purpose: Paths.fileUrl expands it at use
+    // time, and expanding it here would bake this machine's home directory into
+    // a config that is meant to travel between the laptop and the desktop.
+    function path(value) {
+        return string(value);
+    }
+
+    // `max` may be omitted for an open-ended range.
+    function number(min, max) {
+        return function (value) {
+            const asNumber = typeof value === "number"
+                ? value
+                : (typeof value === "string" && value.trim() !== "" ? Number(value) : NaN);
+            if (!isFinite(asNumber))
+                return undefined;
+            return clamp(asNumber, min, max);
+        };
+    }
+
+    function integer(min, max) {
+        const asNumber = number(min, max);
+        return function (value) {
+            const coerced = asNumber(value);
+            return coerced === undefined ? undefined : Math.round(coerced);
+        };
+    }
+
+    function clamp(value, min, max) {
+        if (min !== undefined && value < min)
+            return min;
+        if (max !== undefined && value > max)
+            return max;
+        return value;
+    }
+
+    function oneOf(allowed) {
+        return function (value) {
+            return allowed.indexOf(value) >= 0 ? value : undefined;
+        };
+    }
+
+    // Whole sub-objects are leaves in the spec table (theme-flagged groups like
+    // `bar.surface`), so this is the coercer that keeps them atomic.
+    function object(value) {
+        return (value !== null && typeof value === "object" && !Array.isArray(value))
+            ? value : undefined;
+    }
+
+    function array(value) {
+        return Array.isArray(value) ? value : undefined;
+    }
+}

@@ -1,3 +1,5 @@
+pragma Singleton
+
 // Force-touches the services that must run whether or not any surface is
 // looking at them (#12 §4): a QML singleton nothing references is never
 // constructed, so a service that only listens — battery, notifications, idle —
@@ -8,9 +10,8 @@
 // them would be evaluated when this singleton is created, which is stage one —
 // and the whole point of the deferred list is that it is not.
 //
-// Empty for now — the skeleton has no services yet. Later tickets add a name
-// per line to the right list and touch nothing else.
-pragma Singleton
+// Nearly empty — the shell has no services yet. Later tickets add a name per
+// line to the right list and touch nothing else.
 import QtQuick
 import Quickshell
 
@@ -28,7 +29,12 @@ Singleton {
     //
     //   report("deferred", [SystemTray, Weather]);
     function initDeferred() {
-        report("deferred", []);
+        // ShellState is not a service, but it has the same problem: it is
+        // written by whoever touches it and read by nobody at startup, so
+        // without a name here its file would only be read the first time some
+        // surface happened to ask (#33). Deferred, because nothing in it is
+        // worth a frame.
+        report("deferred", [ShellState]);
     }
 
     function report(stage: string, services) {

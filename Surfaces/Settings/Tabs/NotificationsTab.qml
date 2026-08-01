@@ -150,7 +150,7 @@ TabPage {
     /// Everything to show a row for, in one sorted list so the order does not
     /// jump as rules are set and cleared.
     readonly property var apps: {
-        const rules = Object.keys(Config.values.notifications.appRules);
+        const rules = Object.keys(Config.values.notifications.apps);
         const all = rules.concat(page.knownApps).concat(page.named);
         return all.filter((app, i) => all.indexOf(app) === i).sort();
     }

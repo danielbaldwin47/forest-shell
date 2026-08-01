@@ -91,11 +91,76 @@ TestCase {
         compare(c.array({}), undefined);
     }
 
-    // --- collections ---------------------------------------------------------
-    //
-    // The rule at the top of this file needs a level below the key for these:
-    // one key holds many independent things, and a typo in one of them must not
-    // take the rest of them with it.
+    // --- combinators ---------------------------------------------------------
+
+    // The field table a themed group is written with — the bar surface, cut
+    // down to the two keys that matter here.
+    readonly property var surfaceFields: ({
+        opacity: { def: 0.86, coerce: c.number(0.65, 1.0) },
+        grain: { def: 0.03, coerce: c.number(0, 0.1) }
+    })
+
+    function test_shape_defaults_come_from_the_field_table() {
+        // The leaf's `def` is derived from the same table its coercer reads, so
+        // the two cannot drift apart.
+        const defaults = c.shapeDefaults(surfaceFields);
+        compare(defaults.opacity, 0.86);
+        compare(defaults.grain, 0.03);
+    }
+
+    function test_shape_always_returns_every_key() {
+        // Whatever the file says, the group the shell reads is complete — a
+        // half-written group is the failure mode `themed` groups exist to
+        // prevent.
+        const out = c.shape(surfaceFields)({ opacity: 0.7 });
+        compare(out.opacity, 0.7);
+        compare(out.grain, 0.03);
+    }
+
+    function test_shape_clamps_inside_the_group() {
+        // The whole reason for the combinator: 20% fill measured 1.25:1 against
+        // the brightest wallpaper (#10), so the floor is not advisory.
+        compare(c.shape(surfaceFields)({ opacity: 0.2 }).opacity, 0.65);
+        compare(c.shape(surfaceFields)({ opacity: 4 }).opacity, 1.0);
+    }
+
+    function test_one_bad_key_costs_one_key() {
+        ignoreWarning(/ignoring bar.surface.opacity/);
+        const out = c.shape(surfaceFields, "bar.surface")({ opacity: "loud", grain: 0.05 });
+        compare(out.opacity, 0.86);
+        compare(out.grain, 0.05);
+    }
+
+    function test_shape_keeps_keys_it_does_not_name() {
+        // A group written by a newer shell must not be pruned by an older one:
+        // the settings GUI serializes the *resolved* group back sparsely, so a
+        // key dropped here would be a key dropped from the user's file (#54).
+        const out = c.shape(surfaceFields)({ opacity: 0.9, mystery: 1 });
+        compare(out.mystery, 1);
+        compare(Object.keys(out).length, 3);
+    }
+
+    function test_shape_rejects_a_non_object_wholesale() {
+        // Nothing to salvage per key, so the leaf falls back as one.
+        compare(c.shape(surfaceFields)([]), undefined);
+        compare(c.shape(surfaceFields)("0.86"), undefined);
+    }
+
+    function test_array_of_coerces_entries() {
+        compare(c.arrayOf(c.string)(["workspaces", 3]), ["workspaces", "3"]);
+    }
+
+    function test_array_of_drops_what_it_cannot_read() {
+        // A list has no per-slot default, so a bad entry leaves rather than
+        // becoming a hole the bar would have to render.
+        ignoreWarning(/dropping module entry/);
+        compare(c.arrayOf(c.string, "module")(["clock", {}]), ["clock"]);
+    }
+
+    function test_array_of_still_rejects_non_arrays() {
+        compare(c.arrayOf(c.string)("clock"), undefined);
+        compare(c.arrayOf(c.string)({ a: "b" }), undefined);
+    }
 
     function test_map_of_drops_only_the_bad_entry() {
         const rules = c.mapOf(c.oneOf(["normal", "silent", "blocked"]));
@@ -111,62 +176,5 @@ TestCase {
     function test_map_of_still_rejects_a_non_object() {
         compare(c.mapOf(c.string)(["silent"]), undefined);
         compare(c.mapOf(c.string)("silent"), undefined);
-    }
-
-    function test_list_of_drops_only_the_bad_entry() {
-        const modules = c.listOf(c.oneOf(["clock", "battery", "tray"]));
-        const out = modules(["clock", "aquarium", "tray"]);
-
-        compare(out.length, 2);
-        compare(out[0], "clock");
-        compare(out[1], "tray");
-    }
-
-    function test_list_of_still_rejects_a_non_array() {
-        compare(c.listOf(c.string)({ a: "b" }), undefined);
-    }
-
-    // --- theme-flagged groups ------------------------------------------------
-
-    function test_shape_fills_in_the_knobs_a_hand_edit_left_out() {
-        // The trap `shape` exists to close: a themed group is one key, so
-        // without the merge, naming one knob would drop the rest.
-        const surface = c.shape({ opacity: 0.86, blur: true, grain: 0.03 },
-                                { opacity: c.number(0.65, 1) });
-        const out = surface({ opacity: 0.7 });
-
-        compare(out.opacity, 0.7);
-        compare(out.blur, true);
-        compare(out.grain, 0.03);
-    }
-
-    function test_shape_clamps_a_knob_without_touching_its_neighbours() {
-        const surface = c.shape({ opacity: 0.86, blur: true },
-                                { opacity: c.number(0.65, 1) });
-        const out = surface({ opacity: 0.2, blur: false });
-
-        // 0.2 is unreadable text over a bright wallpaper, so it comes back at
-        // the floor — and the blur the user turned off stays off.
-        compare(out.opacity, 0.65);
-        compare(out.blur, false);
-    }
-
-    function test_shape_falls_back_one_knob_at_a_time() {
-        const ridge = c.shape({ shape: "strata", unitWidth: 14 },
-                              { shape: c.oneOf(["strata"]), unitWidth: c.integer(4, 24) });
-        const out = ridge({ shape: "pills", unitWidth: 9 });
-
-        compare(out.shape, "strata");   // unreadable name → this knob's default
-        compare(out.unitWidth, 9);      // the knob next to it is untouched
-    }
-
-    function test_shape_keeps_keys_it_does_not_know() {
-        // A group written by a newer shell must not be pruned by an older one.
-        const out = c.shape({ opacity: 0.86 }, {})({ opacity: 0.9, sheen: 3 });
-        compare(out.sheen, 3);
-    }
-
-    function test_shape_still_rejects_a_non_object() {
-        compare(c.shape({ opacity: 1 }, {})(0.5), undefined);
     }
 }

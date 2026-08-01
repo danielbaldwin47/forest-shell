@@ -56,7 +56,7 @@ TabPage {
         label: "Inner padding"
         binding: paddingBinding
 
-        ConfigBinding { id: paddingBinding; path: "bar.paddingH" }
+        ConfigBinding { id: paddingBinding; path: "bar.padding" }
 
         SettingSlider { binding: paddingBinding; from: 0; to: 32 }
     }

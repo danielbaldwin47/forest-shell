@@ -75,20 +75,6 @@ QtObject {
         "systemMonitor", "brightness", "nightLight", "recorder"
     ]
 
-    /// Rounded-top strata (locked in #10); `peaks` and `pills` were built and
-    /// rejected, so they are not offered.
-    ///
-    /// The same line is why the ridgeline group has no horizon rule and no
-    /// workspace-id toggle: the prototype had both on sliders, #10 decided
-    /// against both, and a decided-against variant is not a setting any more
-    /// than `pills` is. What ships as settings is the *chosen* parameters —
-    /// including, explicitly, whether the active workspace is teal or amber.
-    readonly property var ridgeShapes: ["strata"]
-
-    /// #10 resolved the active workspace to teal, reserving amber for
-    /// attention — and resolved the choice itself to be a setting.
-    readonly property var ridgeAccents: ["teal", "amber"]
-
     /// Model aliases, not ids: the launcher passes these through to `--model`
     /// (#41). `opusplan` is a plan-mode alias and resolves to sonnet under
     /// `-p`, so it is deliberately not offered.
@@ -133,17 +119,14 @@ QtObject {
     ///
     /// `coerce` may still be given outright for a knob none of that fits, and
     /// is what a future knob type lands as before it earns a shorthand here.
-    function group(knobs) {
-        const defaults = {};
-        const coercers = {};
-
+    function group(label, knobs) {
+        const fields = {};
         for (const key in knobs) {
             const knob = knobs[key];
-            defaults[key] = knob.def;
-            coercers[key] = knob.coerce ?? coercerFor(knob);
+            fields[key] = { def: knob.def, coerce: knob.coerce ?? coercerFor(knob) };
         }
 
-        return { def: defaults, coerce: c.shape(defaults, coercers),
+        return { def: c.shapeDefaults(fields), coerce: c.shape(fields, label),
                  themed: true, knobs: knobs };
     }
 
@@ -190,6 +173,11 @@ QtObject {
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
+            // The one degrade knob (#22 §7): manual, never auto-detected, and
+            // a fully supported look rather than a broken mode. In cost order
+            // it turns off the compositor blur, then decorative effects, then
+            // collapses every transition to a 140ms opacity fade.
+            reducedEffects: { def: false, coerce: c.boolean },
             // Role → colour, read by Core/Theme.qml (#34): an unknown role or
             // an unparseable colour is dropped with a warning rather than
             // painted, because this arrives hand-edited.
@@ -201,67 +189,111 @@ QtObject {
         // theme-flagged, because a preset (#56) swaps how the bar *looks*
         // without moving modules around or resizing it.
         bar: {
-            // Flush full-width is the shipped answer (#10): flushness turned out
-            // to be a property of the wallpaper, not of the bar, and the opaque
-            // band is the failure mode worth designing for.
-            floating: { def: false, coerce: c.boolean },
-            height: { def: 32, coerce: c.integer(24, 48) },
-            paddingH: { def: 12, coerce: c.integer(0, 32) },
-            moduleGap: { def: 14, coerce: c.integer(0, 32) },
+            // Top horizontal is the v1 bar (#9). Left/right are absent rather
+            // than accepted-and-ignored: the widgets are built axis-agnostic so
+            // a vertical bar can land post-v1 without rewrites, but a position
+            // the shell cannot actually lay out is a dead setting.
+            position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
+            // 32 logical px — 48 device px at the T480's 1.5 scale. 26 crowds
+            // the icons, 36+ reads as a title bar (#10).
+            height: { def: 32, coerce: c.integer(20, 64) },
+            padding: { def: 12, coerce: c.integer(0, 48) },
+            moduleGap: { def: 14, coerce: c.integer(0, 48) },
 
+            // Flush full-width is the default; floating insets the bar into a
+            // rounded slab. The margins and radius only apply while floating.
+            floating: { def: false, coerce: c.boolean },
+            floatMarginH: { def: 12, coerce: c.integer(0, 64) },
+            floatMarginV: { def: 8, coerce: c.integer(0, 64) },
+            floatRadius: { def: 10, coerce: c.integer(0, 32) },
+
+            // The window is never destroyed to hide it (#12 §2, #22 §5) — it
+            // drops its content and keeps a reveal strip.
+            autoHide: { def: false, coerce: c.boolean },
+
+            // Which modules the bar carries, in which cluster, in what order.
+            // Presence *is* enablement: there is no separate `enabled` flag,
+            // because a module that is off is a module that is not in a list.
+            //
+            // A list of names, not a closed enum: unknown names are dropped by
+            // the registry with a warning rather than here
+            // (Surfaces/Bar/BarRegistry.qml), so a file written by a newer
+            // shell keeps its modules under an older one. Three leaves rather
+            // than one leaf holding all three, so reordering one cluster
+            // writes back only that cluster.
             modules: {
-                left: { def: ["launcher", "workspaces", "activeWindow"],
-                        coerce: c.listOf(c.oneOf(schema.barModules)) },
-                center: { def: ["clock", "media"],
-                          coerce: c.listOf(c.oneOf(schema.barModules)) },
-                right: { def: ["tray", "status", "battery", "keyboard",
-                               "notifications", "controlCenter"],
-                         coerce: c.listOf(c.oneOf(schema.barModules)) }
+                left: { def: ["workspaces"], coerce: c.arrayOf(c.string, "bar.modules.left") },
+                center: { def: ["clock"], coerce: c.arrayOf(c.string, "bar.modules.center") },
+                right: { def: [], coerce: c.arrayOf(c.string, "bar.modules.right") }
             },
 
-            surface: schema.group({
-                // 86% measured 7.12:1 for secondary text over the brightest pin
-                // wallpaper — statistically indistinguishable from opaque, while
-                // still moving with the wallpaper. The floor is not taste: at
-                // 60% the same text measured 4.44:1 and fails the design
-                // system's 4.5:1 body floor, so the range starts at 0.65 (#10).
-                opacity: { def: 0.86, min: 0.65, max: 1, label: "Fill opacity" },
-                // Delegated to a Hyprland layerrule in the shipping shell, so
-                // this is "ask the compositor for it", not a per-frame effect.
-                // Desaturation was dropped in #35 — unreachable from a
-                // layerrule and not load-bearing.
+            // The two styling groups, declared knob by knob (`group()` above):
+            // the group's default object, its knob-by-knob coercer and the
+            // controls the Bar tab renders are all derived from each line, so
+            // a slider cannot offer a value the file would then clamp.
+            //
+            // Every number below is a measured decision from the bar prototype
+            // (#10), not a taste call made at this keyboard. What is *not*
+            // here is as deliberate: no ridgeline shape key (`peaks` and
+            // `pills` were built and rejected — shipping them as settings
+            // would ship the rejected designs), no horizon rule and no
+            // workspace id under the active peak (both measured as not working
+            // at a 32px bar).
+            surface: schema.group("bar.surface", {
+                // 86% of `surface` over the wallpaper. Measured 7.12:1 for
+                // text-secondary under the right-hand cluster — the worst
+                // case, since that cluster sits over the brightest part of the
+                // sky. The floor is 0.65: 0.60 measured 4.44:1 and fails the
+                // body-text rule (#10).
+                opacity: { def: 0.86, min: 0.65, max: 1.0, label: "Fill opacity" },
+                // Blur is the compositor's job — a Hyprland layerrule on this
+                // bar's namespace, which costs the shell nothing per frame.
                 blur: { def: true, label: "Blur the wallpaper behind" },
-                mist: { def: 0.10, min: 0, max: 0.3, label: "Mist wash" },
+                // The brief's pale mist wash, §6.1.
+                mistWash: { def: 0.10, min: 0, max: 0.5, label: "Mist wash" },
+                // "Barely-perceptible top-edge lightening" — the vertical
+                // luminance gradient every board pin has, compressed into 32px.
                 topLight: { def: true, label: "Top-edge lightening" },
-                bottomHairline: { def: true, label: "Bottom hairline" },
-                grain: { def: 0.03, min: 0, max: 0.08, label: "Grain" },
-                // Less translucency as the wallpaper brightens. Off by default:
-                // it is a second opinion about a number the user just set.
+                topLightAmount: { def: 0.05, min: 0, max: 0.4, label: "Top light amount" },
+                // 1px border-subtle bottom hairline: the bar's bottom edge is
+                // a horizon, and the horizon motif wants a line.
+                hairline: { def: true, label: "Bottom hairline" },
+                // 2-4% monochrome noise kills gradient banding (brief §3.5).
+                grain: { def: 0.03, min: 0, max: 0.1, label: "Grain" },
+                // Less translucency as the wallpaper brightens. Off by
+                // default, and costs nothing while off.
                 adaptiveOpacity: { def: false, label: "Adapt opacity to the wallpaper" }
             }),
 
-            ridgeline: schema.group({
-                shape: { def: "strata", values: schema.ridgeShapes, label: "Shape" },
-                // Width is the whole ballgame: at 14 with a gap of 4 the
-                // horizontal rhythm outruns the vertical and the range appears;
-                // wider and the units read as buttons (#10).
-                unitWidth: { def: 14, min: 4, max: 24, label: "Unit width" },
-                gap: { def: 4, min: 0, max: 12, label: "Gap" },
-                // Height and haze both fall away by distance from the active
-                // workspace; that double encoding is what reads as a receding
-                // range rather than a progress bar.
-                activeHeight: { def: 14, min: 4, max: 24, label: "Active height" },
-                occupiedHeight: { def: 9, min: 2, max: 24, label: "Occupied height" },
-                emptyHeight: { def: 3, min: 0, max: 24, label: "Empty height" },
-                heightFalloff: { def: 2, min: 0, max: 8, label: "Height falloff" },
-                activeHaze: { def: 1.0, min: 0, max: 1, label: "Active haze" },
+            ridgeline: schema.group("bar.ridgeline", {
+                // Width is the whole ballgame (#10): at w14/gap4 the units
+                // read as receding strata; narrower and it reads as a bar
+                // chart, wider and it reads as a row of buttons. Locked taste
+                // call.
+                unitWidth: { def: 14, min: 4, max: 40, label: "Unit width" },
+                gap: { def: 4, min: 0, max: 20, label: "Gap" },
+                // Heights: active tallest, occupied falling away by distance,
+                // empty at the vanishing height regardless.
+                activeHeight: { def: 14, min: 2, max: 48, label: "Active height" },
+                occupiedHeight: { def: 9, min: 1, max: 48, label: "Occupied height" },
+                emptyHeight: { def: 3, min: 0, max: 48, label: "Empty height" },
+                falloff: { def: 2, min: 0, max: 12, label: "Height falloff" },
+                minHeight: { def: 4, min: 0, max: 48, label: "Minimum height" },
+                // Haze: the same encoding again, in opacity, so distance reads
+                // twice.
                 occupiedHaze: { def: 0.62, min: 0, max: 1, label: "Occupied haze" },
                 emptyHaze: { def: 0.22, min: 0, max: 1, label: "Empty haze" },
                 hazeFalloff: { def: 0.10, min: 0, max: 1, label: "Haze falloff" },
-                // Teal, resolved: amber is the one warm element and it is
-                // reserved for attention, so the bar at rest carries none.
-                activeAccent: { def: "teal", values: schema.ridgeAccents,
-                                label: "Active workspace accent" }
+                minHaze: { def: 0.15, min: 0, max: 1, label: "Minimum haze" },
+                // Hyprland destroys empty workspaces, so a fixed slot range is
+                // unioned with whatever live workspaces exist beyond it —
+                // otherwise the row grows and shrinks as you work.
+                slots: { def: 5, min: 1, max: 20, label: "Workspace slots" },
+                // The single-lamplight rule, resolved (#10): amber is reserved
+                // for attention, so the active workspace is teal and the bar
+                // at rest carries no warm element at all. This is the escape
+                // hatch for the other reading, not the default.
+                amberActive: { def: false, label: "Amber active workspace" }
             })
         },
 
@@ -290,7 +322,7 @@ QtObject {
                 // `--tools`, and a name the CLI does not know is a silently
                 // weaker restriction rather than an error.
                 tools: { def: schema.claudeTools.slice(),
-                         coerce: c.listOf(c.oneOf(schema.claudeTools)) },
+                         coerce: c.arrayOf(c.oneOf(schema.claudeTools), "launcher.claude.tools") },
                 permissionMode: { def: "default",
                                   coerce: c.oneOf(schema.claudePermissionModes) }
             }
@@ -306,15 +338,45 @@ QtObject {
 
         notifications: {
             // DND is not here — it is situational, so it is state (#21).
-            // Timeouts and history land with #42 and #43.
+
+            // How long a popup stays up, per urgency, in ms. 0 means "until it
+            // is dismissed", which is why critical is 0: an urgent notification
+            // that times out unseen is the one failure the level exists to
+            // prevent (#42).
+            timeouts: {
+                low: { def: 5000, coerce: c.integer(0, 300000) },
+                normal: { def: 8000, coerce: c.integer(0, 300000) },
+                critical: { def: 0, coerce: c.integer(0, 300000) }
+            },
+
+            // Off by default: nearly every client passes a hardcoded 5000 it
+            // never thought about, so honouring it would make the table above
+            // dead settings. On, a client's own expire-timeout hint wins.
+            honorClientTimeout: { def: false, coerce: c.boolean },
+
+            // Popups on screen at once. Past this the oldest leaves early to
+            // make room — it is already in history, and an uncapped stack is a
+            // screen a notification storm can fill top to bottom.
+            maxVisible: { def: 3, coerce: c.integer(1, 10) },
+
+            // Rows kept in the history the center renders (#43). 0 turns
+            // history off, which is also "do not write my notifications to
+            // disk".
+            historyLimit: { def: 100, coerce: c.integer(0, 1000) },
+
+            // App key → "normal" | "silent" (history only) | "blocked"
+            // (nothing at all). The app key is the desktop entry where a client
+            // supplies one and the app name otherwise, lower-cased.
             //
-            // App id → rule, for every app that has ever notified (#43). A map
-            // and not a list because the shell writes into it by app id, and
-            // one unparseable rule drops that app's entry rather than every
-            // other app's (Core/Coerce.qml, `mapOf`). Apps at `normal` are
-            // absent: the default is the absence of a rule, so this file only
-            // ever carries the apps the user actually silenced or blocked.
-            appRules: { def: ({}), coerce: c.mapOf(c.oneOf(schema.notificationRules)) }
+            // A map rather than a section because the keys are the user's
+            // apps, not ours: the spec table cannot name them ahead of time.
+            // One unparseable rule drops that app's entry rather than every
+            // other app's (Core/Coerce.qml, `mapOf`) — an absent entry is what
+            // `normal` already means, so this file only ever carries the apps
+            // the user actually silenced or blocked. Enforced by
+            // Services/Notifications (#42); the three-way UI that writes it is
+            // the Notifications tab (#43, #54).
+            apps: { def: ({}), coerce: c.mapOf(c.oneOf(schema.notificationRules)) }
         },
 
         weatherTime: {
@@ -334,6 +396,26 @@ QtObject {
                 from: { def: "20:00", coerce: c.string },
                 to: { def: "07:00", coerce: c.string },
                 temperature: { def: 4000, coerce: c.integer(1000, 6500) }
+            },
+
+            // The lock screen (#30, #47). Four keys, and deliberately no fifth:
+            // there is no retry limit, no lockout duration and no failed-attempt
+            // count here, because faillock owns all three and the shell keeps no
+            // counts of its own. The idle timeouts that *reach* the lock are the
+            // idle ladder's (#48), not the lock's.
+            lock: {
+                // Count only, never contents (#9). Off is for a machine that
+                // locks in front of other people.
+                notificationCount: { def: true, coerce: c.boolean },
+                // The system stack, so the lock inherits faillock and whatever
+                // else the distro already trusts, and the shell writes nothing
+                // to /etc. "login" is an Arch/Debian assumption rather than a
+                // law, which is the only reason this is a key at all.
+                pamConfig: { def: "login", coerce: c.string },
+                // Fingerprint is latent: this permits it, fprintd decides. Off
+                // means do not even probe.
+                fingerprint: { def: true, coerce: c.boolean },
+                fingerprintPamConfig: { def: "fprintd", coerce: c.string }
             }
         }
     })

@@ -58,6 +58,25 @@ TestCase {
         verify(store.leafAt(settings.spec, "system.nightLight.enabled") !== null);
     }
 
+    function test_notification_timeouts_are_settings_exposed_per_urgency() {
+        // #42 asks for urgency-aware timeouts with authored defaults, reachable
+        // from settings.json. Critical's 0 is the load-bearing one: it means
+        // "until acknowledged", not "no timeout configured".
+        compare(store.leafAt(settings.spec, "notifications.timeouts.low").def, 5000);
+        compare(store.leafAt(settings.spec, "notifications.timeouts.normal").def, 8000);
+        compare(store.leafAt(settings.spec, "notifications.timeouts.critical").def, 0);
+    }
+
+    function test_per_app_rules_are_a_free_form_map() {
+        // The keys are the user's apps, so the spec table cannot name them:
+        // this is one leaf holding an object, not a section (#42, #43).
+        const leaf = store.leafAt(settings.spec, "notifications.apps");
+        verify(leaf !== null, "notifications.apps is not a leaf");
+        compare(leaf.def, ({}));
+        // Not theme-flagged: a preset has no business silencing an app (#56).
+        compare(leaf.themed, undefined);
+    }
+
     function test_a_fresh_config_is_only_a_version_stamp() {
         // Sparse: defaults are never written out, so a first-run file is one
         // line and every later default change reaches the user.
@@ -84,6 +103,69 @@ TestCase {
         compare(out.appearance, undefined);
         compare(out.keptByANewerShell, 1);
         compare(out.settingsVersion, 2);
+    }
+
+    // --- the bar section (#35) ----------------------------------------------
+
+    function test_the_bar_defaults_are_the_decided_ones() {
+        // #10's resolution table. If one of these changes, the decision
+        // changed — this is not a formatting preference.
+        const bar = store.defaults(settings.spec).bar;
+        compare(bar.position, "top");
+        compare(bar.height, 32);
+        compare(bar.padding, 12);
+        compare(bar.moduleGap, 14);
+        compare(bar.floating, false);
+        compare(bar.surface.opacity, 0.86);
+        compare(bar.surface.hairline, true);
+        compare(bar.surface.grain, 0.03);
+        compare(bar.surface.adaptiveOpacity, false);
+        compare(bar.ridgeline.unitWidth, 14);
+        compare(bar.ridgeline.gap, 4);
+        compare(bar.ridgeline.activeHeight, 14);
+        compare(bar.ridgeline.occupiedHeight, 9);
+        compare(bar.ridgeline.emptyHeight, 3);
+        compare(bar.ridgeline.falloff, 2);
+        compare(bar.ridgeline.occupiedHaze, 0.62);
+        compare(bar.ridgeline.emptyHaze, 0.22);
+        // Amber is reserved for attention; the active workspace is teal, so
+        // the bar at rest carries no warm element (#10).
+        compare(bar.ridgeline.amberActive, false);
+    }
+
+    function test_a_hand_edited_bar_opacity_cannot_go_illegible() {
+        // The one number in the file that can make the bar unreadable rather
+        // than merely ugly: 20% fill measured 1.25:1 (#10).
+        const values = store.resolve(settings.spec, { bar: { surface: { opacity: 0.2 } } }).values;
+        compare(values.bar.surface.opacity, 0.65);
+    }
+
+    function test_a_partly_written_themed_group_still_resolves_whole() {
+        // A preset or a hand edit may name one key; every consumer still reads
+        // a complete group.
+        const values = store.resolve(settings.spec, { bar: { ridgeline: { slots: 9 } } }).values;
+        compare(values.bar.ridgeline.slots, 9);
+        compare(values.bar.ridgeline.unitWidth, 14);
+        compare(Object.keys(values.bar.ridgeline).length,
+                Object.keys(store.leafAt(settings.spec, "bar.ridgeline").knobs).length);
+    }
+
+    function test_module_order_is_three_lists_of_names() {
+        const modules = store.defaults(settings.spec).bar.modules;
+        compare(modules.left, ["workspaces"]);
+        compare(modules.center, ["clock"]);
+        compare(modules.right, []);
+    }
+
+    function test_a_reordered_bar_writes_back_only_the_module_key() {
+        // Sparse: changing the bar layout must not freeze every other bar
+        // default into the user's file.
+        const values = store.defaults(settings.spec);
+        values.bar.modules.left = ["clock", "workspaces"];
+        const out = store.serialize(settings.spec, values, {});
+        compare(out.bar.modules.left, ["clock", "workspaces"]);
+        compare(out.bar.height, undefined);
+        compare(out.bar.surface, undefined);
     }
 
     function test_empty_sections_are_sections_and_not_leaves() {
@@ -126,7 +208,7 @@ TestCase {
 
         compare(surface.opacity, 0.7);
         compare(surface.grain, 0.03);
-        compare(surface.bottomHairline, true);
+        compare(surface.hairline, true);
     }
 
     function test_moving_one_knob_writes_only_that_knob() {
@@ -171,12 +253,16 @@ TestCase {
         compare(store.resolve(settings.spec, raw).values.bar.surface.opacity, 0.65);
     }
 
-    function test_an_unknown_bar_module_costs_that_module_only() {
+    function test_module_lists_pass_unknown_names_to_the_registry() {
+        // The schema's business is "a list of names"; which names exist is the
+        // bar's, and the registry drops unknowns with a warning
+        // (tests/tst_barregistry.qml). Validating against a closed list here
+        // would let an older shell prune the modules a newer one shipped.
         const raw = { bar: { modules: { left: ["launcher", "aquarium", "clock"] } } };
         const left = store.resolve(settings.spec, raw).values.bar.modules.left;
 
-        compare(left.length, 2);
-        compare(left[1], "clock");
+        compare(left.length, 3);
+        compare(left[1], "aquarium");
     }
 
     function test_every_default_bar_module_is_one_the_registry_knows() {
@@ -200,9 +286,9 @@ TestCase {
     }
 
     function test_a_notification_rule_the_shell_cannot_read_costs_one_app() {
-        const raw = { notifications: { appRules: {
+        const raw = { notifications: { apps: {
             firefox: "silent", slack: "screaming", mail: "blocked" } } };
-        const rules = store.resolve(settings.spec, raw).values.notifications.appRules;
+        const rules = store.resolve(settings.spec, raw).values.notifications.apps;
 
         compare(rules.firefox, "silent");
         compare(rules.mail, "blocked");

@@ -12,18 +12,20 @@
 // instead of guessing.
 //
 // This is a closed vocabulary, not a grab-bag: bool, string, path, number,
-// integer, enum, object, array, and the two collection combinators below are
-// the whole set a schema line may use, and a key whose value does not fit one
-// of them is a sign the key wants splitting. Some have no caller yet only
-// because their section's ticket has not landed — they are what the schema is
-// written *in*, so they stay.
+// integer, enum, object, array is the whole set a schema line may use, and a
+// key whose value does not fit one of them is a sign the key wants splitting.
+// Some have no caller yet only because their section's ticket has not landed —
+// they are what the schema is written *in*, so they stay.
+//
+// `shape` and `arrayOf` at the bottom are **combinators over that vocabulary**,
+// not additions to it: they exist because a few leaves are whole sub-objects
+// that may not be split (#56 — a theme preset replaces a group atomically), and
+// those still have to be validated key by key.
 //
 // Pure functions, no Quickshell imports, so tests/ can reach them.
 import QtQuick
 
 QtObject {
-    readonly property QtObject json: JsonMerge {}
-
     function boolean(value) {
         if (typeof value === "boolean")
             return value;
@@ -99,21 +101,64 @@ QtObject {
         return Array.isArray(value) ? value : undefined;
     }
 
-    // --- collections -----------------------------------------------------------
-    //
-    // The two combinators above the scalars: a key whose value is a *collection
-    // of* something the vocabulary already covers. They exist because the
-    // one-bad-value-costs-one-key rule needs a level below the key for these —
-    // `notifications.appRules` is one key holding a rule per app, and a typo in
-    // one app's rule must not silently switch every other app back to normal.
-    //
-    // So they drop the bad entry and keep the rest, rather than returning
-    // `undefined` for the whole key. The dropped entry is not reported here:
-    // these are pure, and the store's issue list is per key. The value the user
-    // sees in the GUI is the surviving map, which is the honest answer.
+    // --- combinators ---------------------------------------------------------
 
-    /// String-keyed map whose *values* all coerce the same way. Entries the
-    /// value coercer refuses are dropped.
+    /// A whole sub-object, validated key by key.
+    ///
+    /// `fields` is `{ key: { def, coerce } }` — the same two slots a spec-table
+    /// leaf carries, one level down. The result is always **complete**: a key
+    /// the file omits gets its default, and a key that cannot be salvaged gets
+    /// its default and a warning, so one bad value inside a group costs one
+    /// key rather than the group.
+    ///
+    /// Needed because the theme-flagged groups (`bar.surface`,
+    /// `bar.ridgeline`) are single leaves so a preset can replace them
+    /// atomically (#56), and the plain `object` coercer waves whatever is
+    /// inside them straight through. That is how a hand-edited bar opacity of
+    /// `"loud"` — or of 0.2, which #10 measured at 1.25:1 against the
+    /// wallpaper — would reach the screen.
+    ///
+    /// Keys the shape does not name are carried through untouched, not pruned.
+    /// A themed group is one key, so the settings GUI (#54) serializes the
+    /// *resolved* group back into the file sparsely — if resolution dropped an
+    /// unknown key here, an older shell's first slider move would prune a group
+    /// written by a newer one, which is exactly the pruning the sparse-write
+    /// rule exists to prevent (Core/SpecStore.qml).
+    function shape(fields, label) {
+        return function (value) {
+            if (object(value) === undefined)
+                return undefined;
+
+            const out = {};
+            for (const key in fields) {
+                const field = fields[key];
+                const raw = value[key];
+                if (raw === undefined) {
+                    out[key] = field.def;
+                    continue;
+                }
+                const coerced = field.coerce(raw);
+                if (coerced === undefined) {
+                    console.warn("settings: ignoring " + (label ? label + "." : "") + key
+                                 + " = " + JSON.stringify(raw));
+                    out[key] = field.def;
+                } else {
+                    out[key] = coerced;
+                }
+            }
+            for (const key in value)
+                if (!(key in fields))
+                    out[key] = value[key];
+            return out;
+        };
+    }
+
+    /// String-keyed map whose *values* all coerce the same way — one key
+    /// holding many independent entries, like `notifications.apps` holding a
+    /// rule per app. Entries the value coercer refuses are dropped rather than
+    /// failing the key: a typo in one app's rule must not silently switch every
+    /// other app back to normal. The dropped entry is not reported here — these
+    /// are pure, and the store's issue list is per key.
     function mapOf(valueCoerce) {
         return function (value) {
             const source = object(value);
@@ -130,52 +175,30 @@ QtObject {
         };
     }
 
-    /// A whole sub-object leaf — a theme-flagged group (#56) — merged over its
-    /// own defaults and then coerced knob by knob.
-    ///
-    /// This is what stops `themed: true` atomicity from becoming a trap. The
-    /// group is one key: a preset replaces it wholesale and never half-merges
-    /// into keys the user left behind. But a *user* who writes
-    /// `"bar": { "surface": { "opacity": 0.7 } }` by hand means "that one knob",
-    /// not "and drop the other nine" — and without the merge every consumer, and
-    /// every control in the settings GUI (#54), would read `undefined` for the
-    /// rest. Unknown keys inside the group survive, same as anywhere else in the
-    /// file: a group written by a newer shell is not pruned by an older one.
-    ///
-    /// `coercers` is per knob and optional per knob. A knob that fails falls
-    /// back to its own default, so the one-bad-value-costs-one-key rule reaches
-    /// inside the group — a bar opacity of `0.2` is unreadable text, and it must
-    /// cost the opacity rather than the whole surface.
-    function shape(defaults, coercers) {
-        return function (value) {
-            const source = object(value);
-            if (source === undefined)
-                return undefined;
-
-            const out = json.merge(defaults, source);
-            for (const key in (coercers || {})) {
-                if (out[key] === undefined)
-                    continue;
-                const coerced = coercers[key](out[key]);
-                out[key] = coerced === undefined ? json.deepCopy(defaults[key]) : coerced;
-            }
-            return out;
-        };
+    /// The defaults of a `shape` field table, as the leaf's `def`. Derived
+    /// rather than written twice — a group whose default and whose validation
+    /// disagreed would resolve differently on the first run than on the second.
+    function shapeDefaults(fields) {
+        const out = {};
+        for (const key in fields)
+            out[key] = fields[key].def;
+        return out;
     }
 
-    /// List whose entries all coerce the same way. Entries the item coercer
-    /// refuses are dropped, so an unknown module id in the bar registry costs
-    /// that module and not the user's whole layout.
-    function listOf(itemCoerce) {
+    /// A homogeneous list. Entries that do not coerce are **dropped** with a
+    /// warning, because a list has no per-slot default to fall back to — a hole
+    /// in a module order is not a thing the bar can render.
+    function arrayOf(item, label) {
         return function (value) {
-            const source = array(value);
-            if (source === undefined)
+            if (array(value) === undefined)
                 return undefined;
-
             const out = [];
-            for (const item of source) {
-                const coerced = itemCoerce(item);
-                if (coerced !== undefined)
+            for (const entry of value) {
+                const coerced = item(entry);
+                if (coerced === undefined)
+                    console.warn("settings: dropping " + (label ? label + " " : "")
+                                 + "entry " + JSON.stringify(entry));
+                else
                     out.push(coerced);
             }
             return out;

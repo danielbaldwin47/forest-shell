@@ -2,7 +2,7 @@
 //
 // Three states, and the first of them is the absence of a rule: `normal` is what
 // every app does, so choosing it *removes* the key rather than writing
-// `"normal"` into the file. That keeps `notifications.appRules` a list of the
+// `"normal"` into the file. That keeps `notifications.apps` a list of the
 // apps the user has actually done something about, which is what makes it worth
 // reading by hand — and it is why this row is not a plain `SettingChoice`, which
 // would have nothing to highlight when the value is absent.
@@ -29,7 +29,7 @@ RowLayout {
         ? "normal" : String(root.binding.value)
 
     readonly property ConfigBinding binding: ConfigBinding {
-        path: "notifications.appRules"
+        path: "notifications.apps"
         knob: root.app
     }
 

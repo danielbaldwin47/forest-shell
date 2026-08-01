@@ -145,6 +145,24 @@ QtObject {
     readonly property real fogBlur: 14            // px; Hyprland layer blur live
     readonly property real fogSaturation: -0.20   // MultiEffect delta for saturate(0.8)
 
+    // The vertical luminance gradient (brief §3.2), picked by the first surface
+    // that needed it — the lock (#47), where a wallpaper of any brightness has
+    // to hold a serif clock and a password field legibly. `bgBase` at these
+    // alphas, bright end at the top, per the brief's "every pin is dark at the
+    // bottom, bright at the top".
+    //
+    // The brief's own 4–6% is the delta between *bands of a surface*; a veil
+    // over an arbitrary photograph needs more, and 8→55% is what keeps
+    // `textPrimary` above its measured contrast on the brightest wallpaper
+    // without the wallpaper reading as switched off.
+    readonly property real veilTop: 0.08
+    readonly property real veilBottom: 0.55
+
+    // What the fog does when a surface has to refuse something — the lock's
+    // failed password (#30). Opacity only, one step of the ladder, no blur
+    // change: the mist thickens for a moment and settles back.
+    readonly property real fogPulseOpacity: 0.28
+
     // --- spacing -------------------------------------------------------------
     // 4px grid (#8). Component internals 4–16, panel padding 16–24, section
     // gaps 32+. Component *dimensions* — bar height, launcher width — are per

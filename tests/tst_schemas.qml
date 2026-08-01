@@ -10,6 +10,7 @@ TestCase {
     SettingsSchema { id: settings }
     StateSchema { id: state }
     SpecStore { id: store }
+    Migrations { id: migrations }
 
     // --- settings.json -------------------------------------------------------
 
@@ -324,5 +325,58 @@ TestCase {
 
     function test_the_two_files_use_different_version_keys() {
         verify(settings.versionKey !== state.versionKey);
+    }
+
+    function test_history_written_before_row_keys_is_migrated_rather_than_dropped() {
+        // v1 rows carried the freedesktop daemon's id as their identity, and
+        // that counter restarts at 1 with every server (#76). History is
+        // ephemera, but it is the user's ephemera — the rows are kept and given
+        // keys rather than thrown away.
+        const raw = {
+            stateVersion: 1,
+            notifications: {
+                history: [
+                    { id: 1, time: 3000, appKey: "telegram", summary: "after the restart" },
+                    { id: 2, time: 2000, appKey: "telegram", summary: "before it" },
+                    { id: 1, time: 1000, appKey: "telegram", summary: "the first one" }
+                ]
+            }
+        };
+
+        const result = migrations.run(raw, state.migrations, state.versionKey, state.version);
+        verify(result.ok, result.error);
+        const rows = result.raw.notifications.history;
+        compare(rows.length, 3);
+
+        const seen = {};
+        for (const row of rows) {
+            compare(row.id, undefined);            // no longer the row's identity
+            verify(typeof row.serverId === "number", "lost the daemon id");
+            verify(typeof row.seq === "number", "no sequence number");
+            verify(seen[row.seq] === undefined, "duplicate seq " + row.seq);
+            seen[row.seq] = true;
+        }
+        // Newest first, so the head holds the highest sequence number — the
+        // next arrival counts on from there.
+        verify(rows[0].seq > rows[2].seq);
+    }
+
+    function test_migrating_a_state_file_with_no_history_changes_nothing() {
+        const result = migrations.run({ stateVersion: 1, dnd: true }, state.migrations,
+                                      state.versionKey, state.version);
+        verify(result.ok, result.error);
+        compare(result.raw.dnd, true);
+        compare(result.raw.notifications, undefined);
+    }
+
+    function test_a_wrecked_history_row_does_not_take_the_migration_down() {
+        // state.json is hand-editable (#21), and a migration that throws stops
+        // the whole run — so this one has to survive nonsense in the list.
+        const result = migrations.run({
+            stateVersion: 1,
+            notifications: { history: ["nonsense", null, 42, { time: 1 }] }
+        }, state.migrations, state.versionKey, state.version);
+        verify(result.ok, result.error);
+        compare(result.raw.notifications.history.length, 4);
     }
 }

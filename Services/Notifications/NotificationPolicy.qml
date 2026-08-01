@@ -115,20 +115,27 @@ QtObject {
     /// How long this notification stays on screen, in ms, or 0 for "until it is
     /// dismissed".
     ///
-    /// `clientSeconds` is the client's own expire-timeout hint as Quickshell
-    /// hands it over — **seconds**, with -1 for "the server decides". It is
+    /// `clientMs` is the client's own expire-timeout hint as Quickshell hands
+    /// it over — **milliseconds**, with -1 for "the server decides". It is
     /// ignored unless the user asks for it, because nearly every client passes
     /// a hardcoded 5000 it never thought about, and honouring that would make
     /// the urgency table dead settings.
-    function timeoutMs(urgency: var, clientSeconds: var, settings: var): int {
+    ///
+    /// Milliseconds is measured, not read: the capability survey (#4) recorded
+    /// `Notification.expireTimeout` as seconds, this file multiplied by 1000 on
+    /// that reading, and a live session showed every honoured timeout pinned to
+    /// the five-minute ceiling (#74). The property is typed `double` in the
+    /// qmltypes, which is what made the wrong reading plausible — so the unit
+    /// is not recoverable from the type, only from the test below it.
+    function timeoutMs(urgency: var, clientMs: var, settings: var): int {
         const table = (settings && settings.timeouts) || {};
 
-        if (settings && settings.honorClientTimeout && typeof clientSeconds === "number"
-                && clientSeconds >= 0) {
+        if (settings && settings.honorClientTimeout && typeof clientMs === "number"
+                && clientMs >= 0) {
             // 0 is the freedesktop spec's "never expire", not "expire now".
-            if (clientSeconds === 0)
+            if (clientMs === 0)
                 return 0;
-            return Math.round(Math.min(maxTimeoutMs, Math.max(minTimeoutMs, clientSeconds * 1000)));
+            return Math.round(Math.min(maxTimeoutMs, Math.max(minTimeoutMs, clientMs)));
         }
 
         const authored = table[urgencyName(urgency)];
@@ -190,12 +197,23 @@ QtObject {
     /// type whatever the client sent, because these rows are bound to directly
     /// by the center (#43) and an `undefined` in a `Text` is a warning per
     /// frame — for a row that may have been written by an older build.
+    ///
+    /// `serverId` is the freedesktop daemon's notification id, kept only for
+    /// correlating a row with a popup that is still on screen. It is **not** an
+    /// identity: that counter restarts at 1 with every server and history does
+    /// not, so one restart is enough to put two different rows in the list
+    /// under the same number (#76). `key` is the identity.
     function record(fields: var): var {
         const source = fields || {};
+        const time = typeof source.time === "number" ? source.time : Date.now();
+        const seq = typeof source.seq === "number" ? source.seq : 0;
+        const appKey = text(source.appKey);
         return {
-            id: typeof source.id === "number" ? source.id : 0,
-            time: typeof source.time === "number" ? source.time : Date.now(),
-            appKey: text(source.appKey),
+            key: keyFor(time, seq, appKey),
+            seq: seq,
+            serverId: typeof source.serverId === "number" ? source.serverId : 0,
+            time: time,
+            appKey: appKey,
             appName: text(source.appName),
             appIcon: text(source.appIcon),
             image: persistableImage(source.image),
@@ -203,6 +221,37 @@ QtObject {
             body: text(source.body),
             urgency: urgencyName(urgencyValue(source.urgency))
         };
+    }
+
+    /// The row key the center's delegates are keyed on (#76).
+    ///
+    /// Derived rather than stored, so it is the same value before a write and
+    /// after a read, and so a row that predates it gets one for free. All three
+    /// parts earn their place: `seq` is what cannot repeat within a run of
+    /// history, `time` is what keeps a row written before the state file had
+    /// loaded from landing on a stored seq, and `appKey` goes last so its
+    /// contents cannot be confused for a separator.
+    function keyFor(time: var, seq: var, appKey: var): string {
+        return String(time) + ":" + String(seq) + ":" + text(appKey);
+    }
+
+    /// The sequence number for the next row, from the history in hand.
+    ///
+    /// No counter is persisted beside the list because the list already carries
+    /// one: history is newest-first and the cap drops the oldest, so the
+    /// highest `seq` ever issued is still at the head. A row without one — hand
+    /// written, or from a build that predates the key — counts as zero and does
+    /// not hold the counter back.
+    function nextSeq(history: var): int {
+        const list = Array.isArray(history) ? history : [];
+        let highest = 0;
+        for (const entry of list) {
+            const seq = entry !== null && typeof entry === "object" && typeof entry.seq === "number"
+                      ? entry.seq : 0;
+            if (seq > highest)
+                highest = seq;
+        }
+        return highest + 1;
     }
 
     /// An image worth writing to disk. Inline image data lives in Quickshell's

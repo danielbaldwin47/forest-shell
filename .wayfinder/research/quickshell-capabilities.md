@@ -130,6 +130,8 @@ Capability flags you advertise to clients: `bodySupported`, `bodyMarkupSupported
 `Notification` exposes `appName`, `appIcon`, `summary`, `body`, `urgency`, `actions`, `image`,
 `expireTimeout`, `resident`, `transient`, `desktopEntry`, `hints`, `hasInlineReply`,
 `inlineReplyPlaceholder`, and `sendInlineReply()` — so inline reply (Telegram-style) works natively.
+`expireTimeout` is in **milliseconds**, with `-1` for "the server decides" — measured on a live
+0.3.0 session (#74), not read off the type, which is a bare `double`.
 `keepOnReload` preserves the notification list across hot reloads. `Retainable`/`RetainableLock` let
 you keep a notification alive for a close animation after the client dismisses it.
 

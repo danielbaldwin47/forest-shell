@@ -23,7 +23,7 @@ QtObject {
     readonly property QtObject c: Coerce {}
 
     readonly property string versionKey: "stateVersion"
-    readonly property int version: 1
+    readonly property int version: 2
 
     readonly property var spec: ({
         // Situational, not setup — the one toggle that is state (#21). Owned by
@@ -65,8 +65,41 @@ QtObject {
         }
     })
 
-    // Nothing to migrate yet, and nothing ever has to be: this file is
-    // disposable, so a future schema break may simply drop it. The registry is
-    // here so the runner is wired identically for both files from day one.
-    readonly property var migrations: []
+    // Nothing here ever *has* to be migrated: this file is disposable, so a
+    // schema break may simply drop it. The rows below are kept anyway — history
+    // is ephemera, but it is the user's ephemera, and dropping it silently on
+    // an upgrade is the kind of thing that reads as a bug.
+    readonly property var migrations: [
+        {
+            to: 2,
+            describe: "notification history rows get their own id",
+            migrate: function (raw) {
+                // v1 rows carried the freedesktop daemon's notification id as
+                // their identity. That counter restarts at 1 with every server
+                // and history does not, so one shell restart was enough to put
+                // two different rows in the list under the same id (#76).
+                const notifications = raw.notifications;
+                if (!notifications || !Array.isArray(notifications.history))
+                    return raw;
+
+                // Newest first, so the head gets the highest number and the
+                // next arrival counts on from there.
+                const rows = notifications.history;
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i];
+                    // state.json is hand-editable (#21) and a step that throws
+                    // stops the whole run — anything that is not a row is left
+                    // exactly as it is, for the reader to drop.
+                    if (row === null || typeof row !== "object" || Array.isArray(row))
+                        continue;
+                    if (typeof row.seq !== "number")
+                        row.seq = rows.length - i;
+                    if (row.serverId === undefined && typeof row.id === "number")
+                        row.serverId = row.id;
+                    delete row.id;
+                }
+                return raw;
+            }
+        }
+    ]
 }

@@ -214,9 +214,14 @@ Singleton {
         root.show(notification, settings);
     }
 
+    // The row's identity is the shell's, not the daemon's: `notification.id`
+    // comes from a counter that restarts at 1 with every server, and history
+    // outlives the server (#76). It is kept as `serverId` for correlating with
+    // a live popup; `seq` counts on from the history already in hand.
     function remember(notification: Notification, appKey: string) {
-        root.setHistory(root.policy.remember(root.history, root.policy.record({
-            id: notification.id,
+        const entry = root.policy.record({
+            serverId: notification.id,
+            seq: root.policy.nextSeq(root.history),
             time: Date.now(),
             appKey: appKey,
             appName: notification.appName,
@@ -225,7 +230,13 @@ Singleton {
             summary: notification.summary,
             body: notification.body,
             urgency: notification.urgency
-        }), Config.values.notifications.historyLimit));
+        });
+        root.setHistory(root.policy.remember(root.history, entry,
+                                             Config.values.notifications.historyLimit));
+        // The row key, in the log, because #76 was a collision nothing rendered
+        // and nothing complained about — the ids only stopped being unique.
+        Logger.log("notifications", "remembered " + entry.key + " (server id "
+                   + entry.serverId + "): " + root.describe(notification, appKey));
     }
 
     function show(notification: Notification, settings: var) {
@@ -243,6 +254,12 @@ Singleton {
         toast.finished.connect(() => root.drop(toast));
         live.insert(0, { toast: toast });
         root.capStack(settings.maxVisible);
+
+        // The resolved timeout, in the log, because it is the one number here
+        // that no test at the pure seam can prove came off a real
+        // `Notification` — #74 was a unit error on exactly that hand-off.
+        Logger.log("notifications", "popup (timeout " + toast.timeoutMs + "ms, client "
+                   + notification.expireTimeout + "): " + root.describe(notification, ""));
     }
 
     // Past the cap the oldest popup leaves early — it is in history, and a

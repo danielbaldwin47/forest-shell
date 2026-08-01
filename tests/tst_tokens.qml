@@ -145,9 +145,8 @@ TestCase {
 
     function test_the_fog_is_a_wash_not_a_dim() {
         // Brief §3.1: a scrim reads as pale mist, not as black at 50%. The
-        // colour is the mist and the opacity is what keeps it a wash.
-        // The mist is a colour *role* — it recolours with the palette like
-        // every other one — and the opacity is what keeps it a wash.
+        // mist is a colour *role* — it recolours with the palette like every
+        // other one — and the opacity is what keeps it a wash rather than a dim.
         compare(tokens.dark.fogWash, "#beced1");
         compare(tokens.fogWashOpacity, 0.10);
         verify(tokens.fogWashOpacity < 0.25);

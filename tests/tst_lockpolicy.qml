@@ -26,15 +26,37 @@ TestCase {
 
     // --- PAM results ---------------------------------------------------------
 
-    function test_only_a_wrong_password_is_retried() {
-        // The retry limit is faillock's, not ours (#30) — a plain failure
-        // re-arms immediately and forever.
-        verify(policy.retryable("failed"));
-        // PAM saying the method is spent, or that the conversation never
-        // happened: re-arming either spins.
-        verify(!policy.retryable("maxTries"));
-        verify(!policy.retryable("error"));
-        verify(!policy.retryable("success"));
+    function test_an_answered_refusal_re_arms_at_once() {
+        // The retry limit is faillock's, not ours (#30) — a wrong password
+        // makes the field live again immediately, forever.
+        compare(policy.rearmWhen("failed", true), "now");
+        compare(policy.rearmWhen("maxTries", true), "now");
+        compare(policy.rearmWhen("error", true), "now");
+    }
+
+    function test_a_conversation_that_never_asked_waits_for_a_keystroke() {
+        // A locked-out account completes without ever prompting. Re-arming that
+        // on the spot would complete just as fast and spin; not re-arming it at
+        // all would strand the user behind a lock they cannot restart. So the
+        // next keystroke reopens it.
+        compare(policy.rearmWhen("maxTries", false), "onInput");
+        compare(policy.rearmWhen("failed", false), "onInput");
+        compare(policy.rearmWhen("error", false), "onInput");
+    }
+
+    function test_success_asks_nothing_further() {
+        compare(policy.rearmWhen("success", true), "never");
+        compare(policy.rearmWhen("success", false), "never");
+    }
+
+    function test_lockout_is_recognised_without_reading_english() {
+        // pam_faillock's own return carries the news in every locale; the
+        // message match is the fallback for stacks that report a lockout as a
+        // plain failure.
+        verify(policy.lockedOutBy("maxTries", ""));
+        verify(policy.lockedOutBy("maxTries", "Conta bloqueada"));
+        verify(policy.lockedOutBy("failed", "Account locked due to 3 failed logins"));
+        verify(!policy.lockedOutBy("failed", "Authentication failure"));
     }
 
     function test_pam_owns_the_wording() {

@@ -48,8 +48,10 @@ Scope {
 
     /// faillock reporting a locked account. Presentation only: it paints the
     /// message ember and keeps it on screen. The shell does not act on it, has
-    /// no idea how long it lasts, and never counts anything itself.
-    readonly property bool lockedOut: policy.isLockout(priv.message)
+    /// no idea how long it lasts, and never counts anything itself — in
+    /// particular it keeps asking, because faillock decides when to start
+    /// saying yes again and the shell has no way to know when that was.
+    readonly property alias lockedOut: priv.lockedOut
 
     /// Whether PAM wants the answer shown rather than dotted — an OTP or a
     /// device prompt rather than a password.
@@ -81,6 +83,9 @@ Scope {
         priv.message = "";
         priv.messageIsError = false;
         priv.fingerprintRestarts = 0;
+        priv.lockedOut = false;
+        priv.rearmOnInput = false;
+        priv.answered = false;
         root.clear();
         password.start();
         if (Config.values.system.lock.fingerprint)
@@ -109,8 +114,23 @@ Scope {
         const response = root.buffer;
         root.clear();
         priv.busy = true;
+        priv.answered = true;
         priv.message = "";
         password.respond(response);
+    }
+
+    /// Called by the surface on every keystroke. Almost always a no-op — the
+    /// one case it exists for is a conversation that ended without ever asking
+    /// us anything, which is what a locked-out account looks like from here.
+    /// Re-arming that on a timer would spin against faillock; re-arming it on
+    /// the keystroke that means someone is standing there costs one PAM start
+    /// and is what keeps the field from going dead for good.
+    function rearm() {
+        if (!priv.begun || !priv.rearmOnInput || priv.busy)
+            return;
+        priv.rearmOnInput = false;
+        priv.answered = false;
+        password.start();
     }
 
     function clear() {
@@ -174,15 +194,24 @@ Scope {
                        : result === PamResult.Error ? "error" : "failed";
             priv.message = policy.failureText(kind, password.message);
             priv.messageIsError = true;
+            priv.lockedOut = policy.lockedOutBy(kind, priv.message);
             Logger.log("lock", "password attempt " + kind
-                       + (root.lockedOut ? " (faillock: locked out)" : ""));
+                       + (priv.lockedOut ? " (faillock: locked out)" : ""));
             root.failed();
 
             // Re-arm for the next attempt. The limit is faillock's — it keeps
-            // refusing through this same conversation, and its refusal is what
-            // the user reads.
-            if (priv.begun && policy.retryable(kind))
+            // refusing, and its refusal is what the user reads. The only
+            // question is *when*: immediately if the user answered, and
+            // otherwise on their next keystroke, because a conversation that
+            // completed without prompting would complete again just as fast.
+            if (!priv.begun)
+                return;
+            const rearm = policy.rearmWhen(kind, priv.answered);
+            priv.answered = false;
+            if (rearm === "now")
                 password.start();
+            else
+                priv.rearmOnInput = rearm === "onInput";
         }
 
         onError: error => {
@@ -275,6 +304,12 @@ Scope {
         property bool responseVisible: false
         property string message: ""
         property bool messageIsError: false
+        property bool lockedOut: false
+
+        // Whether we answered the conversation that is running, and whether the
+        // last one ended unanswered and is waiting for a keystroke to reopen.
+        property bool answered: false
+        property bool rearmOnInput: false
 
         property bool fingerprintActive: false
         property string fingerprintMessage: ""

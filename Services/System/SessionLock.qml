@@ -73,8 +73,15 @@ Singleton {
         return true;
     }
 
-    // Writable state, held one level down so the properties above can be
-    // readonly aliases: the point of the door is that it is the only door.
+    // `locked` and `reason` are held one level down so the properties above can
+    // be readonly aliases: locking is the thing that must have exactly one
+    // door, and this is what makes `lock()` and `unlock()` that door.
+    //
+    // `secure` and `notificationCount` are deliberately *not* behind it. They
+    // are inbound seams — facts about the session written by the one object
+    // that knows them (the lock surface, and #42's notification service) and
+    // read by everyone else. Putting a setter in front of a fact would buy
+    // nothing.
     QtObject {
         id: priv
         property bool locked: false

@@ -48,7 +48,55 @@ Item {
     // which is exactly when it starts to matter.
     property bool capsLock: false
 
+    // Composition, not tokens: where the horizon sits on this particular
+    // surface. The clock rides above the optical centre so the summoned field
+    // lands near it rather than pushing the whole block off balance, and the
+    // brief's negative tracking at display sizes (§4) is a per-surface taste
+    // call the design system deliberately does not fix.
+    readonly property real clockRise: 0.14
+    readonly property int statusIconSize: 15
+    readonly property real statusTextSize: 12.5
+    readonly property real displayTrackingEm: -0.02
+    readonly property real fieldTrackingEm: 0.08
+
+    // One instance per surface, like Core/SettingsSchema.qml's `Coerce {}`:
+    // a stateless bag of pure functions is cheaper to build than to share.
     LockPolicy { id: policy }
+
+    // Everything in the status strip is the same shape: a glyph and a line, one
+    // colour between them. Inline components live on the file's root object.
+    component StatusItem: Row {
+        id: item
+
+        property alias icon: glyph.name
+        property string label
+        property color tint: Theme.textMuted
+        /// A tiny all-caps label rather than an ordinary line — the shell's one
+        /// type-level distinction between a reading and a warning (#8).
+        property bool warning: false
+
+        spacing: Theme.space2
+
+        Icon {
+            id: glyph
+            size: surface.statusIconSize
+            color: item.tint
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: item.label
+            color: item.tint
+            font.family: Theme.fontUi
+            font.weight: item.warning ? Theme.weightMedium : Theme.weightRegular
+            font.pointSize: item.warning ? Theme.pt(Theme.capsSize)
+                                         : Theme.pt(surface.statusTextSize)
+            font.letterSpacing: item.warning
+                ? Theme.tracking(Theme.capsSize, Theme.capsTrackingEm) : 0
+        }
+    }
+
 
     function summon() {
         surface.keyed = true;
@@ -123,7 +171,7 @@ Item {
 
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: -parent.height * 0.14
+        anchors.verticalCenterOffset: -parent.height * surface.clockRise
         spacing: Theme.space3
 
         // The one serif touch in the shell (#8: Newsreader Light, clock only,
@@ -138,7 +186,7 @@ Item {
             font.weight: Theme.weightDisplay
             font.pointSize: Theme.pt(96)
             // Brief §4: slight negative tracking at large sizes.
-            font.letterSpacing: Theme.tracking(96, -0.02)
+            font.letterSpacing: Theme.tracking(96, surface.displayTrackingEm)
         }
 
         Text {
@@ -204,7 +252,11 @@ Item {
                 anchors.bottomMargin: Theme.space2
 
                 focus: true
-                enabled: !surface.auth.busy
+                // `readOnly`, never `enabled: false`: disabling an item clears
+                // its active focus and re-enabling does not give it back, which
+                // would kill type-to-summon for the rest of the lock. Read-only
+                // still receives keys, it just refuses to record them.
+                readOnly: surface.auth.busy
                 horizontalAlignment: TextInput.AlignHCenter
                 // PAM says whether the answer is a secret: a password is dotted,
                 // an OTP or a device prompt is not.
@@ -218,7 +270,7 @@ Item {
                 font.pointSize: Theme.pt(15)
                 // Dots are wide enough to read as a row of stones at this
                 // tracking; without it they clump.
-                font.letterSpacing: Theme.tracking(15, 0.08)
+                font.letterSpacing: Theme.tracking(15, surface.fieldTrackingEm)
                 selectionColor: Theme.accentDeep
                 selectedTextColor: Theme.textPrimary
                 cursorVisible: surface.summoned && !surface.auth.busy
@@ -226,11 +278,19 @@ Item {
                 onTextChanged: surface.auth.buffer = text
                 onAccepted: surface.auth.submit()
 
+                // Each lock surface is its own window, so focus has to be taken
+                // rather than inherited — an output that comes up mid-lock is
+                // otherwise deaf.
+                Component.onCompleted: field.forceActiveFocus()
+
                 // Runs before the input handles the key and does not consume
                 // it, so the character that summoned the field is also the
                 // first character of the password.
                 Keys.onPressed: event => {
                     surface.summon();
+                    // Reopens a conversation that ended without prompting —
+                    // see LockAuth.rearm(). A no-op on every other keystroke.
+                    surface.auth.rearm();
 
                     if (event.key === Qt.Key_Escape) {
                         surface.auth.clear();
@@ -303,11 +363,11 @@ Item {
         id: shake
 
         readonly property int leg: Theme.motionFast / 4
-        readonly property real throw_: Theme.space2
+        readonly property real swing: Theme.space2
 
-        NumberAnimation { target: nudge; property: "x"; to: -shake.throw_; duration: shake.leg }
-        NumberAnimation { target: nudge; property: "x"; to: shake.throw_; duration: shake.leg }
-        NumberAnimation { target: nudge; property: "x"; to: -shake.throw_ / 2; duration: shake.leg }
+        NumberAnimation { target: nudge; property: "x"; to: -shake.swing; duration: shake.leg }
+        NumberAnimation { target: nudge; property: "x"; to: shake.swing; duration: shake.leg }
+        NumberAnimation { target: nudge; property: "x"; to: -shake.swing / 2; duration: shake.leg }
         NumberAnimation { target: nudge; property: "x"; to: 0; duration: shake.leg }
     }
 
@@ -366,28 +426,13 @@ Item {
         spacing: Theme.space6
 
         // Count only, never contents (#9), and switchable off entirely for a
-        // machine that locks in front of other people.
-        Row {
-            spacing: Theme.space2
-            visible: notifications.text !== ""
-
-            Icon {
-                name: "bell"
-                size: 15
-                color: Theme.textMuted
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                id: notifications
-                anchors.verticalCenter: parent.verticalCenter
-                text: Config.values.system.lock.notificationCount
-                      ? policy.notificationSummary(SessionLock.notificationCount) : ""
-                color: Theme.textMuted
-                font.family: Theme.fontUi
-                font.weight: Theme.weightRegular
-                font.pointSize: Theme.pt(12.5)
-            }
+        // machine that locks in front of other people. Zero shows nothing at
+        // all rather than a nought — the empty lock screen is the quiet one.
+        StatusItem {
+            icon: "bell"
+            label: Config.values.system.lock.notificationCount
+                   ? policy.notificationSummary(SessionLock.notificationCount) : ""
+            visible: label !== ""
         }
 
         // Only while discharging: the lid is usually shut between locking and
@@ -397,55 +442,27 @@ Item {
         // Read straight off the native UPower singleton rather than through a
         // service, because there is no battery service yet — #36 builds one,
         // and this becomes a read of it.
-        Row {
+        StatusItem {
             id: batteryPill
-
-            spacing: Theme.space2
-            visible: UPower.onBattery && UPower.displayDevice.isLaptopBattery
 
             readonly property real fraction: UPower.displayDevice.percentage
             readonly property bool low: policy.batteryLow(fraction)
 
-            Icon {
-                name: batteryPill.low ? "battery-low" : "battery-medium"
-                size: 15
-                color: batteryPill.low ? Theme.accentEmber : Theme.textMuted
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: policy.batteryPercent(batteryPill.fraction) + "%"
-                color: batteryPill.low ? Theme.accentEmber : Theme.textMuted
-                font.family: Theme.fontUi
-                font.weight: Theme.weightRegular
-                font.pointSize: Theme.pt(12.5)
-            }
+            visible: UPower.onBattery && UPower.displayDevice.isLaptopBattery
+            icon: batteryPill.low ? "battery-low" : "battery-medium"
+            label: policy.batteryPercent(batteryPill.fraction) + "%"
+            tint: batteryPill.low ? Theme.accentEmber : Theme.textMuted
         }
 
         // The lamplight role: attention, exactly one element at a time (#8).
         // Caps lock and a live fingerprint reader never both apply — the reader
         // stops prompting the moment the user starts typing.
-        Row {
-            spacing: Theme.space2
+        StatusItem {
             visible: surface.capsLock
-
-            Icon {
-                name: "arrow-big-up"
-                size: 15
-                color: Theme.accentWarm
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Caps Lock"
-                color: Theme.accentWarm
-                font.family: Theme.fontUi
-                font.weight: Theme.weightMedium
-                font.pointSize: Theme.pt(Theme.capsSize)
-                font.letterSpacing: Theme.tracking(Theme.capsSize, Theme.capsTrackingEm)
-            }
+            icon: "arrow-big-up"
+            label: "Caps Lock"
+            tint: Theme.accentWarm
+            warning: true
         }
     }
 
@@ -453,27 +470,13 @@ Item {
     // strip so the two PAM contexts never overwrite each other on screen: what
     // fprintd says ("Place your finger on the reader") is about a device, not
     // about the password attempt above it.
-    Row {
+    StatusItem {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: statusStrip.bottom
         anchors.topMargin: Theme.space4
-        spacing: Theme.space2
+
         visible: surface.auth.fingerprintActive
-
-        Icon {
-            name: "fingerprint-pattern"
-            size: 15
-            color: Theme.textMuted
-            anchors.verticalCenter: parent.verticalCenter
-        }
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: surface.auth.fingerprintMessage
-            color: Theme.textMuted
-            font.family: Theme.fontUi
-            font.weight: Theme.weightRegular
-            font.pointSize: Theme.pt(12.5)
-        }
+        icon: "fingerprint-pattern"
+        label: surface.auth.fingerprintMessage
     }
 }

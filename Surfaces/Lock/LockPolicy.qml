@@ -38,14 +38,38 @@ QtObject {
     // these and everything downstream is testable.
     readonly property var resultKinds: ["success", "failed", "maxTries", "error"]
 
-    /// Whether to start another authentication attempt after this result.
+    /// When to open the next conversation, given how the last one ended and
+    /// whether we actually answered it.
     ///
-    /// A wrong password is the normal case and gets another try immediately —
-    /// the retry limit is faillock's, not ours. `maxTries` is PAM saying this
-    /// method is spent, and `error` means the conversation never really
-    /// happened; re-arming either would spin.
-    function retryable(kind: string): bool {
-        return kind === "failed";
+    ///   "never"    it succeeded; there is nothing left to ask.
+    ///   "now"      the user answered and was refused. The normal case: the
+    ///              field goes live again immediately, because the retry limit
+    ///              is faillock's and not ours.
+    ///   "onInput"  the conversation ended without us answering it — faillock
+    ///              denying before the prompt is ever shown, or pam failing to
+    ///              start at all. Re-arming *now* would complete instantly and
+    ///              spin; re-arming on the next keystroke costs nothing and
+    ///              keeps the field alive.
+    ///
+    /// The "onInput" case is the one that matters: a locked-out account
+    /// completes with no prompt, and a lock screen that stops asking has
+    /// stranded its user — there is no way to restart the shell from behind
+    /// its own lock, and faillock's `unlock_time` will expire long before
+    /// anyone can. So the shell always ends up ready to try again; it just
+    /// waits to be asked.
+    function rearmWhen(kind: string, answered: bool): string {
+        if (kind === "success")
+            return "never";
+        return answered ? "now" : "onInput";
+    }
+
+    /// Whether a completed attempt means the account is locked.
+    ///
+    /// `maxTries` is pam_faillock's own return, so it is the locale-independent
+    /// half of this answer; the message match is the other half, for stacks
+    /// that report a lockout as a plain failure. Either is enough.
+    function lockedOutBy(kind: string, message: string): bool {
+        return kind === "maxTries" || isLockout(message);
     }
 
     /// What to show under the field for a completed attempt.
@@ -82,6 +106,11 @@ QtObject {
     /// idle retreat from hiding it — it is the one thing on this screen the
     /// user cannot type their way past, so it stays up until it is answered by
     /// a successful unlock.
+    ///
+    /// English-only, and unavoidably so: this is pam's own text in the system's
+    /// locale, with no machine-readable form behind it. That is why it is only
+    /// half of `lockedOutBy` above — the `maxTries` result carries the same
+    /// news in every language, and this catches the stacks that do not send it.
     function isLockout(message: string): bool {
         if (!message)
             return false;

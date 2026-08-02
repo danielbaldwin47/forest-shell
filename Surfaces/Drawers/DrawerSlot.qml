@@ -148,13 +148,16 @@ Item {
         anchors.centerIn: parent
 
         // Centred, and so scaled about its own centre. #27 gives anchored
-        // panels — the control centre under its bar icon (#44) — an origin at
-        // their anchor instead; the tenant that needs that sets it, because
-        // only the tenant knows where its beak points.
-        transformOrigin: Item.Center
+        // panels — the notification centre under its bar indicator (#43), the
+        // control centre under its button (#44) — an origin at their anchor
+        // instead, which for a tenant that fills the slot means the corner it
+        // hangs from: scaling a screen-sized item about its top-right leaves
+        // that corner still and grows the panel out of the icon above it.
+        transformOrigin: slot.name === "notificationcenter" ? Item.TopRight : Item.Center
 
         sourceComponent: slot.name === "session" ? sessionMenu
                        : slot.name === "launcher" ? launcher
+                       : slot.name === "notificationcenter" ? notificationCenter
                        : null
     }
 
@@ -174,6 +177,21 @@ Item {
     Component {
         id: launcher
         Launcher {
+            implicitWidth: slot.width
+            implicitHeight: slot.height
+            onCloseRequested: reason => Drawers.close(reason)
+        }
+    }
+
+    // The centre is the second tenant that is not centred: it hangs from the
+    // top-right corner, under the bar indicator that opens it, which is #27's
+    // "each drawer is anchored to what opened it". So it takes the whole slot
+    // to place itself in, like the launcher — and, unlike the launcher, moves
+    // its transform origin to that corner, so the 1% settle grows out of the
+    // icon rather than out of the middle of the screen.
+    Component {
+        id: notificationCenter
+        NotificationCenter {
             implicitWidth: slot.width
             implicitHeight: slot.height
             onCloseRequested: reason => Drawers.close(reason)

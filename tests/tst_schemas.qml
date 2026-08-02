@@ -152,13 +152,14 @@ TestCase {
     }
 
     function test_module_order_is_three_lists_of_names() {
-        // #9's default inventory, in #9's order, completed by #37 — bar the
-        // notification indicator, which lands with the notification centre.
+        // #9's default inventory, in #9's order: #37 brought all of it but the
+        // notification indicator, which lands with the centre it opens (#43).
         const modules = store.defaults(settings.spec).bar.modules;
         compare(modules.left, ["launcher", "workspaces", "activeWindow"]);
         compare(modules.center, ["clock", "media"]);
         // The machine's condition, with the one door on that side outermost.
-        compare(modules.right, ["tray", "status", "battery", "keyboard", "controlCenter"]);
+        compare(modules.right, ["tray", "status", "battery", "keyboard", "notifications",
+                                "controlCenter"]);
     }
 
     function test_a_reordered_bar_writes_back_only_the_module_key() {

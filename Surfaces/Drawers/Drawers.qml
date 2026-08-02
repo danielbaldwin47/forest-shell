@@ -6,8 +6,8 @@ pragma Singleton
 //     Drawers.toggle("session")        from a bar button, through Core/SurfaceBus.qml
 //     qs ipc call session toggle       from a keybind, a script, the shell switcher
 //
-// The launcher (#39), the control centre (#44), the dashboard (#49) and the
-// notification centre (#50) all land in this window. What they share is a
+// The launcher (#39), the notification centre (#43), the control centre (#44)
+// and the dashboard (#49) all land in this window. What they share is a
 // window per screen, an input mask and *one* `HyprlandFocusGrab` — one grab
 // because two panels each holding one is the multi-panel focus fight #12 named,
 // where dismissing either can hand focus to the other instead of to the desktop.
@@ -199,6 +199,10 @@ Singleton {
         function toggle(): void { root.toggle("launcher"); }
     }
 
+    readonly property QtObject notificationCenterHandle: QtObject {
+        function toggle(): void { root.toggle("notificationcenter"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -221,6 +225,20 @@ Singleton {
         function close(): void { root.close("ipc"); }
         function toggle(): void { root.toggle("launcher"); }
         function isOpen(): bool { return root.current === "launcher"; }
+    }
+
+    // The notification centre's door (#43). `notificationcenter` and not
+    // `notifications`: the notification service owns that target for DND, and
+    // the second IpcHandler on a name is the one that quietly does not answer.
+    //
+    //     bind = SUPER, N, exec, qs ipc call notificationcenter toggle
+    IpcHandler {
+        target: "notificationcenter"
+
+        function open(): void { root.open("notificationcenter"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("notificationcenter"); }
+        function isOpen(): bool { return root.current === "notificationcenter"; }
     }
 
     // --- Super+Space ---------------------------------------------------------
@@ -252,7 +270,8 @@ Singleton {
     Component.onCompleted: {
         SurfaceBus.register("session", root.sessionHandle);
         SurfaceBus.register("launcher", root.launcherHandle);
-        Logger.stage("drawers armed (ipc targets: session, launcher)");
+        SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
+        Logger.stage("drawers armed (ipc targets: session, launcher, notificationcenter)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

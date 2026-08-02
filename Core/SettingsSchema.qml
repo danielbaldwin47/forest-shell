@@ -222,9 +222,9 @@ QtObject {
             // than one leaf holding all three, so reordering one cluster
             // writes back only that cluster.
             //
-            // The default inventory is #9's, in #9's order (#37 completed it,
-            // bar the notification indicator, which lands with the
-            // notification centre). Left is where you are — the workspaces and
+            // The default inventory is #9's, in #9's order — #37 brought all
+            // but the notification indicator, which lands here with the
+            // notification centre (#43). Left is where you are — the workspaces and
             // the window in front of you, behind the door into the launcher.
             // Centre is the clock and what is playing. Right is the machine's
             // condition, tray first and the control-centre door outermost: the
@@ -240,7 +240,8 @@ QtObject {
                         coerce: c.arrayOf(c.string, "bar.modules.left") },
                 center: { def: ["clock", "media"],
                           coerce: c.arrayOf(c.string, "bar.modules.center") },
-                right: { def: ["tray", "status", "battery", "keyboard", "controlCenter"],
+                right: { def: ["tray", "status", "battery", "keyboard", "notifications",
+                               "controlCenter"],
                          coerce: c.arrayOf(c.string, "bar.modules.right") }
             },
 

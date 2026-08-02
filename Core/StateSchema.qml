@@ -64,7 +64,14 @@ QtObject {
             // reliable high-water mark: the center dismisses single rows (#43),
             // and lowering `historyLimit` truncates it — either can take the
             // highest number away and let the next arrival reissue it.
-            seq: { def: 0, coerce: c.integer(0) }
+            seq: { def: 0, coerce: c.integer(0) },
+
+            // When the center was last open, in epoch ms, or 0 for never
+            // (#43). What the bar indicator counts from: "unread" here means
+            // "arrived since you last looked", because nothing in the shell
+            // marks a single row read. Persisted so the badge does not empty
+            // itself every time the shell restarts.
+            seenAt: { def: 0, coerce: c.integer(0) }
         },
 
         launcher: {

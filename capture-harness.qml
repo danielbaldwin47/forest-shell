@@ -54,6 +54,7 @@ import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
 import qs.Services.Launcher
+import qs.Services.Notifications
 import qs.Services.System
 import Quickshell.Services.UPower
 
@@ -142,6 +143,7 @@ ShellRoot {
                     case "bar-full": return barFullScene;
                     case "drawer":   return drawerScene;
                     case "launcher": return launcherScene;
+                    case "center":   return centerScene;
                     default:         return barScene;
                     }
                 }
@@ -403,6 +405,113 @@ ShellRoot {
             }
 
             Component.onCompleted: root.describeScene = launcherBackdrop.describe
+        }
+    }
+
+    /// The notification centre (#43), posed with a history nobody would enjoy
+    /// receiving: a long app name, a body several lines past what a toast would
+    /// show, a critical row, and a group deep enough to need its count. That is
+    /// the picture worth taking — the centre laid out over rows it was designed
+    /// for tells nobody anything, and the failure this seam catches is #80's:
+    /// text that runs out of the panel it is in.
+    ///
+    ///     tools/capture-harness.sh out.png --surface center --session
+    ///
+    /// `--session`, because every row has a Lucide glyph in it — the dismiss
+    /// `x`, and the bell that stands in for an app with no icon — and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph (Widgets/Icon
+    /// .qml). Offscreen still measures the fills and the layout, which is what
+    /// an overflow is.
+    ///
+    /// History is posed by assignment rather than by a fake service: the panel
+    /// binds to `Notifications.groups`, which is derived from `history`, so
+    /// writing the list is enough to drive the shipped grouping code rather
+    /// than a copy of it living in this file.
+    Component {
+        id: centerScene
+
+        Backdrop {
+            id: centerBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            NotificationCenter {
+                id: centre
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                // One group open, because the collapsed panel and the expanded
+                // one are two different layouts and only one of them has a
+                // notification body in it to overflow.
+                expanded: "org.example.chat"
+            }
+
+            Component.onCompleted: {
+                const now = Date.now();
+                Notifications.history = [
+                    { time: now - 30000, seq: 6, appKey: "org.example.chat",
+                      appName: "Chat", summary: "Ada Lovelace",
+                      body: "Right — so the analytical engine's whole trick is that the "
+                            + "cards describe the operation as well as the number, which is "
+                            + "the part everyone keeps missing when they call it a calculator.",
+                      urgency: "normal" },
+                    { time: now - 400000, seq: 5, appKey: "org.example.chat",
+                      appName: "Chat", summary: "Ada Lovelace",
+                      body: "Are you there?", urgency: "normal" },
+                    { time: now - 900000, seq: 4, appKey: "org.example.chat",
+                      appName: "Chat",
+                      summary: "A summary long enough to want the whole width of the panel "
+                               + "and then some more besides",
+                      body: "", urgency: "low" },
+                    { time: now - 3600000, seq: 3, appKey: "org.freedesktop.systemupdates",
+                      appName: "System updates, and a name no client should have sent",
+                      summary: "Battery critically low", body: "3% remaining.",
+                      urgency: "critical" },
+                    { time: now - 86400000 * 2, seq: 1, appKey: "", appName: "",
+                      summary: "Something with no app id at all", body: "",
+                      urgency: "normal" }
+                ].map(row => Notifications.policy.record(row));
+
+                root.describeScene = centerBackdrop.describe;
+            }
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "groups=" + Notifications.groups.length
+                    + " rows=" + Notifications.history.length
+                    + " expanded=\"" + centre.expanded + "\""
+                    + " panel=" + centre.panelWidth + "x" + centre.maxPanelHeight
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            Component.onDestruction: Notifications.history = []
         }
     }
 

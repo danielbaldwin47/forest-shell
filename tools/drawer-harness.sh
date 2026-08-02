@@ -271,6 +271,63 @@ mark=$(log_lines)
 nested_ipc call launcher toggle > /dev/null
 expect_since "$mark" 'drawers: launcher closed \(toggle\)' 'the launcher toggles shut'
 
+# --- 8c. the notification centre is the third tenant -------------------------
+#
+# #43. The door is `notificationcenter` and not `notifications`, and that is the
+# part worth asserting literally: the notification *service* already owns the
+# `notifications` IPC target for DND, and two IpcHandlers on one name is one of
+# them silently not answering. A rename here is a keybind that stops working.
+
+if grep -qa 'surfaces: notificationcenter registered (qs ipc call notificationcenter toggle)' \
+        "$NESTED_SHELL_LOG"; then
+    nested_pass 'the notification centre registered on the surface bus'
+else
+    nested_fail 'the notification centre never registered on the surface bus'
+fi
+
+if nested_ipc show | grep -qa '^target notificationcenter$'; then
+    nested_pass 'the notification centre owns the `notificationcenter` ipc target'
+else
+    nested_fail 'there is no `notificationcenter` ipc target'
+fi
+
+# Both targets exist, separately — the evidence that the two names did not
+# collide into one handler.
+if nested_ipc show | grep -qa '^target notifications$'; then
+    nested_pass 'the notification service still owns its own `notifications` target'
+else
+    nested_fail 'the `notifications` ipc target went away when the centre took a name'
+fi
+
+mark=$(log_lines)
+nested_ipc call notificationcenter toggle > /dev/null
+expect_since "$mark" 'drawers: notificationcenter opened on ' \
+    'ipc call notificationcenter toggle opens the centre'
+
+reply=$(nested_ipc call notificationcenter isOpen)
+if grep -qa 'true' <<< "$reply"; then
+    nested_pass 'the centre agrees it is open'
+else
+    nested_fail "notificationcenter isOpen said \"$reply\" with the centre open"
+fi
+
+# Opening the centre is what "read" means in this shell (#43): the surface sets
+# `centerOpen`, the service stamps `seenAt` and the bar's count empties. The
+# stamp is the log line; the count is asked for over IPC below.
+expect_since "$mark" 'notifications: seen \(unread ' \
+    'opening the centre marks history seen'
+
+mark=$(log_lines)
+nested_ipc call notificationcenter toggle > /dev/null
+expect_since "$mark" 'drawers: notificationcenter closed \(toggle\)' 'the centre toggles shut'
+
+if nested_ipc show | sed -n '/^target notificationcenter$/,/^target /p' \
+        | grep -qa 'function show('; then
+    nested_fail 'the notificationcenter target advertises show(), which the CLI cannot call'
+else
+    nested_pass 'the notificationcenter target does not advertise an uncallable show()'
+fi
+
 # --- 9. the fog asked the compositor for its blur ----------------------------
 #
 # The 10% wash does nothing on its own — what makes it fog is the compositor

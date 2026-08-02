@@ -22,6 +22,7 @@
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
+#   tools/capture-harness.sh out.png --surface center --session   # the notification centre
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
@@ -132,8 +133,9 @@ if [[ "$SURFACE" == launcher && "$DELAY_MS" == 600 ]]; then
 fi
 
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher)" >&2; exit 2 ;;
+    bar|bar-full|lock|settings|drawer|launcher|center) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center)" \
+           >&2; exit 2 ;;
 esac
 
 # The settings window is 900x660 by its own declaration; capturing it at the

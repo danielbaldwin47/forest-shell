@@ -2,9 +2,9 @@
 
 ## Test seams
 
-Before writing code for a ticket, decide **which of the two seams verifies it**,
-and say so in the PR. A ticket whose acceptance criteria cannot be checked at
-either seam is not ready to build — that is the thing to resolve first.
+Before writing code for a ticket, decide **which of the three seams verifies
+it**, and say so in the PR. A ticket whose acceptance criteria cannot be
+checked at any seam is not ready to build — that is the thing to resolve first.
 
 **1. `tests/` — pure QML, offscreen, run by `tests/run.sh`.**
 Everything that is a *decision* rather than a picture: policy, formatting,
@@ -32,20 +32,34 @@ silent lifecycle: nothing logged, so a lock that could not be unlocked had two
 candidate causes for a week and cost a session to narrow.
 
 Known gap: this seam cannot take screenshots or count frames — the nested
-compositor never presents after its first commit (upstream aquamarine bug,
-diagnosed in #85; see the header of `tools/nested-session.sh`). Visual checks
-go through `tools/capture-harness.sh` instead: the real surface components
-rendered client-side and grabbed pixel-exact, one surface per run
-(`--surface bar|bar-full|lock|settings`). Layout and contrast checks (#79, #80)
-run there, and `--contrast` is the #79 measurement.
+compositor never presents after its first commit (upstream bug, diagnosed in
+#85 and filed as hyprwm/aquamarine#348; see the header of
+`tools/nested-session.sh`). Looking at pixels is seam 3's job.
 
-It renders offscreen by default, which needs no session — but `MultiEffect`
-draws nothing on the offscreen scenegraph, so every Lucide glyph is missing
-from such a capture (`Widgets/Icon.qml`). `--session` renders the same
-components on the caller's own Wayland session, where they draw; that is the
-seam for anything with an icon in it, and how #73's lock status strip and
-settings chrome were finally judged. What still needs a real session by eye:
-compositor composition — blur behind the bar, layer stacking, frame pacing.
+**3. `tools/capture-harness.sh` — the shell's visuals, rendered client-side
+and grabbed pixel-exact.**
+Everything that is a *picture* but still a client-side one: layout (#80-class
+overflows), colour, opacity compositing — one surface per run
+(`--surface bar|bar-full|lock|settings`). By default the real surface
+components render on `QT_QPA_PLATFORM=offscreen` — deterministic geometry,
+scratch config, generated wallpaper — and the scene is grabbed with
+`Item.grabToImage`, so no compositor is involved and no compositor bug can
+starve it. `--contrast` is the #79 measurement (`tools/measure-contrast.py`),
+and it is the *stricter* form of it: compositor blur only averages the
+wallpaper locally, so a window that passes unblurred passes blurred.
+
+One caveat picks the mode: `MultiEffect` draws nothing on the offscreen
+scenegraph (measured — `Widgets/Icon.qml`), so every Lucide glyph is missing
+from an offscreen capture. `--session` renders the same components on the
+caller's own Wayland session, where they draw; that is the mode for anything
+with an icon in it, and how #73's lock status strip and settings chrome were
+finally judged.
+
+What no seam covers, and why: compositor composition — blur behind the bar,
+layer stacking, frame pacing — needs presents the nested compositor cannot
+currently make and pixels a client-side grab never sees. That still takes a
+real session; a ticket whose acceptance lives there should say that in the PR,
+not claim a seam.
 
 ### Why this is a rule
 

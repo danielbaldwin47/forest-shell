@@ -13,10 +13,16 @@
 //
 // The motion is #27's OSD row, and no more than it: the *window* fades in over
 // 240 and out over 140 (OsdWindow.qml owns that, because a window is what
-// enters and leaves), and everything in here is an in-place change at 140 —
-// the track's fill when the level moves, and the crossfade when a second
-// channel takes the pill over while it is still up. Under `reducedEffects` the
-// fill stops travelling and snaps (#69: transforms off, opacity only).
+// enters and leaves), and the one thing that moves in here is the track's fill
+// when the level does — the in-place 140.
+//
+// It moves *within a channel only*. A second channel taking the pill over
+// while it is still up is not an in-place update of anything: the fill
+// travelling from 45% volume to 90% brightness is one bar animating between
+// two numbers that have nothing to do with each other, and it reads as the
+// volume having changed. So a channel switch snaps, and only a level change
+// travels. Under `reducedEffects` nothing travels at all (#69: transforms off,
+// opacity only).
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
@@ -32,6 +38,19 @@ Item {
     required property string channel
     required property int percent
     required property bool muted
+
+    /// True for the instant a new channel's value is landing. See the header:
+    /// the fill snaps between channels and travels within one.
+    ///
+    /// `Qt.callLater` and not a timer — it runs after the properties this pop
+    /// is assigning have all propagated, which is exactly the window the fill
+    /// needs to be re-bound in, and it costs no wakeup when the pill is idle.
+    property bool switchingChannel: false
+
+    onChannelChanged: {
+        pill.switchingChannel = true;
+        Qt.callLater(() => pill.switchingChannel = false);
+    }
 
     // The pill's size is OsdPolicy's, not this file's: the window has to know
     // how big its surface is before this item exists, and two copies of that
@@ -94,9 +113,10 @@ Item {
                     // #27's in-place update, and the only animation on this
                     // surface. A width is a transform in all but name, so
                     // reduced effects takes it away and the fill arrives at its
-                    // new place instead of travelling there (#69).
+                    // new place instead of travelling there (#69) — and so does
+                    // a channel switch, for the reason the header gives.
                     Behavior on width {
-                        enabled: Theme.animateTransforms
+                        enabled: Theme.animateTransforms && !pill.switchingChannel
                         NumberAnimation {
                             duration: Theme.duration(pill.policy.inPlaceMs)
                             easing.type: Easing.Bezier

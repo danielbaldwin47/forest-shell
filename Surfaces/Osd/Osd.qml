@@ -14,6 +14,28 @@ pragma Singleton
 // value is true, and pops on a *change*. A volume key bound to `wpctl` in
 // hyprland.conf pops this surface without the shell having heard the key.
 //
+// ## What to bind the keys to
+//
+// Audio is free: PipeWire pushes every change to every client, so any tool that
+// moves the volume moves this. **Brightness is not.** The value is a sysfs
+// attribute, and a change to one is delivered by `sysfs_notify` — a poll()
+// wakeup rather than an inotify event — so `FileView.watchChanges` only catches
+// the drivers that also touch the file (Services/Hardware/Backlight.qml says so
+// where the watcher is). A key bound straight to `brightnessctl` may therefore
+// move the panel without this ever hearing about it. The shell's own door does
+// not have that problem, because setting the value is what re-reads it:
+//
+//     bind = , XF86AudioRaiseVolume,  exec, qs ipc call controlcenter nudge volume 1
+//     bind = , XF86AudioLowerVolume,  exec, qs ipc call controlcenter nudge volume -1
+//     bind = , XF86AudioMute,         exec, qs ipc call controlcenter mute volume
+//     bind = , XF86AudioMicMute,      exec, qs ipc call controlcenter mute mic
+//     bind = , XF86MonBrightnessUp,   exec, qs ipc call controlcenter nudge brightness 1
+//     bind = , XF86MonBrightnessDown, exec, qs ipc call controlcenter nudge brightness -1
+//
+// Those are the control centre's own routing table (#44), which is the point:
+// one table, so a key and a finger on the slider do the same thing and this
+// surface reports both.
+//
 // ## The arming rule, which is the whole reason there is a policy
 //
 // Every channel's first reading is a jump from nothing to whatever the machine
@@ -117,7 +139,7 @@ Singleton {
         const previous = root.seen[channel] ?? null;
         const now = Date.now();
         const verdict = root.policy.observe(previous, state, now);
-        root.seen[channel] = root.policy.record(previous, state, verdict, now);
+        root.seen[channel] = root.policy.record(previous, state, now);
 
         if (verdict === "arm")
             // Logged, because "the OSD did not pop" has two causes — armed, or

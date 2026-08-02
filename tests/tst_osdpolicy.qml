@@ -8,21 +8,24 @@
 // screen and unmapping it again is seam 2's (tools/osd-harness.sh), and the
 // picture is seam 3's (`tools/capture-harness.sh --surface osd --session`).
 //
-// The one test in here that reaches outside its own directory is
-// `test_the_volume_glyph_agrees_with_the_audio_facade`. The OSD draws the same
-// speaker the bar does, from a second table, and two tables that must agree are
-// two tables that drift — so they are compared rather than described.
+// The tests in here that reach outside their own directory are the drift
+// guards. The OSD says the same three things the bar and the control centre
+// already say — the same speaker glyph, the same channel names, the same clamp
+// — from tables of its own, and two tables that must agree are two tables that
+// drift. So they are compared rather than described.
 import QtQuick
 import QtTest
 import "../Core"
 import "../Surfaces/Osd"
 import "../Services/Media"
+import "../Surfaces/Drawers"
 
 TestCase {
     name: "OsdPolicy"
 
     OsdPolicy { id: policy }
     AudioPolicy { id: audio }
+    ControlCenterPolicy { id: controlCentre }
     SettingsSchema { id: settings }
 
     // A new reading of one channel, the shape the facades hand over.
@@ -107,23 +110,23 @@ TestCase {
         // from the last thing it did — otherwise a value that keeps moving
         // while a service settles keeps pushing the window forward, and a
         // channel that is genuinely being used stays silent.
-        const armed = policy.record(null, snap(true, 0, false), "arm", 1000);
+        const armed = policy.record(null, snap(true, 0, false), 1000);
         compare(armed.armedAt, 1000);
         compare(armed.percent, 0);
 
-        const settling = policy.record(armed, snap(true, 1, false), "arm", 1200);
+        const settling = policy.record(armed, snap(true, 1, false), 1200);
         compare(settling.armedAt, 1000, "re-arming while settling moved the window");
         compare(settling.percent, 1, "the reading itself is always stored");
 
-        const popped = policy.record(settling, snap(true, 40, false), "pop", 5000);
+        const popped = policy.record(settling, snap(true, 40, false), 5000);
         compare(popped.armedAt, 1000);
         compare(popped.percent, 40);
 
         // A device going away and coming back is a new life, so it gets a new
         // window: the value it comes back at is not something the user asked
         // for either.
-        const gone = policy.record(popped, snap(false, 0, false), "ignore", 6000);
-        const back = policy.record(gone, snap(true, 80, false), "arm", 7000);
+        const gone = policy.record(popped, snap(false, 0, false), 6000);
+        const back = policy.record(gone, snap(true, 80, false), 7000);
         compare(back.armedAt, 7000);
     }
 
@@ -159,6 +162,44 @@ TestCase {
             compare(policy.icon("volume", percent, true),
                     audio.sinkIcon(percent / 100, true),
                     "muted glyph at " + percent + "%");
+        }
+    }
+
+    function test_the_channel_names_agree_with_the_control_centre() {
+        // The pill and the slider are the same three channels; reading one
+        // after the other should not feel like two different shells, and a
+        // channel called "Microphone" in one place and "Mic" in the other is
+        // exactly that. The control centre's labels come off its slider rows,
+        // which is where they are authored.
+        const facts = { available: true, percent: 50, muted: false };
+        compare(policy.name("volume"), controlCentre.volumeSlider(facts).label);
+        compare(policy.name("mic"), controlCentre.micSlider(facts).label);
+        compare(policy.name("brightness"), controlCentre.brightnessSlider(facts).label);
+    }
+
+    function test_the_two_glyphs_that_are_not_the_speaker_agree_too() {
+        // Mic and brightness are one glyph each in both places, so they must be
+        // the same one. The *speaker* deliberately differs: the control centre
+        // draws one filled speaker at any level, and the OSD walks
+        // AudioPolicy's ladder, because a pill whose whole job is to report a
+        // level should not draw the same icon at 5% and 95%.
+        const loud = { available: true, percent: 60, muted: false };
+        const quiet = { available: true, percent: 60, muted: true };
+        compare(policy.icon("mic", 60, false), controlCentre.micSlider(loud).icon);
+        compare(policy.icon("mic", 60, true), controlCentre.micSlider(quiet).icon);
+        compare(policy.icon("brightness", 60, false),
+                controlCentre.brightnessSlider(loud).icon);
+    }
+
+    function test_the_clamp_agrees_with_the_control_centre() {
+        // Both take a level from a service that can hand over more than 100 and
+        // from a human who can type anything. A value one of them draws at full
+        // and the other rejects would be the same number meaning two things.
+        for (const value of [-10, 0, 45.4, 45.5, 99.6, 140, "nonesuch"]) {
+            compare(policy.clampPercent(value), controlCentre.clampPercent(value),
+                    "clamped " + value);
+            compare(policy.fraction(value), controlCentre.fraction(value),
+                    "as a fraction, " + value);
         }
     }
 

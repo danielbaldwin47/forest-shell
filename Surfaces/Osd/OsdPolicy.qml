@@ -113,13 +113,18 @@ QtObject {
     /// through everything after — a window measured from the last thing the
     /// channel did would be pushed forward by every step of a service settling,
     /// and a channel that is genuinely being used would never come out of it.
-    function record(previous: var, next: var, verdict: string, nowMs: real): var {
+    /// It takes no verdict for that reason: what `observe()` decided is about
+    /// the pill, and what is kept is about the channel.
+    function record(previous: var, next: var, nowMs: real): var {
+        // A channel with no history, or one whose device had gone away, is
+        // starting a new life: it gets a new window. Anything else carries the
+        // stamp it already had.
         const fresh = !previous || previous.available !== true;
         return {
             available: next.available === true,
             percent: next.percent,
             muted: next.muted === true,
-            armedAt: (verdict === "arm" && fresh) || !previous ? nowMs : previous.armedAt
+            armedAt: fresh ? nowMs : previous.armedAt
         };
     }
 

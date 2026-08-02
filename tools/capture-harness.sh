@@ -57,7 +57,9 @@
 # field), `settings` is the settings window at the tab `--tab` names, and
 # `drawer` is #38's fog scrim with the session menu in it, laid out below the
 # bar the way the compositor lays it out — the picture that answers "scrim at
-# 0.10, bar above the fog". Its icons need `--session`.
+# 0.10, bar above the fog". Its icons need `--session`. `osd` is #46's pill,
+# placed where the settings' position key puts it and posed with `--osd
+# channel[:percent[:muted]]`; its glyph needs `--session` too.
 #
 # --contrast runs tools/measure-contrast.py over the strip the bar occupies
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
@@ -102,6 +104,7 @@ LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
 DRILL=""
 OSD_STATE="volume:45"
+OSD_SET=0
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -122,7 +125,7 @@ while (( $# )); do
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --drill)       DRILL="$2"; shift 2 ;;
-        --osd)         OSD_STATE="$2"; shift 2 ;;
+        --osd)         OSD_STATE="$2"; OSD_SET=1; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
@@ -157,7 +160,7 @@ fi
 # `--osd` only means anything on the pill, and it names a channel the policy
 # knows: a silently ignored flag is a capture of the wrong thing that looks
 # right, and an unknown channel draws a pill with no glyph in it.
-if [[ "$OSD_STATE" != "volume:45" ]]; then
+if (( OSD_SET )); then
     [[ "$SURFACE" == osd ]] || {
         echo "--osd only applies to --surface osd" >&2; exit 2; }
 fi

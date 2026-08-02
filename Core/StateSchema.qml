@@ -30,6 +30,22 @@ QtObject {
         // the notification service (#42).
         dnd: { def: false, coerce: c.boolean },
 
+        // "Keep this machine awake" is about this afternoon (#44, semantics
+        // from #30). Config would restore it on Monday because a film ran on
+        // Friday, which is a lock nobody asked for. Owned by
+        // Services/Hardware/KeepAwake.qml.
+        keepAwake: { def: false, coerce: c.boolean },
+
+        nightLight: {
+            // Whether the screen is warmed *now*. The temperature and the
+            // command are config (`weatherTime.nightLight`) because they are
+            // setup and travel between machines; this is not, for the reason
+            // above — a night light left on last night is not a setting, and a
+            // shell that restored it at nine in the morning would be wrong in
+            // the one way the toggle exists to avoid (#44).
+            on: { def: false, coerce: c.boolean }
+        },
+
         dashboard: {
             lastTab: { def: "", coerce: c.string }   // #49
         },

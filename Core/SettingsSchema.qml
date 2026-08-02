@@ -411,6 +411,32 @@ QtObject {
 
         weatherTime: {
             // Location, units and clock format land with #50.
+
+            // Night light (#44). Here rather than under `appearance` because
+            // this is the section that will own sunset — the schedule #50
+            // lands needs a location, and a warmth key three sections away
+            // from the times that drive it is a key nobody finds.
+            nightLight: {
+                // How warm, in K. 4000 is a warm evening that is still legible
+                // for text; the range is what the tools themselves accept
+                // (Services/Hardware/NightLightPolicy.qml holds the same two
+                // numbers, and this is the file that clamps a hand-edit).
+                temperature: { def: 4000, coerce: c.integer(1000, 6500) },
+
+                // What warms the screen, and what stops. Strings rather than a
+                // toggle, for the reason `system.session.commands` are: what
+                // does this differs by compositor — hyprsunset on Hyprland,
+                // wlsunset or gammastep elsewhere — and the shell has no
+                // business guessing. The defaults are Hyprland's, since that is
+                // the compositor this shell targets (#12).
+                //
+                // `{temp}` is substituted with the temperature above. Emptying
+                // either key removes the control centre's tile rather than
+                // leaving one that fails on every press.
+                command: { def: "hyprctl hyprsunset temperature {temp}",
+                           coerce: c.string },
+                offCommand: { def: "hyprctl hyprsunset identity", coerce: c.string }
+            }
         },
 
         wallpaper: {

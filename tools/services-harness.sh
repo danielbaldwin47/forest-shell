@@ -136,8 +136,12 @@ fi
 # #40 took the list from ten to twelve (Apps, Calculator) and left this at ten,
 # so the check has been red on main since it landed. #41 makes it thirteen.
 deferred_line=$(grep -a 'services: deferred stage' "$NESTED_SHELL_LOG" | head -1)
-if [[ "$deferred_line" == *"13 object(s)"* ]]; then
-    nested_pass 'the deferred stage constructs all thirteen services'
+# Sixteen since #44: PowerProfiles, NightLight and Vpn joined the list, each
+# for a reason Core/ServiceInit.qml states beside it. The number is asserted
+# rather than a lower bound because the whole point of the list is that a
+# service which quietly stopped being constructed is invisible otherwise.
+if [[ "$deferred_line" == *"16 object(s)"* ]]; then
+    nested_pass 'the deferred stage constructs all sixteen services'
 else
     nested_fail "the deferred stage is not what it should be: ${deferred_line:-<no line>}"
 fi
@@ -167,10 +171,14 @@ expect_log 'media: mpris facade ready' 'the mpris facade reports its state'
 # 3 — the bar carries them. The registry resolves names from config, and a
 # module that fails to load drops out with a warning rather than taking the bar
 # with it — which means a broken module looks like a bar that is merely quiet.
-if grep -qaE 'bar: content ready on .* \(3/2/5 modules\)' "$NESTED_SHELL_LOG"; then
+# 3/2/6 since #43 put the notification indicator in the default right cluster
+# (Core/SettingsSchema.qml). The count was left at 3/2/5 by that ticket and this
+# harness has been red on it since; corrected here because #44 is the next thing
+# to run it.
+if grep -qaE 'bar: content ready on .* \(3/2/6 modules\)' "$NESTED_SHELL_LOG"; then
     nested_pass 'the bar carries the whole default inventory (#9, completed by #37)'
 else
-    nested_fail "the default bar is not 3/2/5 modules: $(grep -a 'bar: content ready' "$NESTED_SHELL_LOG" | head -1)"
+    nested_fail "the default bar is not 3/2/6 modules: $(grep -a 'bar: content ready' "$NESTED_SHELL_LOG" | head -1)"
 fi
 
 # A name the registry does not know is dropped with a warning, and the default

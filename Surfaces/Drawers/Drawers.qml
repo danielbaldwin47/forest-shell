@@ -203,6 +203,10 @@ Singleton {
         function toggle(): void { root.toggle("notificationcenter"); }
     }
 
+    readonly property QtObject controlCenterHandle: QtObject {
+        function toggle(): void { root.toggle("controlcenter"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -241,6 +245,46 @@ Singleton {
         function isOpen(): bool { return root.current === "notificationcenter"; }
     }
 
+    // The control centre's door (#44). `controlcenter`, lowercase and one word,
+    // which is the spelling Core/SurfaceBusPolicy.qml already wrote down for
+    // the bar button that has been dispatching to it since #37 — the surface
+    // lands against the name the bar is using rather than inventing a second.
+    //
+    //     bind = SUPER, C, exec, qs ipc call controlcenter toggle
+    //
+    // The four doors every drawer has, and four more this one does: the panel's
+    // controls are reachable without the panel. That is a feature —
+    //
+    //     bind = SUPER, N, exec, qs ipc call controlcenter press nightlight
+    //
+    // — and it is also the only way the ticket's "the eight toggles are
+    // functional" can be checked at all: a tile is a `TapHandler` inside a
+    // drawer, and this repo has no pointer- or key-injection tool it may assume
+    // (tools/drawer-harness.sh says so at length about Escape). The routing is
+    // Surfaces/Drawers/ControlCenterActions.qml, which the tiles call too — one
+    // table, so a harness driving `press` drives what a finger drives.
+    //
+    // On this handler and not a second one of its own: two `IpcHandler`s on one
+    // target is one of them quietly not answering, which is the trap the
+    // notification centre's own door is named around.
+    IpcHandler {
+        target: "controlcenter"
+
+        function open(): void { root.open("controlcenter"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("controlcenter"); }
+        function isOpen(): bool { return root.current === "controlcenter"; }
+
+        function press(control: string): void { ControlCenterActions.press(control); }
+        function slide(control: string, percent: int): void {
+            ControlCenterActions.slide(control, percent);
+        }
+        function nudge(control: string, direction: int): void {
+            ControlCenterActions.nudge(control, direction);
+        }
+        function mute(control: string): void { ControlCenterActions.mute(control); }
+    }
+
     // --- Super+Space ---------------------------------------------------------
     //
     // The summon (#39), registered from QML rather than shelled out to. In the
@@ -271,7 +315,9 @@ Singleton {
         SurfaceBus.register("session", root.sessionHandle);
         SurfaceBus.register("launcher", root.launcherHandle);
         SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
-        Logger.stage("drawers armed (ipc targets: session, launcher, notificationcenter)");
+        SurfaceBus.register("controlcenter", root.controlCenterHandle);
+        Logger.stage("drawers armed (ipc targets: session, launcher, "
+                     + "notificationcenter, controlcenter)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

@@ -100,6 +100,7 @@ LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
 DELAY_MS=600
 REDUCED=0
+LIGHT=0
 
 while (( $# )); do
     case "$1" in
@@ -109,6 +110,7 @@ while (( $# )); do
         --contrast)    CONTRAST=1; shift ;;
         --min-ratio)   MIN_RATIO="$2"; shift 2 ;;
         --surface)     SURFACE="$2"; shift 2 ;;
+        --light)       LIGHT=1; shift ;;
         --session)     SESSION=1; shift ;;
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
@@ -133,8 +135,8 @@ if [[ "$SURFACE" == launcher && "$DELAY_MS" == 600 ]]; then
 fi
 
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center)" \
+    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter)" \
            >&2; exit 2 ;;
 esac
 
@@ -180,8 +182,9 @@ fi
 [[ -f "$WALLPAPER" ]] || { echo "no such wallpaper: $WALLPAPER" >&2; exit 2; }
 
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-printf '{ "wallpaper": { "path": "%s" }, "appearance": { "reducedEffects": %s } }\n' \
+printf '{ "wallpaper": { "path": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s } }\n' \
     "$WALLPAPER" "$( ((REDUCED)) && echo true || echo false )" \
+    "$( ((LIGHT)) && echo false || echo true )" \
     > "$SCRATCH/config/forest-shell/settings.json"
 
 # The offscreen platform takes its screen list from a config file; this is
@@ -378,6 +381,28 @@ print(*(round(float(v) * s) for v in sys.argv[2:6]), round(100 * s))' \
                     "$(( cx + 1 ))" "$FILL_Y" "$(( cw - 2 ))" "$FILL_H" a9b8b0
             fi
         fi
+    elif [[ "$SURFACE" == controlcenter ]]; then
+        # Refused, and the refusal is the finding. #44 was written asking for a
+        # `--contrast` gate over the light palette here, and that gate exists —
+        # it is just not at this seam.
+        #
+        # What this script measures is a **composite**: an authored fill at some
+        # opacity over a wallpaper, which is a number no palette table can
+        # predict and only a render can produce. That is #79, on the bar. The
+        # control centre has no such surface — the panel, the tiles and the
+        # strip are all opaque tokens over an opaque panel, so every ratio in it
+        # is arithmetic over two constants. Rendering them would photograph two
+        # hex values and divide them, and the answer would be worse than the
+        # arithmetic: a region containing text measures its own glyphs, which is
+        # how the first attempt read 3.86:1 over a panel whose real pairings are
+        # 6.4:1 and 4.6:1.
+        #
+        # So the palette gate is `tests/tst_tokens.qml`, where it covers both
+        # modes, every text role and every surface rather than the handful a
+        # posed capture puts on screen — and runs with no compositor at all.
+        # What this surface is captured *for* is the picture: the #80-class
+        # layout check, which needs no flag.
+        fail "--contrast measures a fill composited over the wallpaper; the control centre is opaque throughout — its palette gate is tests/tst_tokens.qml. Capture it without --contrast for the layout."
     else
         # `bar-full` has a strip too, and text drawn into it — which is why it
         # is refused rather than measured: there is no authored fill under it

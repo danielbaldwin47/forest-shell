@@ -91,9 +91,25 @@ Singleton {
         // the first turn can run in it. Constructed on the first `?`, the
         // panel would take a question, spawn into a working directory that
         // does not exist yet, and fail in the shape of a missing binary.
+        // The control centre's three (#44) are here for two different reasons.
+        // PowerProfiles and Vpn each read their state with a subprocess and
+        // never poll after it, so constructing them when the drawer opens would
+        // put a `powerprofilesctl` and an `nmcli` in flight while the grid was
+        // already on screen — the tile would be absent for the first frames of
+        // every first open, which reads as a machine that has no such hardware.
+        // NightLight is the sharper case: it is the only one of the three whose
+        // state does not survive the session it was set in, so it has to *act*
+        // at startup rather than merely be read — a shell restarted with the
+        // toggle on leaves a 6500K screen under a tile that says 4000 until
+        // something re-runs the command (Services/Hardware/NightLight.qml).
+        //
+        // KeepAwake is deliberately not here: it holds no client and spawns
+        // nothing, and the control centre is the only thing that reads it. Its
+        // window is created by the toggle, which is the one moment it matters.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
-                            SystemTray, Mpris, Apps, Calculator, Claude]);
+                            SystemTray, Mpris, Apps, Calculator, Claude,
+                            PowerProfiles, NightLight, Vpn]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

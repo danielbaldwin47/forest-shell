@@ -176,10 +176,21 @@ TestCase {
     function test_empty_sections_are_sections_and_not_leaves() {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["controlCenter", "dashboard", "weatherTime"]) {
+        for (const section of ["controlCenter", "dashboard"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
             compare(store.leafPathsUnder(settings.spec, section).length, 0);
         }
+    }
+
+    function test_the_night_light_keys_live_under_weather_time() {
+        // #44 puts them here rather than under `appearance` because this is the
+        // section that will own sunset (#50) — the schedule needs a location,
+        // and a warmth key three sections away from the times that drive it is
+        // a key nobody finds.
+        compare(store.leafPathsUnder(settings.spec, "weatherTime").sort(),
+                ["weatherTime.nightLight.command",
+                 "weatherTime.nightLight.offCommand",
+                 "weatherTime.nightLight.temperature"]);
     }
 
     // --- the keys the settings window is built on (#54) ----------------------

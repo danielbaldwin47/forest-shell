@@ -153,11 +153,14 @@ Item {
         // instead, which for a tenant that fills the slot means the corner it
         // hangs from: scaling a screen-sized item about its top-right leaves
         // that corner still and grows the panel out of the icon above it.
-        transformOrigin: slot.name === "notificationcenter" ? Item.TopRight : Item.Center
+        transformOrigin: slot.name === "notificationcenter"
+                         || slot.name === "controlcenter" ? Item.TopRight
+                                                          : Item.Center
 
         sourceComponent: slot.name === "session" ? sessionMenu
                        : slot.name === "launcher" ? launcher
                        : slot.name === "notificationcenter" ? notificationCenter
+                       : slot.name === "controlcenter" ? controlCenter
                        : null
     }
 
@@ -192,6 +195,19 @@ Item {
     Component {
         id: notificationCenter
         NotificationCenter {
+            implicitWidth: slot.width
+            implicitHeight: slot.height
+            onCloseRequested: reason => Drawers.close(reason)
+        }
+    }
+
+    // The centre's twin on the other corner of the same bar (#44): the same
+    // placement argument, the same whole-slot handoff, and the same transform
+    // origin — the panel grows out of the button that opened it rather than out
+    // of the middle of the screen.
+    Component {
+        id: controlCenter
+        ControlCenter {
             implicitWidth: slot.width
             implicitHeight: slot.height
             onCloseRequested: reason => Drawers.close(reason)

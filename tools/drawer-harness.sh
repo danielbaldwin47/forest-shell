@@ -21,6 +21,13 @@
 #   6. `ipc call session close` closes an open drawer, and says why
 #   7. `show` is not on the target, because the CLI cannot call it (#77)
 #   8. a toggle for a drawer nobody has built leaves the open one alone
+#   8b-8d. the launcher, the notification centre and the control centre are
+#      real tenants: each registers, opens, agrees it is open, and *swaps* with
+#      another rather than taking the fog down between them
+#   8e. the four service facades #44 added come up and say so
+#   8f. every control-centre toggle is wired: each press logs what it asked for
+#      and the facade answers — working or refusing
+#   8g. the sliders route, without touching the caller's own sound card
 #   9. the compositor took the fog's blur layerrule
 #  10. reducedEffects still opens and closes the drawer — the ladder collapses
 #      the motion, it does not remove the surface
@@ -29,6 +36,15 @@
 # The shell under test runs against a scratch XDG_CONFIG_HOME and
 # XDG_STATE_HOME: check 10 rewrites `appearance.reducedEffects`, and a harness
 # that edits the settings of the session running it is one nobody will run twice.
+#
+# **Checks 8f do touch the caller's hardware, briefly.** There is no scratch
+# copy of a radio: the nested session shares the host's NetworkManager, BlueZ
+# and power-profiles-daemon, so a press that proves a toggle is wired is a press
+# that really flips it. Every one is flipped back — booleans by pressing twice,
+# the power profile and the wifi radio by name from an `EXIT` trap, so an
+# interrupted run still puts them back. The sliders are *not* driven for the
+# same reason turned up one notch further (8g): a sound card left at 40% is a
+# change the user notices and cannot undo.
 #
 # **Escape is driven by hand, not here.** Hyprland's `sendshortcut` takes a
 # *toplevel* — `, escape, activewindow`, and inside this session `hyprctl
@@ -235,19 +251,20 @@ fi
 
 # --- 8. a drawer nobody built leaves the open one alone ----------------------
 #
-# The control centre is declared on the bus and unbuilt (#44). Pressing that
-# button has to be a logged no-op — what must not happen is the open drawer
-# closing because someone reached for a surface that is not there.
+# The dashboard is declared and unbuilt (#49). Reaching for it has to be a
+# no-op — what must not happen is the open drawer closing because someone
+# reached for a surface that is not there.
 #
-# This was `launcher` until #39 landed and made it a real drawer, which is the
-# hazard the check has to be written against: the unbuilt name has to be one
-# that is still unbuilt, or the assertion quietly becomes "a toggle for a
-# drawer that exists does nothing", which is the opposite claim and passes for
-# the wrong reason.
+# This was `launcher` until #39 landed and made it a real drawer, then
+# `controlcenter` until #44 did the same, which is the hazard the check has to
+# be written against: the unbuilt name has to be one that is *still* unbuilt, or
+# the assertion quietly becomes "a toggle for a drawer that exists does
+# nothing", which is the opposite claim and passes for the wrong reason. When
+# #49 lands, move this to the next unbuilt name rather than deleting it.
 
 ipc open > /dev/null
 mark=$(log_lines)
-nested_ipc call controlcenter toggle > /dev/null 2>&1
+nested_ipc call dashboard toggle > /dev/null 2>&1
 expect_quiet_since "$mark" 'drawers: session closed' \
     'a toggle for an unbuilt drawer leaves the open one alone'
 ipc close > /dev/null
@@ -327,6 +344,247 @@ if nested_ipc show | sed -n '/^target notificationcenter$/,/^target /p' \
 else
     nested_pass 'the notificationcenter target does not advertise an uncallable show()'
 fi
+
+# --- 8d. the control centre is the fourth tenant -----------------------------
+#
+# #44. `controlcenter`, lowercase and one word — the spelling
+# Core/SurfaceBusPolicy.qml wrote down for the bar button that has been
+# dispatching to it since #37. The surface had to land against the name the bar
+# was already using; a rename here is a bar button that stops working.
+
+if grep -qa 'surfaces: controlcenter registered (qs ipc call controlcenter toggle)' \
+        "$NESTED_SHELL_LOG"; then
+    nested_pass 'the control centre registered on the surface bus'
+else
+    nested_fail 'the control centre never registered on the surface bus'
+fi
+
+if nested_ipc show | grep -qa '^target controlcenter$'; then
+    nested_pass 'the control centre owns the `controlcenter` ipc target'
+else
+    nested_fail 'there is no `controlcenter` ipc target'
+fi
+
+mark=$(log_lines)
+nested_ipc call controlcenter toggle > /dev/null
+expect_since "$mark" 'drawers: controlcenter opened on ' \
+    'ipc call controlcenter toggle opens the control centre'
+
+# The panel's own line, and the reason it exists: it is the evidence that the
+# grid was assembled from the *real* services rather than drawn empty. The
+# counts are not asserted — this nested session has no battery, may have no
+# bluetooth radio and certainly has no VPN, and ControlCenterPolicy drops a tile
+# per absence on purpose. What is asserted is that it counted something at all.
+expect_since "$mark" 'control-centre: [0-9]+ tile\(s\), [0-9]+ slider\(s\)' \
+    'the control centre assembled its grid from the live services'
+
+reply=$(nested_ipc call controlcenter isOpen)
+if grep -qa 'true' <<< "$reply"; then
+    nested_pass 'the control centre agrees it is open'
+else
+    nested_fail "controlcenter isOpen said \"$reply\" with the panel open"
+fi
+
+# Cross-drawer, the other way round from 8b: the control centre is anchored to
+# the top-right corner and the notification centre to the same one, so these two
+# are the pair most likely to be mistaken for one window if the swap ever became
+# a close and an open.
+mark=$(log_lines)
+nested_ipc call notificationcenter toggle > /dev/null
+expect_since "$mark" 'drawers: controlcenter → notificationcenter' \
+    'the two right-hand panels swap rather than stacking'
+expect_quiet_since "$mark" 'drawers: controlcenter closed' \
+    'the swap does not take the fog down on its way'
+
+mark=$(log_lines)
+nested_ipc call notificationcenter toggle > /dev/null
+expect_since "$mark" 'drawers: notificationcenter closed \(toggle\)' 'and it toggles shut'
+
+if nested_ipc show | sed -n '/^target controlcenter$/,/^target /p' \
+        | grep -qa 'function show('; then
+    nested_fail 'the controlcenter target advertises show(), which the CLI cannot call'
+else
+    nested_pass 'the controlcenter target does not advertise an uncallable show()'
+fi
+
+# --- 8e. the services the grid is made of came up ----------------------------
+#
+# #44 added four, and three of them are named in Core/ServiceInit.qml's deferred
+# list precisely so they are constructed before the drawer is first opened — a
+# tile absent for the first frames of every first open reads as a machine that
+# has no such hardware. Each announces itself either way, working or inert, and
+# that line is the whole of the evidence that the singleton was constructed at
+# all. What the machine actually has is not asserted: a nested session has no
+# battery and no tunnel, and both of those are legitimate answers.
+
+for service in 'power-profile' 'vpn' 'night-light' 'keep-awake'; do
+    if grep -qaE "^.* $service: " "$NESTED_SHELL_LOG"; then
+        nested_pass "the $service facade came up"
+    else
+        nested_fail "the $service facade never logged — was it constructed?"
+    fi
+done
+
+# --- 8f. the control centre's controls actually do something -----------------
+#
+# The ticket's "Wi-Fi, BT, DND, Night Light, Keep Awake, Dark/Light, Power
+# Profile, VPN toggles functional", which is a seam-2 claim: it is about
+# services talking to a real NetworkManager, a real BlueZ and a real
+# `powerprofilesctl`. Driven over `press` rather than by clicking, because a
+# tile is a `TapHandler` and there is no injection tool here — the panel calls
+# the same function (Surfaces/Drawers/ControlCenterActions.qml), so this drives
+# what a finger drives.
+#
+# Each press is asserted twice, and the pair is the point:
+#
+#   1. `control-centre: <id> on|off` — the shell asked for something. This is
+#      the line that says the control is *wired*, and it is the only evidence
+#      for three of them: DND and Keep Awake write state and the theme mode
+#      writes a config key, none of which logs on success. Without it a press
+#      on any of the three is indistinguishable from a tile wired to nothing.
+#   2. the facade's own line — the hardware answered. **Not asserted as
+#      success**: this session has no VPN, no battery and may have no bluetooth
+#      adapter, and "no adapter — unchanged" is the correct answer to a press
+#      rather than a failure. What would be a failure is silence.
+#
+# So the first pattern is exact and the second accepts the service's own
+# vocabulary, working or refusing.
+
+# **This section touches the caller's own machine, and puts it back.**
+#
+# There is no scratch copy of a radio. The nested session shares the host's
+# NetworkManager, BlueZ, power-profiles-daemon and PipeWire, so a press that
+# reaches a facade reaches the real hardware — which is exactly what makes this
+# a seam-2 check and exactly what makes it dangerous. Every boolean below is
+# therefore pressed an even number of times, and the three that cannot be
+# restored that way are recorded here and set back at the end regardless of how
+# the run finishes.
+#
+# The alternative was to press nothing and assert only the routing, which is
+# what 8g does for the sliders. It is the right answer there — a sound card left
+# at 40% is a change the user notices and cannot undo — and the wrong one here:
+# "the eight toggles are functional" is the ticket's acceptance, and a radio
+# that never moved is not evidence of it.
+# Recorded by *name* and set back by name, rather than by pressing twice. A
+# second press is not a reliable undo: the facades toggle off their own bound
+# property, and BlueZ takes long enough to propagate the first change that the
+# second press can read the stale value and ask for the same thing again —
+# measured, and it left this laptop's bluetooth radio off.
+HOST_PROFILE=$(powerprofilesctl get 2>/dev/null | tr -d '[:space:]' || true)
+# `nmcli radio wifi` *prints* enabled/disabled and *takes* on/off. Passing back
+# what it printed is silently rejected, which is how an earlier version of this
+# left the laptop's wifi off after every run.
+case "$(nmcli radio wifi 2>/dev/null | tr -d '[:space:]')" in
+    enabled)  HOST_WIFI=on ;;
+    disabled) HOST_WIFI=off ;;
+    *)        HOST_WIFI="" ;;
+esac
+HOST_BT=$(bluetoothctl show 2>/dev/null | sed -n 's/.*Powered: \(yes\|no\).*/\1/p' | head -1)
+
+restore_host() {
+    [[ -n "$HOST_PROFILE" ]] && powerprofilesctl set "$HOST_PROFILE" 2>/dev/null
+    [[ -n "$HOST_WIFI" ]] && nmcli radio wifi "$HOST_WIFI" 2>/dev/null
+    [[ "$HOST_BT" == yes ]] && bluetoothctl power on > /dev/null 2>&1
+    [[ "$HOST_BT" == no ]] && bluetoothctl power off > /dev/null 2>&1
+    return 0
+}
+
+# Called explicitly at the end of this section rather than from a `trap`.
+# `trap restore_host EXIT` was the obvious spelling and it is wrong here:
+# nested-session.sh installs its own EXIT trap to tear the compositor down, and
+# a second `trap ... EXIT` *replaces* it rather than chaining — which took the
+# nested session's cleanup with it and failed ten checks that had nothing to do
+# with radios. An interrupted run is the accepted cost; `--keep` exists for the
+# case where someone wants to stop in the middle anyway.
+
+press() { nested_ipc call controlcenter press "$1" > /dev/null 2>&1; }
+
+check_press() {
+    local control="$1" pattern="$2" what="$3"
+    local mark
+    mark=$(log_lines)
+    press "$control"
+    expect_since "$mark" "$pattern" "$what"
+}
+
+# The three with no hardware to be missing: state and a config key, so both
+# halves are exact.
+check_press dnd 'control-centre: dnd on' 'pressing Do Not Disturb asks for it on'
+check_press dnd 'control-centre: dnd off' 'and pressing it again asks for it off'
+
+check_press keepawake 'control-centre: keepawake on' 'pressing Keep Awake asks for it on'
+expect_since "$(( $(log_lines) - 40 ))" 'keep-awake: on — inhibiting idle' \
+    'and the facade took the idle inhibitor'
+check_press keepawake 'control-centre: keepawake off' 'and pressing it again releases it'
+
+check_press mode 'control-centre: mode on' 'pressing Theme asks for light'
+check_press mode 'control-centre: mode off' 'and pressing it again asks for dark'
+
+# The five that depend on hardware this session may not have. The first line is
+# exact; the second only has to be *something* from the right facade.
+check_press wifi 'control-centre: wifi (on|off)' 'pressing Wi-Fi asks the network facade'
+expect_since "$(( $(log_lines) - 40 ))" 'network: ' 'and the network facade answered'
+# Restored by name in `restore_host`, for the reason bluetooth is.
+
+check_press bluetooth 'control-centre: bluetooth (on|off)' \
+    'pressing Bluetooth asks the bluez facade'
+expect_since "$(( $(log_lines) - 40 ))" 'bluetooth: ' 'and the bluez facade answered'
+# Not pressed again: see `restore_host`. BlueZ has not propagated the first
+# change yet, so a second press reads the stale value and asks for the same
+# thing twice — which is how this check used to leave the radio off.
+
+# The one that cannot be undone by pressing it again — it cycles, and the cycle
+# length is whatever the daemon offers. `restore_host` sets it back by name.
+check_press powerprofile 'control-centre: powerprofile pressed' \
+    'pressing Power Profile asks power-profiles-daemon'
+expect_since "$(( $(log_lines) - 40 ))" 'power-profile: ' \
+    'and power-profiles-daemon answered'
+
+check_press vpn 'control-centre: vpn (on|off)' 'pressing VPN asks networkmanager'
+expect_since "$(( $(log_lines) - 40 ))" 'vpn: ' 'and networkmanager answered'
+press vpn   # back down, on a machine that actually had one to bring up
+
+check_press nightlight 'control-centre: nightlight (on|off)' \
+    'pressing Night Light asks the configured command'
+expect_since "$(( $(log_lines) - 40 ))" 'night-light: ' 'and the command answered'
+press nightlight
+
+# The door that is deliberately a no-op until the wallpaper ticket — and says
+# so, which is the difference between a stub and a dead button.
+check_press wallpaper 'control-centre: wallpaper unchanged — the picker is not built yet' \
+    'the wallpaper tile says it is a stub rather than doing nothing'
+
+# A name no tile has. Over IPC this is something a person typed into a keybind,
+# and a keybind that does nothing deserves the one line saying why.
+check_press nonesuch 'control-centre: nonesuch unchanged — no such control' \
+    'a press for a control that does not exist explains itself'
+
+restore_host
+
+# --- 8g. the sliders route to the right service ------------------------------
+#
+# Only the routing, and deliberately only the routing. The three sliders drive
+# **the caller's own hardware**: this nested session shares the host's PipeWire
+# and its backlight, so `slide volume 40` sets the volume of the machine running
+# the harness and `mute mic` mutes its microphone. A harness that edits the
+# settings of the session running it is one nobody runs twice (this file's own
+# header says so about XDG_CONFIG_HOME) — and a sound card is worse than a
+# config file, because there is no scratch copy of it to point at.
+#
+# So what is asserted is the line the shell logs *before* it calls the facade,
+# and the two ids that reach no hardware at all. That the facades themselves
+# work is Services/Media/AudioPolicy.qml and Services/Hardware/BacklightPolicy
+# .qml at seam 1, and tools/services-harness.sh at this one.
+
+mark=$(log_lines)
+nested_ipc call controlcenter slide nonesuch 40 > /dev/null 2>&1
+expect_since "$mark" 'control-centre: nonesuch unchanged — no such slider' \
+    'a slide for a slider that does not exist explains itself'
+
+mark=$(log_lines)
+nested_ipc call controlcenter mute brightness > /dev/null 2>&1
+expect_since "$mark" 'control-centre: brightness unchanged — does not mute' \
+    'the brightness slider refuses to mute rather than silently ignoring it'
 
 # --- 9. the fog asked the compositor for its blur ----------------------------
 #

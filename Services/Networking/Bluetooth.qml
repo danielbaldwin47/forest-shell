@@ -58,9 +58,25 @@ Singleton {
     readonly property string icon: root.policy.icon(root.enabled, root.connectedCount, root.discovering)
     readonly property string label: root.policy.label(root.enabled, root.connectedCount)
 
-    // Read-only, like the network facade next door and for the same reason:
-    // pairing and the radio toggle are the control centre's (#44), and a setter
-    // with no caller is one nobody has ever run.
+    /// The radio switch (#44) — the caller #36 left this note waiting for.
+    /// Pairing is still not here: it needs a device list with per-device state
+    /// and a passkey prompt, which is the drill-in rather than the tile.
+    ///
+    /// A function and not a writable `enabled`, the same shape the network
+    /// facade uses: assigning to a property that carries a binding destroys the
+    /// binding, and this one is what carries BlueZ's answer back — including
+    /// when it refuses.
+    function setEnabled(value: bool): void {
+        if (!root.present) {
+            Logger.warn("bluetooth", "no adapter — unchanged");
+            return;
+        }
+        root.adapter.enabled = value;
+    }
+
+    function toggle(): void {
+        root.setEnabled(!root.enabled);
+    }
 
     // A line per state change worth asserting on (#81).
     onEnabledChanged: Logger.log("bluetooth", "radio " + (root.enabled ? "on" : "off"))

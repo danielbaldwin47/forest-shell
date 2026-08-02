@@ -56,16 +56,173 @@ TestCase {
             verify(tokens.isColor(tokens.lightSeed[role]), role + " is not a colour");
     }
 
-    function test_the_light_seed_is_deliberately_partial() {
-        // #8 recorded the brief's light table as incomplete. The gap is
-        // structural, not an oversight, and shrinks when the light theme is
-        // actually built.
-        const fallbacks = tokens.lightFallbackRoles;
-        verify(fallbacks.length > 0);
-        for (const role of fallbacks)
-            compare(tokens.lightSeed[role], undefined);
+    function test_the_light_row_names_every_role_itself() {
+        // #8 recorded the brief's light table as incomplete and seven roles fell
+        // through to their dark values. #44 is the ticket that made that
+        // visible — the Dark/Light tile flips this palette live — and filling
+        // them is part of it: a light mode borrowing dark's `surfaceOverlay`
+        // paints a near-black hover onto a white card.
+        compare(tokens.lightFallbackRoles, []);
         for (const role of tokens.colorRoles)
-            verify(tokens.lightSeed[role] !== undefined || fallbacks.indexOf(role) >= 0);
+            verify(tokens.lightSeed[role] !== undefined, role + " missing from light");
+    }
+
+    // --- contrast ------------------------------------------------------------
+    //
+    // #44 owes a contrast gate over the light palette: the Dark/Light tile is
+    // the first thing in the shell that flips it live, and after #79 and #94
+    // authored numbers do not get the benefit of the doubt.
+    //
+    // The gate is *here* rather than at seam 3, and that is a correction to the
+    // ticket rather than a shortcut. `tools/capture-harness.sh --contrast`
+    // measures a **composite** — an authored fill at some opacity over a
+    // wallpaper, which is a number no palette table can predict and only a
+    // render can produce (#79 is exactly that measurement, on the bar). Every
+    // surface in the control centre is opaque over an opaque panel, so its
+    // ratios are palette arithmetic and nothing else: rendering them would
+    // photograph two constants and divide them. Done here they also cover both
+    // modes, every role pair, and every surface the shell draws on — not the
+    // handful a posed capture happens to put on screen — and they run in CI
+    // with no compositor and no session.
+    //
+    // What seam 3 does own for this surface is the picture: #80-class overflow
+    // and the layout, `--surface controlcenter`.
+
+    readonly property var backgroundRoles: [
+        "bgBase", "bgSunken", "surface", "surfaceRaised", "surfaceOverlay"
+    ]
+
+    /// WCAG 2.1 relative luminance and contrast ratio. Written out rather than
+    /// taken from `tools/measure-contrast.py`, which is the same arithmetic
+    /// over a PNG — this side of the line has no PNG and no python.
+    function channel(value) {
+        const c = value / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+
+    function luminance(hex) {
+        const h = String(hex).replace("#", "");
+        const r = parseInt(h.substring(0, 2), 16);
+        const g = parseInt(h.substring(2, 4), 16);
+        const b = parseInt(h.substring(4, 6), 16);
+        return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    }
+
+    function contrast(a, b) {
+        const la = luminance(a);
+        const lb = luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+
+    function test_the_ratio_maths_agrees_with_a_known_pair() {
+        // Black on white is 21:1 by definition; the dark row's own recorded
+        // "16.0:1 on base" is the second anchor. Without this the four tests
+        // below would pass just as happily on arithmetic that was subtly wrong.
+        compare(Math.round(contrast("#000000", "#ffffff")), 21);
+        verify(Math.abs(contrast("#e6ece8", "#0b100d") - 16.0) < 0.3);
+    }
+
+    function test_body_text_clears_aa_on_every_surface_in_both_modes() {
+        // The two text roles go anywhere, including into a well.
+        for (const darkMode of [true, false]) {
+            const p = tokens.palette(darkMode, null);
+            for (const fg of ["textPrimary", "textSecondary"])
+                for (const bg of backgroundRoles) {
+                    const ratio = contrast(p[fg], p[bg]);
+                    verify(ratio >= 4.5,
+                           (darkMode ? "dark" : "light") + " " + fg + " on " + bg
+                           + " is " + ratio.toFixed(2) + ":1");
+                }
+        }
+    }
+
+    function test_accent_text_clears_aa_on_the_surfaces_it_is_labelled_on() {
+        // The four a label can land on. `bgSunken` is deliberately not among
+        // them: it is wells, insets and slider grooves (Core/Tokens.qml names
+        // it that), and the shell draws no accent-coloured text into one — the
+        // control centre's groove has an accent *fill* beside it, which is an
+        // adjacency and not a legibility ratio.
+        const labelSurfaces = ["bgBase", "surface", "surfaceRaised", "surfaceOverlay"];
+        for (const darkMode of [true, false]) {
+            const p = tokens.palette(darkMode, null);
+            for (const fg of ["accentPrimary", "accentWarm", "accentEmber",
+                              "accentLichen", "accentStone"])
+                for (const bg of labelSurfaces) {
+                    const ratio = contrast(p[fg], p[bg]);
+                    verify(ratio >= 4.5,
+                           (darkMode ? "dark" : "light") + " " + fg + " on " + bg
+                           + " is " + ratio.toFixed(2) + ":1");
+                }
+        }
+    }
+
+    function test_muted_text_clears_the_large_text_floor_in_both_modes() {
+        // 3:1, AA for large text, and deliberately not 4.5. #8 recorded the
+        // light row's `textMuted` at 4.0:1 as large-text-only; that is the
+        // brief's decision about a role, not a gap in it, and a gate that
+        // demanded 4.5 here would be this file overruling the design brief.
+        for (const darkMode of [true, false]) {
+            const p = tokens.palette(darkMode, null);
+            for (const bg of backgroundRoles) {
+                const ratio = contrast(p.textMuted, p[bg]);
+                verify(ratio >= 3.0,
+                       (darkMode ? "dark" : "light") + " textMuted on " + bg
+                       + " is " + ratio.toFixed(2) + ":1");
+            }
+        }
+    }
+
+    function test_the_accent_fill_reads_under_the_text_that_sits_on_it() {
+        // `accentDeep` is a fill and never text: the selected chip (#54), the
+        // active session row (#38), the lit control-centre tile (#44). All
+        // three draw `textPrimary` on it and one draws `textSecondary` too, so
+        // those are the two pairings that have to hold.
+        //
+        // This is the pair that made #44 fill the light row rather than let it
+        // fall through: light mode's `textPrimary` is *dark*, so a light
+        // `accentDeep` that darkened to match dark's would have been dark ink
+        // on a dark fill — the one combination that cannot be read at all.
+        for (const darkMode of [true, false]) {
+            const p = tokens.palette(darkMode, null);
+            const mode = darkMode ? "dark" : "light";
+            const ratio = contrast(p.textPrimary, p.accentDeep);
+            verify(ratio >= 4.5,
+                   mode + " textPrimary on accentDeep is " + ratio.toFixed(2) + ":1");
+            // And the reason nothing dimmer may go there: on a fill this
+            // saturated the next role down is already under AA in dark, which
+            // is what forces the lit tile's detail line onto `textPrimary` and
+            // a smaller size (Surfaces/Drawers/ControlTile.qml).
+            verify(contrast(p.textSecondary, p.accentDeep) < 4.5
+                   || contrast(p.textMuted, p.accentDeep) < 4.5,
+                   mode + " a dimmer role now reads on accentDeep — the tile "
+                   + "detail could use it");
+        }
+    }
+
+    function test_a_border_is_visible_against_what_it_borders() {
+        // Not a text ratio: 1.2:1 is the point at which a hairline stops being
+        // a hairline and becomes an edge nobody can see. `borderStrong` is a
+        // focus ring, so it has to clear more than a subtle one does.
+        for (const darkMode of [true, false]) {
+            const p = tokens.palette(darkMode, null);
+            const mode = darkMode ? "dark" : "light";
+            for (const bg of ["surface", "surfaceRaised"]) {
+                verify(contrast(p.borderSubtle, p[bg]) >= 1.2,
+                       mode + " borderSubtle is invisible on " + bg);
+                verify(contrast(p.borderStrong, p[bg]) >= 1.8,
+                       mode + " borderStrong is too faint on " + bg);
+            }
+        }
+    }
+
+    function test_the_fallback_list_is_derived_rather_than_hand_written() {
+        // It is empty now and the mechanism has to outlive that: a theme preset
+        // (#56) can replace the row with a partial one, and a role it does not
+        // name must resolve rather than arrive undefined. Derived means the
+        // list re-computes instead of being a stale constant nobody updated.
+        const computed = tokens.colorRoles.filter(
+            role => tokens.lightSeed[role] === undefined);
+        compare(tokens.lightFallbackRoles, computed);
     }
 
     function test_both_palettes_answer_every_role() {

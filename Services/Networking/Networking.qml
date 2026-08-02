@@ -57,15 +57,39 @@ Singleton {
 
     /// The wifi radio's own switch — airplane mode.
     ///
-    /// Read-only, and the facade is read-only throughout: nothing in this
-    /// ticket turns a radio on or off, and a setter with no caller is a setter
-    /// nobody has ever run. The toggle belongs to the control centre (#44),
-    /// which will arrive with a caller and a check for it. When it does, the
-    /// write goes through a *function* rather than making this property
-    /// writable — assigning to a property that carries a binding destroys the
-    /// binding, so the one call that turned the radio off would also be the
-    /// last time this facade heard about it changing.
+    /// Read-only *here*, and written through `setWifiEnabled` below — #36 left
+    /// the note and #44 is the caller it was waiting for. Still a binding
+    /// rather than a writable property, for the reason that note gave:
+    /// assigning to a property that carries a binding destroys the binding, so
+    /// the one call that turned the radio off would also be the last time this
+    /// facade heard about it changing.
     readonly property bool wifiEnabled: Nm.Networking.wifiEnabled
+
+    /// Whether the radio can be switched at all. A laptop with its rfkill
+    /// switch flipped — or a lid slider, on the machines that still have one —
+    /// reports the hardware off, and NetworkManager will not bring it up for
+    /// anybody. The tile stays visible and says so, rather than accepting a
+    /// press that silently does nothing.
+    readonly property bool wifiSwitchable: root.available && Nm.Networking.wifiHardwareEnabled
+
+    /// The radio switch (#44). Writes upstream's property, which is the one
+    /// place the value lives; the binding above is what carries the answer
+    /// back, including when NetworkManager refuses.
+    function setWifiEnabled(value: bool): void {
+        if (!root.available) {
+            Logger.warn("network", "no networkmanager — wifi unchanged");
+            return;
+        }
+        if (!root.wifiSwitchable) {
+            Logger.warn("network", "wifi is blocked in hardware — unchanged");
+            return;
+        }
+        Nm.Networking.wifiEnabled = value;
+    }
+
+    function toggleWifi(): void {
+        root.setWifiEnabled(!root.wifiEnabled);
+    }
 
     /// Every device the bar could speak for, as plain data — which is what lets
     /// the policy next door decide between them without meeting NetworkManager.

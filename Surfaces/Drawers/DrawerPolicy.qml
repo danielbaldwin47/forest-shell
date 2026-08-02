@@ -30,11 +30,12 @@ QtObject {
     /// (#37), and pressing one of those must not close the drawer that is open.
     ///
     /// Grows by one line per tenant ticket; `session` is the first (#38),
-    /// `launcher` the second (#39) and `notificationcenter` the third (#43).
+    /// `launcher` the second (#39), `notificationcenter` the third (#43) and
+    /// `controlcenter` the fourth (#44).
     ///
     /// Writable, and nothing in the shell writes it: `tests/` does, to reach
-    /// the states a three-drawer shell does not have yet.
-    property var tenants: ["session", "launcher", "notificationcenter"]
+    /// the states a four-drawer shell does not have yet.
+    property var tenants: ["session", "launcher", "notificationcenter", "controlcenter"]
 
     /// Whether a drawer exists to be opened at all.
     function known(name: string): bool {

@@ -144,6 +144,7 @@ ShellRoot {
                     case "drawer":   return drawerScene;
                     case "launcher": return launcherScene;
                     case "center":   return centerScene;
+                    case "controlcenter": return controlCenterScene;
                     default:         return barScene;
                     }
                 }
@@ -512,6 +513,102 @@ ShellRoot {
             }
 
             Component.onDestruction: Notifications.history = []
+        }
+    }
+
+    /// The control centre (#44), posed with a machine that has everything: all
+    /// three sliders, all nine tiles, a battery with an estimate, and the
+    /// longest strings any of those fields can actually carry — a 32-character
+    /// SSID (the limit the spec allows), a vendor power profile and a VPN
+    /// profile named like a real one. That is the picture worth taking, and the
+    /// failure this seam catches is #80's: a row whose text column starves
+    /// because something beside it grew.
+    ///
+    ///     tools/capture-harness.sh out.png --surface controlcenter --session
+    ///     tools/capture-harness.sh out.png --surface controlcenter --light --contrast
+    ///
+    /// `--session` for the picture, because every tile and every slider has a
+    /// Lucide glyph in it and `MultiEffect` draws nothing on the offscreen
+    /// scenegraph (Widgets/Icon.qml). Offscreen still measures the fills and
+    /// the layout, which is what an overflow and a contrast ratio are — and the
+    /// light-palette gate #44 owes (#79, #94) is exactly that measurement.
+    ///
+    /// The facts are *assigned* rather than left to the services: the panel
+    /// binds to real hardware, and a capture of that is a picture of whichever
+    /// machine ran it. Assigning replaces the binding and drives the shipped
+    /// policy — the tiles, the reflow and the strip are all still the real
+    /// code, working off a machine this one is pretending to be.
+    Component {
+        id: controlCenterScene
+
+        Backdrop {
+            id: controlBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            ControlCenter {
+                id: centre
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                facts: ({
+                    wifi: { available: true, on: true,
+                            label: "PUMPKINCURRY-5GHz-guest-net" },
+                    bluetooth: { present: true, on: true, label: "2 devices" },
+                    dnd: { on: true },
+                    nightlight: { available: true, on: true, temperature: 4000 },
+                    keepawake: { on: true },
+                    dark: Theme.dark,
+                    powerprofile: { available: true, profile: "power-saver" },
+                    vpn: { available: true, on: true, name: "work-eu-frankfurt-1" },
+                    volume: { available: true, percent: 45, muted: false },
+                    mic: { available: true, percent: 80, muted: true },
+                    brightness: { available: true, percent: 60 },
+                    battery: { hasBattery: true, label: "84%",
+                               state: "discharging", timeRemaining: "3h 20m" }
+                })
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "tiles=" + centre.tiles.length
+                    + " rows=" + centre.tileRows.length
+                    + " sliders=" + centre.sliderRows.length
+                    + " mode=" + (Theme.dark ? "dark" : "light")
+                    + " panel=" + root.region(centre.panelItem, controlBackdrop)
+                    + " strip=" + root.region(centre.stripItem, controlBackdrop)
+                    + " tile=" + root.region(centre.litTileItem, controlBackdrop)
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            Component.onCompleted: root.describeScene = controlBackdrop.describe
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
         }
     }
 

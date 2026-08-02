@@ -101,6 +101,18 @@ Singleton {
         root.setMuted(!root.muted);
     }
 
+    /// The microphone's own level (#44). The bar never needed it — a mic has no
+    /// indicator, only a mute glyph — so it arrives with the control centre's
+    /// slider, which is its first caller. Clamped by the same policy as the
+    /// sink: a source over unity is a source that clips.
+    function setSourceVolume(volume: real) {
+        if (!root.hasSource) {
+            Logger.warn("audio", "no default source — ignoring mic volume " + volume);
+            return;
+        }
+        root.source.audio.volume = root.policy.clamp(volume);
+    }
+
     function setSourceMuted(muted: bool) {
         if (!root.hasSource) {
             Logger.warn("audio", "no default source — ignoring mic mute " + muted);

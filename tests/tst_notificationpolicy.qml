@@ -598,4 +598,149 @@ TestCase {
         compare(policy.countSince(undefined, 1000), 0);
         compare(policy.countSince([null, { time: "soon" }, { time: 2000 }], 1000), 1);
     }
+
+    // --- what the center shows (#43) -----------------------------------------
+
+    function test_history_groups_by_app_newest_app_first() {
+        // The centre draws one group per app, in the order the apps appear in
+        // history — which, history being newest first, is "whoever notified
+        // last is at the top". Rows inside a group keep that order too.
+        const history = rows([
+            { time: 5000, appKey: "firefox", appName: "Firefox", summary: "three" },
+            { time: 4000, appKey: "telegram", appName: "Telegram", summary: "two" },
+            { time: 1000, appKey: "firefox", appName: "Firefox", summary: "one" }
+        ]);
+        const groups = policy.groups(history);
+
+        compare(groups.length, 2);
+        compare(groups[0].appKey, "firefox");
+        compare(groups[0].count, 2);
+        compare(groups[0].latest, 5000);
+        compare(groups[0].rows.map(row => row.summary), ["three", "one"]);
+        compare(groups[1].appKey, "telegram");
+        compare(groups[1].count, 1);
+    }
+
+    function test_a_group_describes_itself_as_its_newest_row_does() {
+        // An app that has renamed itself, or started sending an icon, is drawn
+        // the way it describes itself now rather than the way it did first.
+        const history = rows([
+            { time: 5000, appKey: "chat", appName: "Chat 2", appIcon: "new" },
+            { time: 1000, appKey: "chat", appName: "Chat", appIcon: "old" }
+        ]);
+        const group = policy.groups(history)[0];
+
+        compare(group.appName, "Chat 2");
+        compare(group.appIcon, "new");
+    }
+
+    function test_rows_with_no_app_key_are_still_grouped() {
+        // They cannot be *ruled* on — `knownApps` drops them for exactly that
+        // reason — but they are in history, and a row the centre never draws is
+        // a row nothing can clear.
+        const history = rows([{ time: 2000, appKey: "", appName: "" },
+                              { time: 1000, appKey: "firefox" }]);
+        const groups = policy.groups(history);
+
+        compare(groups.length, 2);
+        compare(groups[0].appKey, "");
+        compare(groups[0].count, 1);
+    }
+
+    function test_grouping_survives_a_wrecked_history() {
+        compare(policy.groups(undefined).length, 0);
+        compare(policy.groups([null, "nonsense", { time: 1000, appKey: "x" }]).length, 1);
+    }
+
+    function test_clearing_an_app_takes_its_rows_and_only_its_rows() {
+        const history = rows([
+            { time: 3000, appKey: "firefox" },
+            { time: 2000, appKey: "telegram" },
+            { time: 1000, appKey: "firefox" }
+        ]);
+        const after = policy.withoutApp(history, "firefox");
+
+        compare(after.length, 1);
+        compare(after[0].appKey, "telegram");
+        // A new list: the service binds to its history, and an in-place splice
+        // would change the value under a binding that never re-evaluates.
+        compare(history.length, 3);
+    }
+
+    function test_clearing_an_app_folds_the_key_the_way_a_rule_does() {
+        // `notifications.apps` is hand-editable and matched case-insensitively,
+        // so the key the centre hands back can be any casing of the row's.
+        const history = rows([{ time: 1000, appKey: "firefox" }]);
+        compare(policy.withoutApp(history, "  FireFox "), []);
+    }
+
+    function test_dismissing_a_row_goes_by_the_row_key() {
+        // Not the daemon's id, which restarts at 1 with every server (#76):
+        // dismissing one row must never take an unrelated one with it.
+        const history = rows([
+            { time: 2000, seq: 2, appKey: "firefox", serverId: 1 },
+            { time: 1000, seq: 1, appKey: "telegram", serverId: 1 }
+        ]);
+        const after = policy.withoutRow(history, history[0].key);
+
+        compare(after.length, 1);
+        compare(after[0].appKey, "telegram");
+    }
+
+    function test_dismissing_a_row_that_is_already_gone_changes_nothing() {
+        // It may have fallen off the end of `historyLimit` between the frame
+        // that drew it and the click. The user's intent is satisfied either way.
+        const history = rows([{ time: 1000, seq: 1, appKey: "firefox" }]);
+        compare(policy.withoutRow(history, "nope").length, 1);
+    }
+
+    // --- the bar's unread count (#43) ----------------------------------------
+
+    function test_unread_is_what_arrived_since_the_centre_was_last_open() {
+        const history = rows([
+            { time: 5000, appKey: "firefox" },
+            { time: 4000, appKey: "telegram" },
+            { time: 1000, appKey: "firefox" }
+        ]);
+        compare(policy.unreadSince(history, 4000), 2);
+        compare(policy.unreadSince(history, 5001), 0);
+    }
+
+    function test_a_centre_never_opened_leaves_everything_unread() {
+        // The opposite of the lock's floor, and deliberately: a `since` of 0
+        // means "the lock is not up" and counts nothing, where a `seenAt` of 0
+        // means "you have never looked" and counts everything. A badge that
+        // never lit on a first day would be the worse failure of the two.
+        const history = rows([{ time: 5000, appKey: "firefox" },
+                              { time: 1000, appKey: "telegram" }]);
+        compare(policy.unreadSince(history, 0), 2);
+        compare(policy.unreadSince(history, undefined), 2);
+        compare(policy.unreadSince([], 0), 0);
+    }
+
+    function test_the_count_stops_being_a_number_past_ninety_nine() {
+        // Past there the exact number is not information, and a wide module
+        // pushes the clock off the centre of the bar (the #80 class).
+        compare(policy.countLabel(0), "");
+        compare(policy.countLabel(-3), "");
+        compare(policy.countLabel(1), "1");
+        compare(policy.countLabel(99), "99");
+        compare(policy.countLabel(100), "99+");
+        compare(policy.countLabel(undefined), "");
+    }
+
+    function test_a_timestamp_is_coarse_on_purpose() {
+        // The clock ticks once a minute (Core/Time.qml), and a row that counted
+        // seconds under the pointer would be movement the shell has not earned.
+        const now = 1000000000;
+        compare(policy.relativeTime(now, now), "now");
+        compare(policy.relativeTime(now - 59000, now), "now");
+        compare(policy.relativeTime(now - 60000, now), "1m");
+        compare(policy.relativeTime(now - 3600000, now), "1h");
+        compare(policy.relativeTime(now - 90000000, now), "1d");
+        // A row from the future is a clock that moved, not a row to argue with.
+        compare(policy.relativeTime(now + 5000, now), "now");
+        compare(policy.relativeTime(0, now), "");
+        compare(policy.relativeTime(undefined, now), "");
+    }
 }

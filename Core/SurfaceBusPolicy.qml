@@ -57,6 +57,18 @@ QtObject {
             verb: "toggle",
             label: "Control centre"
         },
+        // The notification centre (#43), which is a drawer tenant like the two
+        // below it. The target is `notificationcenter` and not `notifications`
+        // because the notification *service* already owns that target for DND
+        // (Services/Notifications/Notifications.qml), and two IpcHandlers on
+        // one name is one of them silently losing. The bar module's config id
+        // is still `notifications` — that is the registry's namespace, not this
+        // one, the same three-spellings split `controlcenter` has above.
+        notificationcenter: {
+            target: "notificationcenter",
+            verb: "toggle",
+            label: "Notification centre"
+        },
         // The first surface in this table that actually exists (#38). It
         // registers a handler on construction like the rest will, so nothing
         // about the bus changes when a name stops being a promise — which is

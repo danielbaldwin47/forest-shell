@@ -96,6 +96,13 @@ QtObject {
         "WebSearch", "WebFetch", "Read", "Grep", "Glob"
     ]
 
+    /// Where the OSD pill sits (#46). One edge with the pill centred against
+    /// it, or the middle of the screen — layer-shell centres a surface on
+    /// whichever axis it is not anchored to, so this list is the anchor table.
+    /// Surfaces/Osd/OsdPolicy.qml holds the same five and turns them into
+    /// flags.
+    readonly property var osdPositions: ["top", "bottom", "left", "right", "center"]
+
     /// Per-app notification handling (#9, #43): silent means history only.
     readonly property var notificationRules: ["normal", "silent", "blocked"]
 
@@ -222,9 +229,9 @@ QtObject {
             // than one leaf holding all three, so reordering one cluster
             // writes back only that cluster.
             //
-            // The default inventory is #9's, in #9's order (#37 completed it,
-            // bar the notification indicator, which lands with the
-            // notification centre). Left is where you are — the workspaces and
+            // The default inventory is #9's, in #9's order — #37 brought all
+            // but the notification indicator, which lands here with the
+            // notification centre (#43). Left is where you are — the workspaces and
             // the window in front of you, behind the door into the launcher.
             // Centre is the clock and what is playing. Right is the machine's
             // condition, tray first and the control-centre door outermost: the
@@ -240,7 +247,8 @@ QtObject {
                         coerce: c.arrayOf(c.string, "bar.modules.left") },
                 center: { def: ["clock", "media"],
                           coerce: c.arrayOf(c.string, "bar.modules.center") },
-                right: { def: ["tray", "status", "battery", "keyboard", "controlCenter"],
+                right: { def: ["tray", "status", "battery", "keyboard", "notifications",
+                               "controlCenter"],
                          coerce: c.arrayOf(c.string, "bar.modules.right") }
             },
 
@@ -358,6 +366,40 @@ QtObject {
 
         controlCenter: {
             // Sliders, toggle grid and drill-ins land with #44 and #45.
+
+            // The OSD (#46) — the pill that pops on a volume, mic or
+            // brightness change.
+            //
+            // **Here, and not in a tenth section**, which is the one thing
+            // about this ticket the resolutions do not settle: #21 fixes the
+            // section list at nine and `tests/tst_settingstabs.qml` holds the
+            // tabs to ten, so an `osd` section would be a tab #9 never listed.
+            // The OSD reports exactly the three channels the control centre
+            // puts sliders on — volume out, mic, brightness (#9) — so it sits
+            // under the section that owns those controls, and reads as "what
+            // the control centre does when it is not open".
+            //
+            // JSON-only for now, which #9 permits in as many words ("long-tail
+            // options may stay JSON-only until they earn a control"): the
+            // Control Center tab is #55's, and these three rows land with it.
+            osd: {
+                // How long it stays up, in ms. Bounded either side rather than
+                // at zero: a 0 here would be a surface that maps and unmaps in
+                // one frame. Surfaces/Osd/OsdPolicy.qml clamps an IPC-supplied
+                // value to the same pair, and tst_osdpolicy.qml pins the two
+                // together.
+                timeout: { def: 2000, coerce: c.integer(300, 10000) },
+
+                // Which edge it sits against, centred on the other axis;
+                // `center` is the middle of the screen. Bottom by default
+                // because the bar is at the top and the notification stack owns
+                // the top-right corner (#42).
+                position: { def: "bottom", coerce: c.oneOf(schema.osdPositions) },
+
+                // Its gap from that edge, in px. Applied to the anchored edge
+                // only, and ignored by `center`.
+                margin: { def: 64, coerce: c.integer(0, 400) }
+            }
         },
 
         dashboard: {
@@ -410,10 +452,48 @@ QtObject {
 
         weatherTime: {
             // Location, units and clock format land with #50.
+
+            // Night light (#44). Here rather than under `appearance` because
+            // this is the section that will own sunset — the schedule #50
+            // lands needs a location, and a warmth key three sections away
+            // from the times that drive it is a key nobody finds.
+            nightLight: {
+                // How warm, in K. 4000 is a warm evening that is still legible
+                // for text; the range is what the tools themselves accept
+                // (Services/Hardware/NightLightPolicy.qml holds the same two
+                // numbers, and this is the file that clamps a hand-edit).
+                temperature: { def: 4000, coerce: c.integer(1000, 6500) },
+
+                // What warms the screen, and what stops. Strings rather than a
+                // toggle, for the reason `system.session.commands` are: what
+                // does this differs by compositor — hyprsunset on Hyprland,
+                // wlsunset or gammastep elsewhere — and the shell has no
+                // business guessing. The defaults are Hyprland's, since that is
+                // the compositor this shell targets (#12).
+                //
+                // `{temp}` is substituted with the temperature above. Emptying
+                // either key removes the control centre's tile rather than
+                // leaving one that fails on every press.
+                command: { def: "hyprctl hyprsunset temperature {temp}",
+                           coerce: c.string },
+                offCommand: { def: "hyprctl hyprsunset identity", coerce: c.string }
+            }
         },
 
         wallpaper: {
-            path: { def: "", coerce: c.path }
+            path: { def: "", coerce: c.path },
+
+            // Where the control centre's picker looks for candidates (#45), and
+            // nothing else reads it — the wallpaper itself is `path` above and
+            // may live anywhere. `~/` and not an absolute path because
+            // settings.json travels between machines and a home directory does
+            // not; Surfaces/Background/Wallpapers.qml expands it.
+            //
+            // A folder that does not exist is not an error: the picker says
+            // where it looked and shows nothing, which is the correct answer on
+            // a machine that keeps its wallpapers somewhere else.
+            folder: { def: "~/Pictures/Wallpapers", coerce: c.path,
+                      label: "Where the wallpaper picker looks" }
             // Fill mode and any transition land with the wallpaper work.
         },
 
@@ -469,6 +549,88 @@ QtObject {
                 // means do not even probe.
                 fingerprint: { def: true, coerce: c.boolean },
                 fingerprintPamConfig: { def: "fprintd", coerce: c.string }
+            },
+
+            // The idle ladder (#48). Four stages, each with its own toggle and
+            // its own pair of timeouts in **minutes** — #30's table, which was
+            // measured against this machine rather than picked: the T480 ran no
+            // idle daemon at all before this, and its effective behaviour was
+            // DPMS-off at 5.5 minutes and nothing else.
+            //
+            //   stage      battery    ac
+            //   dim        2.5 min    5 min
+            //   lock       5 min      10 min
+            //   dpms       6 min      12 min
+            //   suspend    15 min     off
+            //
+            // Minutes and not seconds because that is the unit the decision was
+            // made in and the unit the GUI will offer; the ladder converts once
+            // (Services/System/IdlePolicy.qml).
+            //
+            // **Zero means "not on this power source"**, which is what makes AC
+            // suspend off while battery suspend is on without a second toggle to
+            // keep in agreement with the first. `enabled` is the other kind of
+            // off — the one the user flips — and it turns the stage off on both
+            // sources at once.
+            //
+            // What is deliberately not here: `respectInhibitors`. #30 puts it on
+            // all four stages, and a key that could turn it off would be a key
+            // that makes a film stop halfway. It is a constant in the policy.
+            // Nor is the audio gate: it is on suspend only, and which stage a
+            // rule applies to is not a setting.
+            //
+            // JSON-only for now, which #9 permits for the long tail: the System
+            // tab is #55's, and these rows land with it.
+            idle: {
+                // Screen down to `level`, restored on the first activity. The
+                // backlight facade does it (#36), so this is one number rather
+                // than a command — unlike the two below, dimming is not
+                // compositor business.
+                dim: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 2.5, coerce: c.number(0, 600) },
+                    ac: { def: 5, coerce: c.number(0, 600) },
+                    level: { def: 10, coerce: c.integer(1, 100) }
+                },
+
+                lock: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 5, coerce: c.number(0, 600) },
+                    ac: { def: 10, coerce: c.number(0, 600) }
+                },
+
+                dpms: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 6, coerce: c.number(0, 600) },
+                    ac: { def: 12, coerce: c.number(0, 600) },
+
+                    // While locked the screen is showing a clock nobody is
+                    // reading, so #30 tightens this stage and only this stage.
+                    // Seconds, because a number under a minute written as a
+                    // fraction of one is a number nobody can check.
+                    lockedSeconds: { def: 30, coerce: c.integer(5, 600) },
+
+                    // Strings for the reason `system.session.commands` are: what
+                    // blanks a screen differs by compositor and the shell has no
+                    // business guessing. These are Hyprland's, since that is the
+                    // compositor this shell targets (#12). Blanking either one
+                    // turns the stage into a logged refusal rather than a silent
+                    // no-op (#78).
+                    offCommand: { def: "hyprctl dispatch dpms off", coerce: c.string },
+                    onCommand: { def: "hyprctl dispatch dpms on", coerce: c.string }
+                },
+
+                // What suspends is `system.session.commands.suspend`, one
+                // section up: the session menu's Suspend and the ladder's last
+                // rung are the same act on the same machine, and two keys for it
+                // would be two keys to keep in agreement.
+                suspend: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 15, coerce: c.number(0, 600) },
+                    // Off on mains: a plugged-in machine that suspends itself is
+                    // one that drops your ssh sessions while you read (#30).
+                    ac: { def: 0, coerce: c.number(0, 600) }
+                }
             }
         }
     })

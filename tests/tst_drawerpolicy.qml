@@ -49,6 +49,19 @@ TestCase {
         compare(oneDrawer.known("launcher"), false);
     }
 
+    function test_the_notification_centre_is_a_drawer() {
+        // #43 is the fifth tenant of the shared window — popups keep their own
+        // (Surfaces/Notifications/Popups.qml), because a toast has to appear
+        // over a fullscreen window and a drawer never does.
+        compare(policy.known("notificationcenter"), true);
+        compare(policy.next("", "notificationcenter"), "notificationcenter");
+        compare(policy.next("notificationcenter", "notificationcenter"), "");
+        // The swap, in the direction the bar makes easy: the indicator is two
+        // modules from the control-centre button.
+        compare(policy.next("launcher", "notificationcenter"), "notificationcenter");
+        compare(policy.next("notificationcenter", "session"), "session");
+    }
+
     function test_a_toggle_for_a_drawer_nobody_built_changes_nothing() {
         // The bus already logs the miss (Core/SurfaceBusPolicy.qml). What must
         // not happen is the open drawer closing because someone pressed a

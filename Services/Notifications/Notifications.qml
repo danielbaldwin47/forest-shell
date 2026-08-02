@@ -31,7 +31,9 @@ pragma Singleton
 // Reading it (#43, the bar indicator and the center):
 //
 //   Notifications.history          // newest first, [{ appKey, summary, … }]
+//   Notifications.groups           // the same rows, one entry per app (#43)
 //   Notifications.knownApps        // every app history remembers (#54, #71)
+//   Notifications.unreadCount      // what the bar indicator badges (#43)
 //   Notifications.centerOpen = true
 //
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
@@ -100,6 +102,21 @@ Singleton {
     /// the list the notification is already in is the same thing twice.
     property bool centerOpen: false
 
+    /// History grouped by app, newest app first — the center's model (#43).
+    /// Derived rather than maintained, so it cannot disagree with the list.
+    readonly property var groups: root.policy.groups(root.history)
+
+    /// When the center was last looked at, in epoch ms, or 0 for "never".
+    /// Persisted, because a badge that resets on every shell restart is a badge
+    /// that lies about what the user has seen.
+    property double seenAt: 0
+
+    /// What the bar indicator counts (#43). Not "unread" in the sense of a
+    /// per-row flag — nothing in the shell marks one row read — but "arrived
+    /// since the center was last open", which is the only reading this shell
+    /// can support honestly. NotificationPolicy holds the argument.
+    readonly property int unreadCount: root.policy.unreadSince(root.history, root.seenAt)
+
     /// Why popups are not showing right now, or "" when they are. For the bar
     /// indicator's tooltip, and for anyone asking "where did my notification
     /// go" — the same vocabulary, from the same cascade, as the log lines.
@@ -158,6 +175,58 @@ Singleton {
         persist.restart();
     }
 
+    /// Clear one app's rows — the center's per-app clear (#43). The rule the
+    /// app is under is untouched: clearing what an app has said is not the same
+    /// act as deciding what it may say, and conflating the two would silence an
+    /// app the user only wanted to tidy up after.
+    function clearApp(appKey: string): void {
+        const before = root.history.length;
+        root.setHistory(root.policy.withoutApp(root.history, appKey));
+        Logger.log("notifications", "cleared " + (appKey || "(no app id)") + " — "
+                   + (before - root.history.length) + " row(s), " + root.history.length + " left");
+    }
+
+    /// Clear everything. Popups on screen are left alone: they are their own
+    /// surface with their own dismissal, and a clear-all that also swept the
+    /// screen would take away the notification the user is reading right now.
+    function clearAll(): void {
+        const before = root.history.length;
+        root.setHistory([]);
+        Logger.log("notifications", "cleared history — " + before + " row(s)");
+    }
+
+    /// Drop one row, by the row key (#76). The counter is deliberately not
+    /// lowered: `seq` is a high-water mark, and the row that carried the
+    /// highest number leaving is exactly the case it exists for.
+    function dismiss(key: string): void {
+        const before = root.history.length;
+        const next = root.policy.withoutRow(root.history, key);
+        if (next.length === before) {
+            Logger.warn("notifications", "no history row " + key + " to dismiss");
+            return;
+        }
+        root.setHistory(next);
+        Logger.log("notifications", "dismissed " + key + ", " + next.length + " row(s) left");
+    }
+
+    /// Mark everything remembered as seen — what opening the center means, and
+    /// what empties the bar indicator's count.
+    ///
+    /// Stamped with the clock rather than with the newest row's time, so a
+    /// notification that arrives in the same millisecond as the click is not
+    /// counted as already-read.
+    function markSeen(): void {
+        root.seenAt = Date.now();
+        persist.restart();
+        Logger.log("notifications", "seen (unread " + root.unreadCount + ")");
+    }
+
+    // Both edges. Opening the center is the user saying they have looked; the
+    // closing edge covers what arrived while it was open, which they were
+    // looking at as it landed — the popup was suppressed precisely because the
+    // list underneath already had it.
+    onCenterOpenChanged: root.markSeen()
+
     // Whether the file has been read yet. state.json is lazy and deferred, so
     // this service is constructed — and can be notified — before its own
     // history has arrived.
@@ -176,6 +245,11 @@ Singleton {
         // carry numbers `readHistory` issued to a hand-edited file.
         root.seq = root.policy.nextSeq(stored, Math.max(root.seq,
                                                         ShellState.values.notifications.seq)) - 1;
+
+        // Never backwards either, and for the same reason: the center may have
+        // been opened before the file arrived, and the stamp that says so is
+        // newer than anything on disk.
+        root.seenAt = Math.max(root.seenAt, ShellState.values.notifications.seenAt);
 
         if (!root.loaded) {
             root.loaded = true;
@@ -436,6 +510,21 @@ Singleton {
             root.setDnd(enabled);
             return root.dnd ? "on" : "off";
         }
+
+        /// What the bar indicator is showing, as a number — the answer to "is
+        /// the badge right", from outside the shell.
+        function unread(): int {
+            return root.unreadCount;
+        }
+
+        /// Empty history. The center's clear-all has a button; this is the same
+        /// act for a keybind, and it is what tools/notification-harness.sh
+        /// drives the surface-free half of the ticket with.
+        function clear(): string {
+            const before = root.history.length;
+            root.clearAll();
+            return String(before) + " cleared";
+        }
     }
 
     NotificationServer {
@@ -474,6 +563,10 @@ Singleton {
     function writeHistory() {
         ShellState.set("notifications.history", root.history);
         ShellState.set("notifications.seq", root.seq);
+        // On the same debounce as the list, because "what is here" and "what
+        // has been looked at" are one fact: a list written without its seen
+        // stamp comes back with a badge for notifications the user has read.
+        ShellState.set("notifications.seenAt", root.seenAt);
     }
 
     Timer {

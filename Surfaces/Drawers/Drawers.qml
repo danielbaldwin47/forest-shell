@@ -6,8 +6,8 @@ pragma Singleton
 //     Drawers.toggle("session")        from a bar button, through Core/SurfaceBus.qml
 //     qs ipc call session toggle       from a keybind, a script, the shell switcher
 //
-// The launcher (#39), the control centre (#44), the dashboard (#49) and the
-// notification centre (#50) all land in this window. What they share is a
+// The launcher (#39), the notification centre (#43), the control centre (#44)
+// and the dashboard (#49) all land in this window. What they share is a
 // window per screen, an input mask and *one* `HyprlandFocusGrab` — one grab
 // because two panels each holding one is the multi-panel focus fight #12 named,
 // where dismissing either can hand focus to the other instead of to the desktop.
@@ -199,6 +199,14 @@ Singleton {
         function toggle(): void { root.toggle("launcher"); }
     }
 
+    readonly property QtObject notificationCenterHandle: QtObject {
+        function toggle(): void { root.toggle("notificationcenter"); }
+    }
+
+    readonly property QtObject controlCenterHandle: QtObject {
+        function toggle(): void { root.toggle("controlcenter"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -221,6 +229,97 @@ Singleton {
         function close(): void { root.close("ipc"); }
         function toggle(): void { root.toggle("launcher"); }
         function isOpen(): bool { return root.current === "launcher"; }
+    }
+
+    // The notification centre's door (#43). `notificationcenter` and not
+    // `notifications`: the notification service owns that target for DND, and
+    // the second IpcHandler on a name is the one that quietly does not answer.
+    //
+    //     bind = SUPER, N, exec, qs ipc call notificationcenter toggle
+    IpcHandler {
+        target: "notificationcenter"
+
+        function open(): void { root.open("notificationcenter"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("notificationcenter"); }
+        function isOpen(): bool { return root.current === "notificationcenter"; }
+    }
+
+    // The control centre's door (#44). `controlcenter`, lowercase and one word,
+    // which is the spelling Core/SurfaceBusPolicy.qml already wrote down for
+    // the bar button that has been dispatching to it since #37 — the surface
+    // lands against the name the bar is using rather than inventing a second.
+    //
+    //     bind = SUPER, C, exec, qs ipc call controlcenter toggle
+    //
+    // The four doors every drawer has, and four more this one does: the panel's
+    // controls are reachable without the panel. That is a feature —
+    //
+    //     bind = SUPER, N, exec, qs ipc call controlcenter press nightlight
+    //
+    // — and it is also the only way the ticket's "the eight toggles are
+    // functional" can be checked at all: a tile is a `TapHandler` inside a
+    // drawer, and this repo has no pointer- or key-injection tool it may assume
+    // (tools/drawer-harness.sh says so at length about Escape). The routing is
+    // Surfaces/Drawers/ControlCenterActions.qml, which the tiles call too — one
+    // table, so a harness driving `press` drives what a finger drives.
+    //
+    // On this handler and not a second one of its own: two `IpcHandler`s on one
+    // target is one of them quietly not answering, which is the trap the
+    // notification centre's own door is named around.
+    IpcHandler {
+        target: "controlcenter"
+
+        function open(): void { root.open("controlcenter"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("controlcenter"); }
+        function isOpen(): bool { return root.current === "controlcenter"; }
+
+        function press(control: string): void { ControlCenterActions.press(control); }
+        function slide(control: string, percent: int): void {
+            ControlCenterActions.slide(control, percent);
+        }
+        function nudge(control: string, direction: int): void {
+            ControlCenterActions.nudge(control, direction);
+        }
+        function mute(control: string): void { ControlCenterActions.mute(control); }
+
+        // The drill-ins (#45), on this handler for the same reason the rest are:
+        // two `IpcHandler`s on one target is one of them quietly not answering.
+        //
+        // Every row inside every detail view is reachable from here, and it has
+        // to be — a row is a `TapHandler` inside a drawer, so without these
+        // doors "Wi-Fi: scan, join, disconnect" and "Bluetooth: pair, connect,
+        // disconnect" would be claims with no seam under them at all. What they
+        // drive is exactly what a finger drives: one routing table, called from
+        // both sides (Surfaces/Drawers/ControlCenterActions.qml).
+        //
+        //     qs ipc call controlcenter drill wifi
+        //     qs ipc call controlcenter network PUMPKINCURRY
+        //     qs ipc call controlcenter passphrase PUMPKINCURRY hunter2hunter2
+        //     qs ipc call controlcenter back
+        function drill(panel: string): void { ControlCenterActions.drill(panel); }
+        function back(): void { ControlCenterActions.back("ipc"); }
+        function panel(): string { return ControlCenterActions.panel; }
+
+        function network(ssid: string): void { ControlCenterActions.network(ssid); }
+        function passphrase(ssid: string, secret: string): void {
+            ControlCenterActions.passphrase(ssid, secret);
+        }
+        function forgetNetwork(ssid: string): void {
+            ControlCenterActions.forgetNetwork(ssid);
+        }
+        function device(address: string): void { ControlCenterActions.device(address); }
+        function forgetDevice(address: string): void {
+            ControlCenterActions.forgetDevice(address);
+        }
+        function output(id: string): void { ControlCenterActions.output(id); }
+        function stream(id: string, percent: int): void {
+            ControlCenterActions.stream(id, percent);
+        }
+        function muteStream(id: string): void { ControlCenterActions.muteStream(id); }
+        function tunnel(name: string): void { ControlCenterActions.tunnel(name); }
+        function wallpaper(path: string): void { ControlCenterActions.wallpaper(path); }
     }
 
     // --- Super+Space ---------------------------------------------------------
@@ -252,7 +351,10 @@ Singleton {
     Component.onCompleted: {
         SurfaceBus.register("session", root.sessionHandle);
         SurfaceBus.register("launcher", root.launcherHandle);
-        Logger.stage("drawers armed (ipc targets: session, launcher)");
+        SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
+        SurfaceBus.register("controlcenter", root.controlCenterHandle);
+        Logger.stage("drawers armed (ipc targets: session, launcher, "
+                     + "notificationcenter, controlcenter)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

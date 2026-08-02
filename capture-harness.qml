@@ -44,6 +44,8 @@
 //                        or any of `summoned`, `caps`, `notify:N`
 //   CAPTURE_SETTINGS_TAB which settings tab to open (default: the state file's)
 //   CAPTURE_DELAY_MS     settle time before the grab (default 600)
+//   CAPTURE_OSD          the OSD pill's state as `channel[:percent[:muted]]`,
+//                        e.g. `volume:45` or `mic:60:muted` (default volume:45)
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
@@ -53,7 +55,9 @@ import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
+import qs.Surfaces.Osd
 import qs.Services.Launcher
+import qs.Services.Notifications
 import qs.Services.System
 import Quickshell.Services.UPower
 
@@ -65,6 +69,16 @@ ShellRoot {
     readonly property string surfaceName: Quickshell.env("CAPTURE_SURFACE") || "bar"
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
+
+    /// Which control-centre detail view to open before the grab (#45), or "" for
+    /// the grid. `wifi`, `bluetooth`, `audio`, `vpn`, `wallpaper`.
+    readonly property string drillPanel: Quickshell.env("CAPTURE_DRILL") ?? ""
+    /// What the OSD pill is reporting (#46), as `channel[:percent[:muted]]`.
+    /// Posed rather than read off the machine, for the same reason every other
+    /// fact here is: a capture driven by the real services is a picture of
+    /// whatever this laptop's volume happened to be.
+    readonly property var osdState: (Quickshell.env("CAPTURE_OSD") || "volume:45").split(":")
+
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
     readonly property int delayMs: parseInt(Quickshell.env("CAPTURE_DELAY_MS") || "600")
@@ -142,6 +156,9 @@ ShellRoot {
                     case "bar-full": return barFullScene;
                     case "drawer":   return drawerScene;
                     case "launcher": return launcherScene;
+                    case "center":   return centerScene;
+                    case "controlcenter": return controlCenterScene;
+                    case "osd":      return osdScene;
                     default:         return barScene;
                     }
                 }
@@ -403,6 +420,313 @@ ShellRoot {
             }
 
             Component.onCompleted: root.describeScene = launcherBackdrop.describe
+        }
+    }
+
+    /// The notification centre (#43), posed with a history nobody would enjoy
+    /// receiving: a long app name, a body several lines past what a toast would
+    /// show, a critical row, and a group deep enough to need its count. That is
+    /// the picture worth taking — the centre laid out over rows it was designed
+    /// for tells nobody anything, and the failure this seam catches is #80's:
+    /// text that runs out of the panel it is in.
+    ///
+    ///     tools/capture-harness.sh out.png --surface center --session
+    ///
+    /// `--session`, because every row has a Lucide glyph in it — the dismiss
+    /// `x`, and the bell that stands in for an app with no icon — and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph (Widgets/Icon
+    /// .qml). Offscreen still measures the fills and the layout, which is what
+    /// an overflow is.
+    ///
+    /// History is posed by assignment rather than by a fake service: the panel
+    /// binds to `Notifications.groups`, which is derived from `history`, so
+    /// writing the list is enough to drive the shipped grouping code rather
+    /// than a copy of it living in this file.
+    Component {
+        id: centerScene
+
+        Backdrop {
+            id: centerBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            NotificationCenter {
+                id: centre
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                // One group open, because the collapsed panel and the expanded
+                // one are two different layouts and only one of them has a
+                // notification body in it to overflow.
+                expanded: "org.example.chat"
+            }
+
+            Component.onCompleted: {
+                const now = Date.now();
+                Notifications.history = [
+                    { time: now - 30000, seq: 6, appKey: "org.example.chat",
+                      appName: "Chat", summary: "Ada Lovelace",
+                      body: "Right — so the analytical engine's whole trick is that the "
+                            + "cards describe the operation as well as the number, which is "
+                            + "the part everyone keeps missing when they call it a calculator.",
+                      urgency: "normal" },
+                    { time: now - 400000, seq: 5, appKey: "org.example.chat",
+                      appName: "Chat", summary: "Ada Lovelace",
+                      body: "Are you there?", urgency: "normal" },
+                    { time: now - 900000, seq: 4, appKey: "org.example.chat",
+                      appName: "Chat",
+                      summary: "A summary long enough to want the whole width of the panel "
+                               + "and then some more besides",
+                      body: "", urgency: "low" },
+                    { time: now - 3600000, seq: 3, appKey: "org.freedesktop.systemupdates",
+                      appName: "System updates, and a name no client should have sent",
+                      summary: "Battery critically low", body: "3% remaining.",
+                      urgency: "critical" },
+                    { time: now - 86400000 * 2, seq: 1, appKey: "", appName: "",
+                      summary: "Something with no app id at all", body: "",
+                      urgency: "normal" }
+                ].map(row => Notifications.policy.record(row));
+
+                root.describeScene = centerBackdrop.describe;
+            }
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "groups=" + Notifications.groups.length
+                    + " rows=" + Notifications.history.length
+                    + " expanded=\"" + centre.expanded + "\""
+                    + " panel=" + centre.panelWidth + "x" + centre.maxPanelHeight
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            Component.onDestruction: Notifications.history = []
+        }
+    }
+
+    /// The control centre (#44), posed with a machine that has everything: all
+    /// three sliders, all nine tiles, a battery with an estimate, and the
+    /// longest strings any of those fields can actually carry — a 32-character
+    /// SSID (the limit the spec allows), a vendor power profile and a VPN
+    /// profile named like a real one. That is the picture worth taking, and the
+    /// failure this seam catches is #80's: a row whose text column starves
+    /// because something beside it grew.
+    ///
+    ///     tools/capture-harness.sh out.png --surface controlcenter --session
+    ///     tools/capture-harness.sh out.png --surface controlcenter --light
+    ///
+    /// `--session` for the picture, because every tile and every slider has a
+    /// Lucide glyph in it and `MultiEffect` draws nothing on the offscreen
+    /// scenegraph (Widgets/Icon.qml). Offscreen still measures the fills and
+    /// the layout, which is what an overflow is — and an overflow is what this
+    /// surface is captured for: the first run of it cut four of nine tile
+    /// labels to "Do Not Di…", which is the #80 shape exactly.
+    ///
+    /// `--contrast` is *refused* here, and tools/capture-harness.sh says why at
+    /// length: this panel is opaque throughout, so its ratios are arithmetic
+    /// over two palette constants rather than a composite over a wallpaper. The
+    /// light-palette gate #44 owes lives in tests/tst_tokens.qml instead, where
+    /// it covers both modes and every role pair.
+    ///
+    /// The facts are *assigned* rather than left to the services: the panel
+    /// binds to real hardware, and a capture of that is a picture of whichever
+    /// machine ran it. Assigning replaces the binding and drives the shipped
+    /// policy — the tiles, the reflow and the strip are all still the real
+    /// code, working off a machine this one is pretending to be.
+    Component {
+        id: controlCenterScene
+
+        Backdrop {
+            id: controlBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            ControlCenter {
+                id: centre
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                facts: ({
+                    wifi: { available: true, on: true,
+                            label: "PUMPKINCURRY-5GHz-guest-net" },
+                    bluetooth: { present: true, on: true, label: "2 devices" },
+                    dnd: { on: true },
+                    nightlight: { available: true, on: true, temperature: 4000 },
+                    keepawake: { on: true },
+                    dark: Theme.dark,
+                    powerprofile: { available: true, profile: "power-saver" },
+                    vpn: { available: true, on: true, name: "work-eu-frankfurt-1" },
+                    volume: { available: true, percent: 45, muted: false },
+                    mic: { available: true, percent: 80, muted: true },
+                    brightness: { available: true, percent: 60 },
+                    battery: { hasBattery: true, label: "84%",
+                               state: "discharging", timeRemaining: "3h 20m" }
+                })
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "tiles=" + centre.tiles.length
+                    + " rows=" + centre.tileRows.length
+                    + " sliders=" + centre.sliderRows.length
+                    + " mode=" + (Theme.dark ? "dark" : "light")
+                    + " drill=" + (ControlCenterActions.panel || "none")
+                    + " panel=" + root.region(centre.panelItem, controlBackdrop)
+                    + " strip=" + root.region(centre.stripItem, controlBackdrop)
+                    + " tile=" + root.region(centre.litTileItem, controlBackdrop)
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            // The drill-ins (#45), when one is asked for. Driven through the
+            // same door the IPC handler and the tiles use, so what is captured
+            // is the panel a press produces and not a component posed by name.
+            //
+            // The four list panels are captured against *real* services and so
+            // against whatever this machine has — unlike the grid above, whose
+            // facts are assigned. That is deliberate and it is the honest
+            // limit of this seam for them: a network list is a picture of a
+            // radio, and there is no way to pose one from here. What the
+            // capture is worth is the #80 check — that a row with a long name
+            // in it does not starve the column beside it — and an empty list
+            // still answers the layout half of that through the chrome. The
+            // wallpaper picker is the one that poses fully, because its
+            // contents are files and `--wallpaper-folder` can point at any.
+            Component.onCompleted: {
+                root.describeScene = controlBackdrop.describe;
+                if (root.drillPanel !== "")
+                    ControlCenterActions.drill(root.drillPanel);
+            }
+
+            // Left at the root again, so a harness run cannot leave a scanner
+            // running on the machine that ran it.
+            Component.onDestruction: ControlCenterActions.back("capture")
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+        }
+    }
+
+    /// The OSD pill (#46), over the wallpaper it floats on, at the position the
+    /// settings put it.
+    ///
+    ///     tools/capture-harness.sh out.png --surface osd --session
+    ///     tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
+    ///
+    /// `--session`, because the pill is a glyph, a track and a reading, and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph
+    /// (Widgets/Icon.qml) — an offscreen capture is the same picture with the
+    /// speaker missing. Offscreen still measures the fills and the layout,
+    /// which is what an overflow is: the readout is a fixed column beside a
+    /// track that takes the rest, and "Muted" is the longest thing that column
+    /// ever holds.
+    ///
+    /// The real OsdContent, posed by assignment. What is *not* here is the
+    /// window: `Surfaces/Osd/OsdWindow.qml` is a layer surface, and where a
+    /// compositor puts it is seam 2's business (tools/osd-harness.sh) — so the
+    /// pill is placed here the way the anchor table says it would be, from the
+    /// same policy the window reads.
+    Component {
+        id: osdScene
+
+        Backdrop {
+            id: osdBackdrop
+
+            readonly property string channel: root.osdState[0]
+            readonly property int percent: root.osdState.length > 1
+                ? parseInt(root.osdState[1]) : 45
+            readonly property bool muted: root.osdState.length > 2
+                && root.osdState[2] === "muted"
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            OsdContent {
+                id: pill
+
+                readonly property var anchorFlags: Osd.policy.anchorsFor(Osd.position)
+                readonly property var marginValues:
+                    Osd.policy.marginsFor(Osd.position, Osd.margin)
+
+                // The layer-shell rule, drawn: an anchored edge is that edge
+                // plus its margin, and an unanchored axis is centred.
+                x: anchorFlags.left ? marginValues.left
+                 : anchorFlags.right ? parent.width - width - marginValues.right
+                 : (parent.width - width) / 2
+                y: anchorFlags.top ? marginValues.top
+                 : anchorFlags.bottom ? parent.height - height - marginValues.bottom
+                 : (parent.height - height) / 2
+
+                width: implicitWidth
+                height: implicitHeight
+
+                policy: Osd.policy
+                channel: osdBackdrop.channel
+                percent: osdBackdrop.percent
+                muted: osdBackdrop.muted
+            }
+
+            Component.onCompleted: root.sceneDescription =
+                "osd=" + osdBackdrop.channel + ":" + osdBackdrop.percent
+                + (osdBackdrop.muted ? ":muted" : "") + " at=" + Osd.position
         }
     }
 

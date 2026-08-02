@@ -68,4 +68,170 @@ QtObject {
         return muted === true;
     }
 
+    // --- the drill-in's two lists (#45) --------------------------------------
+    //
+    // The output picker and the per-application mixer. Both arrive as plain rows
+    // the facade assembles from PipeWire nodes, and both follow the ordering
+    // rule Services/Networking/WifiPolicy.qml argues at length: only fields that
+    // change when something *happens* decide where a row sits. A volume is the
+    // most volatile value in the shell — it moves while the user is dragging the
+    // very row it would reorder — so it decides nothing here.
+
+    /// The output devices, in the order they are drawn: the current default
+    /// first, then everything else alphabetically by the name PipeWire shows.
+    ///
+    /// The default is pinned to the top rather than left in place because it is
+    /// the answer to the question the picker was opened with — "what am I
+    /// playing through" — and a checked row six rows down answers it slowly.
+    function sinks(nodes: var): var {
+        const out = [];
+        for (const node of nodes ?? []) {
+            const id = String(node?.id ?? "");
+            if (id === "")
+                continue;
+            out.push({
+                id: id,
+                name: policy.deviceName(node),
+                isDefault: node?.isDefault === true,
+                live: node?.live ?? null
+            });
+        }
+        return out.sort((a, b) => {
+            if (a.isDefault !== b.isDefault)
+                return a.isDefault ? -1 : 1;
+            const left = a.name.toLowerCase();
+            const right = b.name.toLowerCase();
+            return left < right ? -1 : left > right ? 1 : 0;
+        });
+    }
+
+    /// What to call an output. PipeWire's `description` is the human one
+    /// ("Built-in Audio Analogue Stereo"); `nickname` is shorter when it exists;
+    /// `name` is the machine one (`alsa_output.pci-0000_00_1f.3.analog-stereo`)
+    /// and is the last resort rather than the first.
+    function deviceName(node: var): string {
+        const facts = node ?? ({});
+        return String(facts.description ?? "").trim()
+            || String(facts.nickname ?? "").trim()
+            || String(facts.name ?? "").trim()
+            || "Unknown device";
+    }
+
+    /// The per-application mixer, alphabetical by application. One row per
+    /// stream and not per application: Firefox playing two tabs is two streams
+    /// to PipeWire and two volumes to set, and merging them would give a slider
+    /// that moves one of the two.
+    function streams(nodes: var): var {
+        const out = [];
+        for (const node of nodes ?? []) {
+            const id = String(node?.id ?? "");
+            if (id === "")
+                continue;
+            out.push({
+                id: id,
+                name: policy.streamName(node),
+                subtitle: policy.streamSubtitle(node),
+                icon: policy.streamIcon(node),
+                live: node?.live ?? null
+            });
+        }
+        return out.sort((a, b) => {
+            const left = a.name.toLowerCase();
+            const right = b.name.toLowerCase();
+            if (left !== right)
+                return left < right ? -1 : 1;
+            // Two streams from one application keep PipeWire's order, which is
+            // the order they started in — stable, and the only thing left that
+            // tells them apart.
+            return Number(a.id) - Number(b.id);
+        });
+    }
+
+    /// Who is making the noise. `application.name` is what the toolkit set and
+    /// is right almost always; the node's own description is the fallback for a
+    /// stream created by something that set no properties at all.
+    function streamName(node: var): string {
+        const props = node?.properties ?? ({});
+        return String(props["application.name"] ?? "").trim()
+            || String(node?.description ?? "").trim()
+            || String(node?.name ?? "").trim()
+            || "Unknown application";
+    }
+
+    /// What it is playing, when the application says. Dropped when it is the
+    /// same as the application's own name — "Firefox · Firefox" is a row that
+    /// spent a line saying nothing.
+    function streamSubtitle(node: var): string {
+        const props = node?.properties ?? ({});
+        const media = String(props["media.name"] ?? "").trim();
+        return media.toLowerCase() === policy.streamName(node).toLowerCase() ? "" : media;
+    }
+
+    /// The glyph on a mixer row: the application's own desktop id, which
+    /// Widgets/Icon.qml resolves against the icon theme, or the shell's own
+    /// speaker glyph for a stream that names no application.
+    function streamIcon(node: var): string {
+        const props = node?.properties ?? ({});
+        return String(props["application.icon_name"] ?? "").trim()
+            || String(props["application.process.binary"] ?? "").trim()
+            || "volume-2";
+    }
+
+    /// What both facades compare before republishing (#75). The volumes are
+    /// deliberately absent: they move under the pointer, and a rebuilt delegate
+    /// is a slider that loses the drag that is moving it.
+    function sinkSignature(rows: var): string {
+        return (rows ?? []).map(row => row.id + " " + row.name
+                                + (row.isDefault ? "*" : "-")).join("");
+    }
+
+    function streamSignature(rows: var): string {
+        return (rows ?? []).map(row => row.id + " " + row.name
+                                + " " + row.subtitle).join("");
+    }
+
+    // --- is anything actually playing (#48) ----------------------------------
+
+    /// Whether audio is coming out of this machine right now, from the states of
+    /// the default sink's link groups.
+    ///
+    /// The idle ladder's suspend stage is gated on this and nothing else is
+    /// (#30): a machine playing music through headphones must not sleep under
+    /// the person listening to it, while the same machine dimming, locking and
+    /// blanking is exactly right.
+    ///
+    /// **A link, not a stream.** A paused player keeps its node — the mixer row
+    /// stays, which is the point of the mixer — and PipeWire moves the *link* to
+    /// `Paused` when it corks and back to `Active` when it does not. That is the
+    /// distinction #30 asks for by name ("any active un-corked audio output
+    /// stream"), and it is the only one of the two that a spotify left paused
+    /// overnight answers correctly.
+    ///
+    /// `active` is `PwLinkState.Active` passed in by the facade: this file
+    /// imports nothing but QtQuick, so it cannot name the enum it is comparing
+    /// against.
+    function playing(states: var, active: var): bool {
+        for (const state of states ?? [])
+            if (state === active)
+                return true;
+        return false;
+    }
+
+    // --- what the log says ---------------------------------------------------
+
+    function playingLine(on: bool): string {
+        return on ? "audio playing" : "audio idle";
+    }
+
+    function switched(name: string): string {
+        return "output → " + name;
+    }
+
+    function streamMoved(name: string, percentValue: int): string {
+        return "stream " + name + " " + policy.percent(percentValue / 100) + "%";
+    }
+
+    function streamRefused(id: string, reason: string): string {
+        return "stream " + id + " unchanged — " + reason;
+    }
 }

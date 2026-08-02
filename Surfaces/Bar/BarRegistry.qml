@@ -26,9 +26,9 @@ QtObject {
     /// the two modules that make the bar usable, #36 the status cluster, the
     /// battery and the optional brightness readout, and #37 the rest — the
     /// tray, media, active window, keyboard layout and the two surface
-    /// buttons. What is left of the fourteen is the notification indicator,
-    /// which lands with the notification centre (#43), and the three other
-    /// off-by-default optionals (system monitor, night light, recorder).
+    /// buttons, and #43 the notification indicator that completes them. What
+    /// is left are the three other off-by-default optionals (system monitor,
+    /// night light, recorder).
     ///
     /// `status` is one entry and not four: #9 groups network, bluetooth, volume
     /// and mic into a single quiet icon cluster, and four entries would let a
@@ -47,6 +47,10 @@ QtObject {
         tray: { file: "Tray.qml", label: "System tray" },
         keyboard: { file: "KeyboardLayout.qml", label: "Keyboard layout" },
         controlCenter: { file: "ControlCenterButton.qml", label: "Control centre button" },
+        // #43, the fourteenth. The file is not `Notifications.qml` because the
+        // modules directory is imported explicitly and a type of that name
+        // would shadow the service singleton the module reads.
+        notifications: { file: "NotificationIndicator.qml", label: "Notifications" },
         // Shipped, and in no default list (#9). A module that is off is a
         // module no cluster names — see the note on enablement above.
         brightness: { file: "Brightness.qml", label: "Brightness" }

@@ -96,8 +96,11 @@ QtObject {
     // something: which of two glyphs, whether the detail line is a state word
     // or a name the user chose.
 
-    function row(id: string, on: bool, icon: string, label: string,
-                 detail: string): var {
+    /// One tile, as the grid draws it. Named `makeTile` and not `row`, which is
+    /// what it was: `rows()` twenty lines up chunks tiles into *grid rows*, and
+    /// two meanings of "row" one screen apart is one of them being read wrong.
+    function makeTile(id: string, on: bool, icon: string, label: string,
+                      detail: string): var {
         return { id: id, on: on === true, icon: icon, label: label,
                  detail: detail, drillIn: false };
     }
@@ -109,7 +112,7 @@ QtObject {
         // The network's own name when there is one — "Wi-Fi / PUMPKINCURRY" is
         // the line that answers "am I on the right network", which is the
         // question anybody opens this for.
-        return policy.row("wifi", on, on ? "wifi" : "wifi-off", "Wi-Fi",
+        return policy.makeTile("wifi", on, on ? "wifi" : "wifi-off", "Wi-Fi",
                           on ? (wifi.label || "Not connected") : "Off");
     }
 
@@ -117,13 +120,13 @@ QtObject {
         if (bluetooth.present !== true)
             return null;
         const on = bluetooth.on === true;
-        return policy.row("bluetooth", on, on ? "bluetooth" : "bluetooth-off",
+        return policy.makeTile("bluetooth", on, on ? "bluetooth" : "bluetooth-off",
                           "Bluetooth", on ? (bluetooth.label || "No devices") : "Off");
     }
 
     function dndTile(dnd: var): var {
         const on = dnd.on === true;
-        return policy.row("dnd", on, "bell-off", "Do Not Disturb",
+        return policy.makeTile("dnd", on, "bell-off", "Do Not Disturb",
                           policy.stateWord(on));
     }
 
@@ -134,7 +137,7 @@ QtObject {
         if (nightlight.available !== true)
             return null;
         const on = nightlight.on === true;
-        return policy.row("nightlight", on, on ? "moon-star" : "moon", "Night Light",
+        return policy.makeTile("nightlight", on, on ? "moon-star" : "moon", "Night Light",
                           on ? policy.temperatureLabel(nightlight.temperature) : "Off");
     }
 
@@ -145,7 +148,7 @@ QtObject {
 
     function keepAwakeTile(keepawake: var): var {
         const on = keepawake.on === true;
-        return policy.row("keepawake", on, "coffee", "Keep Awake",
+        return policy.makeTile("keepawake", on, "coffee", "Keep Awake",
                           policy.stateWord(on));
     }
 
@@ -155,7 +158,7 @@ QtObject {
     /// permanently lit in it teaches nobody what lit means.
     function modeTile(dark: bool): var {
         const light = dark !== true;
-        return policy.row("mode", light, light ? "sun" : "moon", "Theme",
+        return policy.makeTile("mode", light, light ? "sun" : "moon", "Theme",
                           light ? "Light" : "Dark");
     }
 
@@ -170,7 +173,7 @@ QtObject {
         if (profile.available !== true)
             return null;
         const name = profile.profile || "balanced";
-        return policy.row("powerprofile", name !== "balanced",
+        return policy.makeTile("powerprofile", name !== "balanced",
                           policy.profileIcon(name), "Power Profile",
                           policy.profileLabel(name));
     }
@@ -195,7 +198,7 @@ QtObject {
         if (vpn.available !== true)
             return null;
         const on = vpn.on === true;
-        return policy.row("vpn", on, on ? "shield" : "shield-off", "VPN",
+        return policy.makeTile("vpn", on, on ? "shield" : "shield-off", "VPN",
                           on ? (vpn.name || "On") : "Off");
     }
 
@@ -204,7 +207,7 @@ QtObject {
     /// `drillIn` is what tells the surface to open a panel instead of calling a
     /// service.
     function wallpaperTile(): var {
-        const tile = policy.row("wallpaper", false, "wallpaper", "Wallpaper", "");
+        const tile = policy.makeTile("wallpaper", false, "wallpaper", "Wallpaper", "");
         tile.drillIn = true;
         return tile;
     }
@@ -335,7 +338,7 @@ QtObject {
     // --- what the log says ---------------------------------------------------
     //
     // One line per act worth asserting on, which is what makes the grid
-    // drivable from tools/control-center-harness.sh. #81 was a lifecycle with
+    // drivable from tools/drawer-harness.sh. #81 was a lifecycle with
     // no log line, and one bug then had two candidate causes for a week.
 
     /// What the shell *asked for*, logged before the call — the facade next

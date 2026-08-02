@@ -18,7 +18,7 @@ pragma Singleton
 // assert on, which is #81 restated: the failure would be a tile that silently
 // does nothing, and the log would not say which of nine.
 //
-// Pulled out here it is reachable from `tools/control-center-harness.sh`, and
+// Pulled out here it is reachable from `tools/drawer-harness.sh`, and
 // there is exactly one copy of it — the panel calls the same function the IPC
 // door does, so a harness that drives `press` is driving what the tile drives.
 //
@@ -84,37 +84,35 @@ Singleton {
     /// a name someone typed into a keybind, and a keybind that does nothing is
     /// worth one line saying why.
     function press(id: string): void {
+        // One switch and not two on the same id: the log line and the call
+        // have to stay in step, and two cascades a screen apart are two places
+        // to forget a tile.
         switch (id) {
-        case "wifi":
-        case "bluetooth":
-        case "dnd":
-        case "nightlight":
-        case "keepawake":
-        case "mode":
-        case "vpn":
-            Logger.log("control-centre", root.policy.toggled(id, !root.stateOf(id)));
-            break;
+        case "wifi":         root.announce(id); Networking.toggleWifi(); return;
+        case "bluetooth":    root.announce(id); Bluetooth.toggle(); return;
+        case "dnd":          root.announce(id); Notifications.toggleDnd(); return;
+        case "nightlight":   root.announce(id); NightLight.toggle(); return;
+        case "keepawake":    root.announce(id); KeepAwake.toggle(); return;
+        case "mode":         root.announce(id); Theme.setDark(!Theme.dark); return;
+        case "vpn":          root.announce(id); Vpn.toggle(); return;
+        // The two with no on-state to name: one cycles through whatever the
+        // daemon offers, one opens a door.
         case "powerprofile":
-        case "wallpaper":
-            // No on-state to name: one cycles and one opens a door.
             Logger.log("control-centre", root.policy.pressed(id));
-            break;
-        default:
-            Logger.warn("control-centre", root.policy.refused(id, "no such control"));
+            PowerProfiles.cycle();
+            return;
+        case "wallpaper":
+            Logger.log("control-centre", root.policy.pressed(id));
+            root.drillIn("wallpaper");
             return;
         }
+        Logger.warn("control-centre", root.policy.refused(id, "no such control"));
+    }
 
-        switch (id) {
-        case "wifi":         Networking.toggleWifi(); return;
-        case "bluetooth":    Bluetooth.toggle(); return;
-        case "dnd":          Notifications.toggleDnd(); return;
-        case "nightlight":   NightLight.toggle(); return;
-        case "keepawake":    KeepAwake.toggle(); return;
-        case "mode":         Theme.setDark(!Theme.dark); return;
-        case "powerprofile": PowerProfiles.cycle(); return;
-        case "vpn":          Vpn.toggle(); return;
-        case "wallpaper":    root.drillIn("wallpaper"); return;
-        }
+    /// The line a boolean toggle logs before it routes: what is being asked
+    /// for, which is the current state inverted.
+    function announce(id: string): void {
+        Logger.log("control-centre", root.policy.toggled(id, !root.stateOf(id)));
     }
 
     /// The one tile that is a door. Stubbed until the wallpaper ticket builds
@@ -130,7 +128,7 @@ Singleton {
     /// cannot hear yourself setting is a volume you set twice.
     function slide(id: string, percent: int): void {
         const value = root.policy.clampPercent(percent);
-        if (["volume", "mic", "brightness"].indexOf(id) < 0) {
+        if (root.policy.sliderOrder.indexOf(id) < 0) {
             Logger.warn("control-centre", root.policy.refused(id, "no such slider"));
             return;
         }
@@ -141,9 +139,7 @@ Singleton {
         // moves, which for a drag across a 300px track is fifty lines rather
         // than one per frame.
         if (root.lastSlide[id] !== value) {
-            const next = Object.assign({}, root.lastSlide);
-            next[id] = value;
-            root.lastSlide = next;
+            root.lastSlide[id] = value;
             Logger.log("control-centre", root.policy.moved(id, value));
         }
 
@@ -155,21 +151,36 @@ Singleton {
     }
 
     /// The last value logged per slider, so a drag that passes over the same
-    /// whole percent twice does not say so twice.
+    /// whole percent twice does not say so twice. Mutated in place: nothing
+    /// binds to it, so there is no notification to preserve.
     property var lastSlide: ({})
 
     /// One notch, for the wheel and the arrow keys — and for a keybind, which
     /// is the caller that cannot read the current value to nudge from.
+    /// Routed through `slide` rather than through each service's own `step`,
+    /// so all three land on the policy's grid and all three log — an earlier
+    /// version called `Audio.stepVolume` and `Backlight.step` directly and
+    /// those two notches produced no `control-centre:` line at all, which is
+    /// the rule this file states two functions up broken by its own author.
     function nudge(id: string, direction: int): void {
-        switch (id) {
-        case "volume":     Audio.stepVolume(direction); return;
-        case "mic":
-            root.slide("mic", root.policy.nudge(root.policy.percent(Audio.sourceVolume),
-                                                direction));
+        const from = root.currentPercent(id);
+        if (from < 0) {
+            Logger.warn("control-centre", root.policy.refused(id, "no such slider"));
             return;
-        case "brightness": Backlight.step(direction); return;
         }
-        Logger.warn("control-centre", root.policy.refused(id, "no such slider"));
+        root.slide(id, root.policy.nudge(from, direction));
+    }
+
+    /// Where a slider is now, or -1 for an id that is not one. The nudge needs
+    /// it because a keybind, unlike a wheel over a track, has no on-screen
+    /// value to step from.
+    function currentPercent(id: string): int {
+        switch (id) {
+        case "volume":     return root.policy.percent(Audio.volume);
+        case "mic":        return root.policy.percent(Audio.sourceVolume);
+        case "brightness": return Backlight.percent;
+        }
+        return -1;
     }
 
     function mute(id: string): void {

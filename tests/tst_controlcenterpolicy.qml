@@ -349,7 +349,7 @@ TestCase {
     // --- what the log says ---------------------------------------------------
     //
     // One line per toggle, which is what makes the grid drivable from
-    // tools/control-center-harness.sh. #81 was a lifecycle with no log line and
+    // tools/drawer-harness.sh. #81 was a lifecycle with no log line and
     // one bug then had two candidate causes for a week.
 
     function test_a_toggle_logs_what_it_did() {

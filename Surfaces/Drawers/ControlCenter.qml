@@ -47,6 +47,7 @@ import qs.Services.Media
 import qs.Services.Hardware
 import qs.Services.Networking
 import qs.Services.Notifications
+import qs.Surfaces.Settings
 
 FocusScope {
     id: root
@@ -144,7 +145,7 @@ FocusScope {
     // nothing can assert on, and "the eight toggles are functional" is a
     // seam-2 claim about real hardware. Split out, the same functions the tiles
     // call are reachable from `qs ipc call controlcenter press wifi` and so
-    // from tools/control-center-harness.sh — one table, two callers.
+    // from tools/drawer-harness.sh — one table, two callers.
 
     // --- the panel -----------------------------------------------------------
 
@@ -246,9 +247,14 @@ FocusScope {
                         // stretched: three tiles of one width and two of
                         // another is a grid that reads as two grids
                         // (ControlCenterPolicy.qml chunks without padding).
+                        // Asked of the *model*, not of `children`: a
+                        // `Repeater` is itself a child, so `children.length - 1`
+                        // counts three for a two-tile row and the spacer never
+                        // appeared — the two tiles stretched to fill, which is
+                        // the thing this comment says they must not do.
                         Item {
                             Layout.fillWidth: true
-                            visible: parent.children.length - 1 < root.policy.columns
+                            visible: modelData.length < root.policy.columns
                         }
                     }
                 }
@@ -345,14 +351,20 @@ FocusScope {
                     font.pointSize: Theme.pt(11)
                 }
 
-                // The gear dispatches `open` and never `show` — the CLI parses
-                // `show` as its own subcommand (#77). Direct rather than over
-                // IPC: the window is in this process.
+                // `show` and not `toggle`, which is the whole of what the
+                // ticket's "the settings gear dispatches open / showTab (#77) —
+                // never show" is protecting: `SurfaceBus.toggle` would *close*
+                // a settings window that was already open, so pressing a gear
+                // to reach settings would sometimes take them away. `show("")`
+                // is what the window's own `open()` IPC calls, so the gear and
+                // the keybind land in the same place — on the tab it was left
+                // on. Direct rather than over IPC: the window is a singleton in
+                // this process.
                 IconButton {
                     glyph: "settings"
                     onPressed: {
                         root.closeRequested("settings");
-                        SurfaceBus.toggle("settings");
+                        SettingsWindow.show("");
                     }
                 }
 

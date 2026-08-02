@@ -525,13 +525,20 @@ ShellRoot {
     /// because something beside it grew.
     ///
     ///     tools/capture-harness.sh out.png --surface controlcenter --session
-    ///     tools/capture-harness.sh out.png --surface controlcenter --light --contrast
+    ///     tools/capture-harness.sh out.png --surface controlcenter --light
     ///
     /// `--session` for the picture, because every tile and every slider has a
     /// Lucide glyph in it and `MultiEffect` draws nothing on the offscreen
     /// scenegraph (Widgets/Icon.qml). Offscreen still measures the fills and
-    /// the layout, which is what an overflow and a contrast ratio are — and the
-    /// light-palette gate #44 owes (#79, #94) is exactly that measurement.
+    /// the layout, which is what an overflow is — and an overflow is what this
+    /// surface is captured for: the first run of it cut four of nine tile
+    /// labels to "Do Not Di…", which is the #80 shape exactly.
+    ///
+    /// `--contrast` is *refused* here, and tools/capture-harness.sh says why at
+    /// length: this panel is opaque throughout, so its ratios are arithmetic
+    /// over two palette constants rather than a composite over a wallpaper. The
+    /// light-palette gate #44 owes lives in tests/tst_tokens.qml instead, where
+    /// it covers both modes and every role pair.
     ///
     /// The facts are *assigned* rather than left to the services: the panel
     /// binds to real hardware, and a capture of that is a picture of whichever

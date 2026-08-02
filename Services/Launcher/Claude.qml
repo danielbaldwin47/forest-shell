@@ -85,6 +85,13 @@ Singleton {
     /// fresh id. Guarded so a genuinely broken session cannot loop.
     property bool retriedLostSession: false
 
+    /// Something the *next* turn to settle has to say for itself, beyond its
+    /// own text. Today that is only the lost-session retry: the answer is
+    /// real, but it was given without the history the user assumes it has,
+    /// and a shell that quietly starts a second conversation inside the first
+    /// is answering a different question from the one that was asked.
+    property string pendingNote: ""
+
     ListModel { id: transcript }
 
     // --- asking --------------------------------------------------------------
@@ -97,14 +104,24 @@ Singleton {
     /// that silently discards the answer you are reading to start another is
     /// worse than one that waits.
     function ask(body: string, settings: var): bool {
-        if (runner.running)
+        // Each refusal says which one it was. A question that vanished
+        // because another was still streaming is exactly the silent
+        // lifecycle #81 is about — the panel looks like it dropped what was
+        // typed, and nothing anywhere says why.
+        if (runner.running) {
+            Logger.log("launcher", root.policy.refused("a turn is already in flight"));
             return false;
-        if (!root.available)
+        }
+        if (!root.available) {
+            Logger.log("launcher", root.policy.refused("the CLI is not logged in"));
             return false;
+        }
 
         const split = root.policy.split(body);
-        if (split.question === "")
+        if (split.question === "") {
+            Logger.log("launcher", root.policy.refused("there is no question yet"));
             return false;
+        }
 
         root.model = root.policy.modelFor(split.model, settings);
         root.retriedLostSession = false;
@@ -130,6 +147,10 @@ Singleton {
         runner.asked = question;
         runner.settings = settings ?? {};
         runner.started = false;
+        // Cleared per run: stderr is what a failure with nothing on stdout is
+        // reported from, and a line left over from the previous run would
+        // explain this one with the last one's reason.
+        runner.tail = "";
         // The resolved model rather than the configured one, so an inline
         // `?sonnet` override reaches the argv instead of being resolved twice
         // to two different answers.
@@ -160,6 +181,7 @@ Singleton {
     /// Forget the conversation. The next question opens a new session.
     function reset(): void {
         root.cancel();
+        Logger.log("launcher", root.policy.forgot(transcript.count));
         transcript.clear();
         root.answer = "";
         root.failure = "";
@@ -175,7 +197,7 @@ Singleton {
             probed: root.probed,
             streaming: root.streaming,
             turns: transcript.count,
-            failed: root.failure
+            failure: root.failure
         });
     }
 
@@ -185,22 +207,41 @@ Singleton {
     /// end four ways — a result line, a watchdog, a cancel, and a binary that
     /// was never there — and all four have to leave the panel in a state the
     /// user can type into.
-    function settle(): void {
+    /// `reason` is what ended it: `""` for a terminal `result` line,
+    /// `"cancelled"` for the user, or a watchdog id.
+    function settle(reason: string): void {
         const state = root.run ?? {};
         const note = root.policy.denialNote(state.denials ?? []);
 
         if (note !== "")
             Logger.log("launcher", root.policy.denied(state.denials));
 
-        if (state.failed === true) {
+        // Whatever streamed is kept, however the run ended. A cancel and a
+        // watchdog both arrive here with an answer half written, and throwing
+        // away the part the user was reading is a worse outcome than the one
+        // they asked for — and it is the only copy: nothing else holds it.
+        const text = String(state.answer ?? "");
+        if (text !== "" || note !== "")
+            transcript.append({ speaker: "claude", text,
+                                note: root.pendingNote === ""
+                                      ? note
+                                      : root.pendingNote + (note === "" ? "" : " · " + note) });
+        root.pendingNote = "";
+
+        if (reason === "cancelled") {
+            // Not a failure. The user asked for it, the panel already shows
+            // what arrived, and a red line under it would be the shell
+            // reporting an error it was told to cause.
+            root.failure = "";
+        } else if (reason !== "") {
+            root.failure = root.policy.watchdog(reason);
+        } else if (state.failed === true) {
             root.failure = state.message;
             Logger.warn("launcher", root.policy.failed(state.message));
-        } else if (String(state.answer ?? "") !== "" || note !== "") {
-            transcript.append({ speaker: "claude", text: String(state.answer ?? ""),
-                                note });
+        } else {
+            root.failure = "";
             Logger.log("launcher",
-                       root.policy.answered(String(state.answer ?? "").length,
-                                            state.ttft ?? 0));
+                       root.policy.answered(text.length, state.ttft ?? 0));
         }
 
         root.answer = "";
@@ -259,6 +300,18 @@ Singleton {
                 root.status = String(root.run.status ?? "");
                 if (root.run.sessionId)
                     root.sessionId = root.run.sessionId;
+
+                // The billing check, acted on rather than noted. It is raised
+                // on the *first* line of a run that would otherwise answer
+                // perfectly well and be paid for by an API account instead of
+                // the subscription, so the only useful response is to stop it
+                // now — see `abort` in ClaudePolicy.begin().
+                if (root.run.abort === true && runner.running) {
+                    root.run.abort = false;
+                    watchdog.stop();
+                    runner.signal(15);
+                    Logger.warn("launcher", root.policy.failed(root.run.message));
+                }
             }
         }
 
@@ -269,8 +322,14 @@ Singleton {
             splitMarker: "\n"
             onRead: line => {
                 const text = String(line ?? "").trim();
-                if (text !== "")
-                    runner.tail = text;
+                if (text === "")
+                    return;
+                // The last few lines, not the last one: a fatal argument
+                // error is often a usage line under the reason for it, and
+                // keeping only the final line keeps the least useful half.
+                const kept = runner.tail === "" ? [] : runner.tail.split("\n");
+                kept.push(text);
+                runner.tail = kept.slice(-4).join("\n");
             }
         }
 
@@ -290,36 +349,36 @@ Singleton {
             if (state.lostSession === true && !root.retriedLostSession) {
                 root.retriedLostSession = true;
                 root.sessionId = "";
-                Logger.log("launcher", root.policy.opened("", false));
+                // Said out loud on the answer it produces. The retry is
+                // right — the id outlives the transcript it names — but the
+                // answer comes back without the history the user believes is
+                // behind it, and a shell that starts a second conversation
+                // inside the first without saying so is answering a different
+                // question from the one that was asked.
+                root.pendingNote = "The earlier conversation had expired, "
+                                 + "so this is a fresh one";
                 root.start(runner.asked, runner.settings);
-                return;
-            }
-
-            if (runner.cancelled) {
-                runner.cancelled = false;
-                root.answer = "";
-                root.status = "";
-                return;
-            }
-
-            if (runner.killedOn !== "") {
-                root.failure = root.policy.watchdog(runner.killedOn);
-                runner.killedOn = "";
-                root.answer = "";
-                root.status = "";
                 return;
             }
 
             // No terminal `result` line and a non-zero exit: the run died on
             // something that never reached stdout. stderr is the only account
             // of it there is.
-            if (state.done !== true && exitCode !== 0) {
+            if (state.done !== true && exitCode !== 0 && !runner.cancelled
+                    && runner.killedOn === "") {
                 state.failed = true;
                 state.message = runner.tail !== "" ? runner.tail
                                                    : "claude exited " + exitCode;
             }
 
-            root.settle();
+            // One way out, so that a cancel and a watchdog keep whatever
+            // streamed and surface whatever was denied, exactly as a normal
+            // answer does. Returning early from either was how a cancelled
+            // half-answer disappeared and a denial went unreported.
+            const reason = runner.cancelled ? "cancelled" : runner.killedOn;
+            runner.cancelled = false;
+            runner.killedOn = "";
+            root.settle(reason);
         }
 
         onRunningChanged: {

@@ -103,6 +103,13 @@ FocusScope {
     /// actually answering; otherwise it previews what the query as typed would
     /// use, so `?sonnet` changes the chip as the word is completed rather than
     /// after the answer comes back.
+    /// How wide prose is allowed to get inside the column. The column stays
+    /// 720 — the field, the rule and the legend are all measured off it — but
+    /// the prototype measured 720 at 14.5px as ~105 characters a line, which
+    /// is past the width prose stays readable at. Named once here because
+    /// three places need it and three literals is how they drift apart.
+    readonly property real proseWidth: 600
+
     readonly property string modelInUse:
         Claude.streaming
         ? Claude.model
@@ -199,6 +206,25 @@ FocusScope {
             return;
         root.selected = Math.max(0, Math.min(root.rows.length - 1,
                                              root.selected + delta));
+    }
+
+    /// Who is speaking, as the caps micro-label the rest of the shell already
+    /// uses for a band heading. An inline component because the transcript
+    /// needs it in two places — the finished turns and the one still being
+    /// written — and the third copy is where the two stop agreeing about
+    /// tracking.
+    component TurnLabel: Text {
+        required property string speaker
+
+        text: speaker === "you" ? "YOU" : "CLAUDE"
+        // The one colour decision in the transcript: the reader's own turns
+        // recede and Claude's come forward, which is what makes a wall of
+        // prose scannable without a rule between every pair.
+        color: speaker === "you" ? Theme.textSecondary : Theme.accentPrimary
+        font.family: Theme.fontUi
+        font.pointSize: Theme.pt(Theme.capsSize)
+        font.weight: Theme.weightMedium
+        font.letterSpacing: Theme.tracking(Theme.capsSize, Theme.capsTrackingEm)
     }
 
     // --- the god ray ---------------------------------------------------------
@@ -758,19 +784,12 @@ FocusScope {
                             width: turnsColumn.width
                             spacing: Theme.space2
 
-                            Text {
-                                text: turn.speaker === "you" ? "YOU" : "CLAUDE"
-                                color: turn.speaker === "you" ? Theme.textSecondary
-                                                             : Theme.accentPrimary
-                                font.family: Theme.fontUi
-                                font.pointSize: Theme.pt(Theme.capsSize)
-                                font.weight: Theme.weightMedium
-                                font.letterSpacing: Theme.tracking(Theme.capsSize,
-                                                                   Theme.capsTrackingEm)
+                            TurnLabel {
+                                speaker: turn.speaker
                             }
 
                             Text {
-                                width: Math.min(600, turnsColumn.width)
+                                width: Math.min(root.proseWidth, turnsColumn.width)
                                 text: turn.text
                                 color: Theme.textPrimary
                                 wrapMode: Text.Wrap
@@ -814,14 +833,8 @@ FocusScope {
                         width: turnsColumn.width
                         spacing: Theme.space2
 
-                        Text {
-                            text: "CLAUDE"
-                            color: Theme.accentPrimary
-                            font.family: Theme.fontUi
-                            font.pointSize: Theme.pt(Theme.capsSize)
-                            font.weight: Theme.weightMedium
-                            font.letterSpacing: Theme.tracking(Theme.capsSize,
-                                                               Theme.capsTrackingEm)
+                        TurnLabel {
+                            speaker: "claude"
                         }
 
                         Row {
@@ -830,7 +843,7 @@ FocusScope {
                             Text {
                                 id: liveAnswer
 
-                                width: Math.min(600, turnsColumn.width)
+                                width: Math.min(root.proseWidth, turnsColumn.width)
                                     - (caret.visible ? caret.width + 2 : 0)
                                 text: Claude.answer
                                 color: Theme.textPrimary
@@ -891,7 +904,7 @@ FocusScope {
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(560, turnsColumn.width)
+                                width: Math.min(root.proseWidth - 40, turnsColumn.width)
                                 text: Claude.failure
                                 color: Theme.accentEmber
                                 wrapMode: Text.Wrap

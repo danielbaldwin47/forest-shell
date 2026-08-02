@@ -199,14 +199,6 @@ QtObject {
         });
     }
 
-    /// Where every turn must run. Session lookup is scoped to the working
-    /// directory, so two turns in different cwds are two conversations —
-    /// pinned, stable, and deliberately not a git repository, because worktree
-    /// scoping widens the lookup in ways nothing here can predict.
-    function workingDirectory(stateDir: string): string {
-        return String(stateDir ?? "") + "/claude";
-    }
-
     /// Environment the child must not inherit. An `ANTHROPIC_API_KEY` in the
     /// parent silently redirects billing off the subscription, and an
     /// inherited `CLAUDE_EFFORT` silently changes the effort the settings
@@ -272,6 +264,13 @@ QtObject {
             streamed: false,    // any text at all has arrived
             done: false,        // a `result` line closed the run
             failed: false,
+            // Stop the run *now*, rather than reporting on it afterwards.
+            // Only the billing check raises this: every other failure is
+            // already terminal by the time it is known, where this one is
+            // discovered on the first line of a run that would otherwise
+            // stream happily to completion and be paid for by the wrong
+            // account. Services/Launcher/Claude.qml watches it and signals.
+            abort: false,
             lostSession: false, // the session id no longer resolves
             message: "",        // why it failed, in a sentence
             denials: [],
@@ -295,7 +294,11 @@ QtObject {
                 // this. The run works, which is exactly why it is checked.
                 if (String(event.apiKeySource ?? "none") !== "none") {
                     state.failed = true;
-                    state.done = true;
+                    // Not `done`. Reporting it and letting the run finish is
+                    // the whole failure: the answer would arrive, correctly,
+                    // billed to the wrong account. `abort` is what stops it,
+                    // and `done` would stand the watchdog down instead.
+                    state.abort = true;
                     state.message = "An API key in the environment is billing this "
                                   + "run — Ask Claude needs the subscription";
                 }
@@ -352,14 +355,27 @@ QtObject {
                     : String(event.result ?? "Claude could not answer");
                 state.lostSession = state.message.indexOf("No conversation found") >= 0;
                 // The failure text is not an answer and must not be left in
-                // the bubble as if it were one.
-                state.answer = "";
-            } else if (!state.streamed) {
-                // The deltas are only there because of
-                // `--include-partial-messages`; the terminal line carries the
-                // whole answer regardless. An empty bubble under a successful
-                // run is the #78 shape.
-                state.answer = String(event.result ?? "");
+                // the bubble as if it were one — but only when there is no
+                // answer of the user's own there already. A cancel arrives
+                // down this branch (SIGTERM produces `is_error: true`), and
+                // discarding the half-written answer they were reading is a
+                // worse outcome than the one they asked for.
+                if (!state.streamed)
+                    state.answer = "";
+            } else {
+                if (!state.streamed) {
+                    // The deltas are only there because of
+                    // `--include-partial-messages`; the terminal line carries
+                    // the whole answer regardless.
+                    state.answer = String(event.result ?? "");
+                }
+                // A success that said nothing at all is the #78 shape in its
+                // success branch: the question sits in the transcript under a
+                // reply that never came, and nothing on screen is wrong.
+                if (state.answer === "" && state.denials.length === 0) {
+                    state.failed = true;
+                    state.message = "Claude answered with nothing at all";
+                }
             }
             return state;
         }
@@ -417,9 +433,14 @@ QtObject {
     /// one to show.
     ///
     /// `state` is the provider's own: `{ available, probed, streaming, turns,
-    /// failed }`. Order is the order of certainty, as the calculator's is: a
+    /// failure }`. Order is the order of certainty, as the calculator's is: a
     /// logged-out CLI is a fact about the machine and outranks anything about
     /// this particular question.
+    ///
+    /// `failure` is a *sentence*, not a flag — deliberately not named `failed`,
+    /// which is the boolean one file over in the run state. Two fields a
+    /// function apart, one a bool and one a string, is how a caller passes the
+    /// wrong object and takes a branch that reads as "fine".
     function silence(question: string, state: var): var {
         const it = state ?? {};
 
@@ -427,8 +448,8 @@ QtObject {
             return { icon: "circle-slash", text: policy.unauthorised() };
         if ((it.turns ?? 0) > 0 || it.streaming === true)
             return null;
-        if (String(it.failed ?? "") !== "")
-            return { icon: "circle-slash", text: String(it.failed) };
+        if (String(it.failure ?? "") !== "")
+            return { icon: "circle-slash", text: String(it.failure) };
         if (String(question ?? "").trim() === "")
             return { icon: "sparkles", text: "Ask anything" };
         return { icon: "corner-down-left", text: "Press Enter to ask" };
@@ -464,6 +485,18 @@ QtObject {
 
     function cancelled(): string {
         return "cancelled by the user";
+    }
+
+    /// A question that was not sent, and which of the three reasons it was.
+    /// Logged rather than shown: the panel already looks unchanged, and #81 is
+    /// the ticket about a state change with nothing to grep for.
+    function refused(why: string): string {
+        return "not asking — " + String(why ?? "");
+    }
+
+    function forgot(turns: int): string {
+        return "conversation forgotten (" + turns + " turn"
+             + (turns === 1 ? "" : "s") + ")";
     }
 
     function denied(denials: var): string {

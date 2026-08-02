@@ -260,6 +260,13 @@ TestCase {
         })));
         verify(state.failed);
         verify(state.message.length > 0);
+        // And it must *stop* the run rather than note it. The answer would
+        // arrive perfectly well and be billed to the wrong account, so
+        // reporting without aborting is the whole failure.
+        verify(state.abort);
+        // Not `done`: that is what stands the watchdog down, and a run being
+        // paid for by the wrong account is the last one to leave running.
+        verify(!state.done);
     }
 
     function test_only_text_deltas_at_the_text_index_are_the_answer() {
@@ -373,6 +380,48 @@ TestCase {
         verify(state.lostSession);
     }
 
+    function test_a_success_that_said_nothing_is_a_failure() {
+        // The #78 shape in its success branch: exit 0, `is_error: false`, and
+        // an empty string. Left alone it is a question sitting in the
+        // transcript under a reply that never came, with nothing on screen
+        // wrong enough to explain it.
+        const state = policy.begin();
+        policy.apply(state, policy.parse(line({
+            type: "result", is_error: false, subtype: "success",
+            result: "", permission_denials: [] })));
+        verify(state.failed);
+        verify(state.message.length > 0);
+    }
+
+    function test_a_denial_alone_is_answer_enough() {
+        // ...but a run that said nothing *because* a tool was refused has
+        // already explained itself, and calling that a failure would hide the
+        // chip behind an error line.
+        const state = policy.begin();
+        policy.apply(state, policy.parse(line({
+            type: "result", is_error: false, subtype: "success", result: "",
+            permission_denials: [{ tool_name: "WebSearch" }] })));
+        verify(!state.failed);
+    }
+
+    function test_a_cancel_keeps_the_half_written_answer() {
+        // SIGTERM produces `is_error: true` (terminal_reason
+        // "aborted_streaming"), so a cancel arrives down the failure branch —
+        // and throwing away the text the user was reading is a worse outcome
+        // than the one they asked for.
+        const state = policy.begin();
+        policy.apply(state, policy.parse(line({ type: "stream_event", event: {
+            type: "content_block_start", index: 0,
+            content_block: { type: "text" } } })));
+        policy.apply(state, policy.parse(line({ type: "stream_event", event: {
+            type: "content_block_delta", index: 0,
+            delta: { type: "text_delta", text: "Rayleigh scattering is" } } })));
+        policy.apply(state, policy.parse(line({
+            type: "result", is_error: true, subtype: "error_during_execution",
+            terminal_reason: "aborted_streaming", permission_denials: [] })));
+        compare(state.answer, "Rayleigh scattering is");
+    }
+
     // --- denials -------------------------------------------------------------
 
     function test_a_denial_is_soft_and_only_the_array_reports_it() {
@@ -447,19 +496,19 @@ TestCase {
     function test_a_logged_out_shell_says_so_before_anything_else() {
         const said = policy.silence("what is a quine", {
             available: false, probed: true, streaming: false,
-            turns: 0, failed: "" });
+            turns: 0, failure: "" });
         verify(said.text.indexOf("login") >= 0);
     }
 
     function test_an_empty_question_invites_one() {
         const said = policy.silence("", { available: true, probed: true,
-                                          streaming: false, turns: 0, failed: "" });
+                                          streaming: false, turns: 0, failure: "" });
         compare(said.text, "Ask anything");
     }
 
     function test_a_conversation_in_progress_has_no_silence() {
         compare(policy.silence("", { available: true, probed: true,
-                                     streaming: false, turns: 2, failed: "" }), null);
+                                     streaming: false, turns: 2, failure: "" }), null);
     }
 
     // --- the log -------------------------------------------------------------

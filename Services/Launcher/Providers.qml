@@ -121,30 +121,31 @@ Singleton {
     /// Enter on a conversational provider, where the query itself is the thing
     /// being sent rather than a row under it (#41).
     ///
-    /// Returns whether the launcher should close, like `activate()` — and it
-    /// is the first caller to answer `false` on purpose. That was reserved
-    /// from the day the dispatcher was written for "a calculator you keep
-    /// typing into"; a chat is the same shape, and the panel staying open with
-    /// the answer streaming into it is the whole feature.
+    /// Returns nothing, where `activate()` returns whether to close. That is
+    /// the difference this entry point exists to express: a conversation never
+    /// closes the launcher, so a bool every caller would discard would be a
+    /// question with one answer.
+    ///
+    /// Which queries reach here is `LauncherPolicy.converses()` — the same
+    /// call the surface makes to decide it has a transcript rather than a
+    /// list, so the two cannot disagree about which provider is which.
     /// `settings` is `launcher.providers` — the on/off map every other entry
     /// point here takes — and it is *not* what the run is configured by. The
     /// model, effort, tool allowlist and permission mode are `launcher.claude`,
     /// read here rather than passed in, so that the surface keeps handing the
     /// dispatcher the one settings object it already has.
-    function submit(query: string, settings: var): bool {
-        if (root.policy.route(query, settings).id === "claude")
-            Claude.ask(root.policy.bodyOf(query, settings),
-                       Config.values.launcher.claude);
-        return false;
+    function submit(query: string, settings: var): void {
+        if (!root.policy.converses(query, settings))
+            return;
+        Claude.ask(root.policy.bodyOf(query, settings),
+                   Config.values.launcher.claude);
     }
 
     /// Stop whatever is streaming. Escape on a conversational provider means
     /// "stop this answer" while one is arriving and "close the launcher" when
     /// none is, so the surface asks whether there was anything to stop.
     function cancel(query: string, settings: var): bool {
-        if (root.policy.route(query, settings).id !== "claude")
-            return false;
-        if (!Claude.streaming)
+        if (!root.policy.converses(query, settings) || !Claude.streaming)
             return false;
         Claude.cancel();
         return true;

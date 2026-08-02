@@ -10,7 +10,7 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Media/` | MPRIS players, volume, sinks |
 | `Hardware/` | Battery, brightness, sensors, input devices |
 | `Networking/` | Wi-Fi, Bluetooth, VPN |
-| `System/` | Session, logind, updates, disk — `SessionLock` (#47) |
+| `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47) |
 | `Theming/` | The three palette modes behind `Core/Theme.qml` |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
@@ -25,8 +25,9 @@ A third rule, added by #36, because two of these services collide by name with
 the upstream module they wrap:
 
 - **A facade that shadows an upstream singleton imports it under an alias.**
-  `Quickshell.Networking` and `Quickshell.Bluetooth` each export a singleton
-  named after the module, and so do we. Inside `Networking.qml` and
+  `Quickshell.Networking`, `Quickshell.Bluetooth`, `Quickshell.Services.Mpris`
+  and `Quickshell.Services.SystemTray` each export a singleton named after the
+  module, and so do we — `Nm.`, `Bz.`, `Mp.` and `Sni.` respectively. Inside `Networking.qml` and
   `Bluetooth.qml`, `Nm.` and `Bz.` mean upstream's; everywhere else in the
   shell the unqualified name means the facade. Two types with one name is the
   failure mode Core/Config.qml documents for a singleton called `State` — no
@@ -35,7 +36,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Eight of them exist so far:
+Ten of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -82,6 +83,29 @@ Eight of them exist so far:
   singleton, and then takes about a second to answer. A service constructed
   when the user first opens a panel would spend that second reporting a machine
   with no radios and no battery.
+
+- `Media/Mpris.qml`, `System/SystemTray.qml` (#37) — the two services behind
+  bar modules whose *contents* belong to other applications. Both are native
+  clients (`Quickshell.Services.Mpris`, `Quickshell.Services.SystemTray`), both
+  keep their decisions in a policy beside them, and both are in the deferred
+  list for a sharper version of the same argument: the StatusNotifier host is
+  registered by the singleton being constructed, so a tray that waited for the
+  bar module would lose the icon of every application that started before it.
+  `Mpris`'s difficulty is which player the pill is about when several are on
+  the bus, and it is entirely in `MprisPolicy.qml`.
+
+  `SystemTray` is the other side of the naming rule above: it carries the
+  upstream singleton's name and imports it as `Sni.`, because
+  `Surfaces/Bar/Modules/Tray.qml` is already `Tray` — the same trade
+  `Backlight` made for `Brightness`, taken the other way round.
+
+  `Compositor/` grew two things for the same ticket, and one of them is a
+  parser: Quickshell models no input devices at all, so the keyboard layout is
+  read out of `hyprctl devices -j` by `KeyboardPolicy.qml` and re-read after
+  each `activelayout` event. That policy also remembers the trap —
+  `switchxkblayout` is a hyprctl *command*, not a dispatcher, and sending it
+  through `Hyprland.dispatch` answers `Invalid dispatcher` and changes
+  nothing.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

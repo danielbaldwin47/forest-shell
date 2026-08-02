@@ -20,7 +20,7 @@ import qs.Surfaces.Bar.Modules
 BarIndicator {
     id: root
 
-    visible: Power.hasBattery
+    shown: Power.hasBattery
     icon: Power.icon
     label: Power.label
 

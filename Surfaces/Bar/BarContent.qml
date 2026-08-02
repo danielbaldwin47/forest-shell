@@ -94,6 +94,28 @@ Item {
 
                     anchors.verticalCenter: parent.verticalCenter
 
+                    // A module that hides itself must take its gap with it. A
+                    // `Row` skips invisible children entirely but still puts
+                    // `spacing` around a visible one of zero width, so without
+                    // this the three self-hiding modules #37 adds — media with
+                    // nothing playing, the keyboard layout on a single-layout
+                    // machine, the window title on an empty workspace — would
+                    // each leave a 14px hole in the bar where they are not.
+                    //
+                    // **`shown` and not `visible`**, which is the module
+                    // contract and not a synonym: a module that can be absent
+                    // declares `shown`, and this reads it. Asking the item
+                    // about `visible` instead deadlocks — Qt forces every
+                    // child of an invisible item to read `visible: false`, so
+                    // a Loader that starts hidden (its item does not exist for
+                    // the first evaluation) would hide the module it then
+                    // loaded, forever. Measured: it emptied the whole bar.
+                    //
+                    // A module with no `shown` is always on the bar, which is
+                    // most of them — the clock does not have a case for being
+                    // absent.
+                    visible: module.item !== null && module.item.shown !== false
+
                     // Synchronous: the bar is on the critical path to the first
                     // frame, and a module that arrives a frame later would show
                     // as the cluster jumping into place.

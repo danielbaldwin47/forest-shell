@@ -222,15 +222,38 @@ QtObject {
             // than one leaf holding all three, so reordering one cluster
             // writes back only that cluster.
             //
-            // The right cluster is the machine's condition (#9): the status
-            // group first, the battery outermost, so the number nearest the
-            // screen edge is the one people glance at without reading the bar.
+            // The default inventory is #9's, in #9's order (#37 completed it,
+            // bar the notification indicator, which lands with the
+            // notification centre). Left is where you are — the workspaces and
+            // the window in front of you, behind the door into the launcher.
+            // Centre is the clock and what is playing. Right is the machine's
+            // condition, tray first and the control-centre door outermost: the
+            // right cluster is all readings except that last one, and a door at
+            // the screen edge is the easiest target on the bar.
+            //
+            // Three of these hide themselves — media with nothing playing, the
+            // keyboard layout on a single-layout machine, the window title on
+            // an empty workspace — so the shipped bar is shorter than this list
+            // most of the time.
             modules: {
-                left: { def: ["workspaces"], coerce: c.arrayOf(c.string, "bar.modules.left") },
-                center: { def: ["clock"], coerce: c.arrayOf(c.string, "bar.modules.center") },
-                right: { def: ["status", "battery"],
+                left: { def: ["launcher", "workspaces", "activeWindow"],
+                        coerce: c.arrayOf(c.string, "bar.modules.left") },
+                center: { def: ["clock", "media"],
+                          coerce: c.arrayOf(c.string, "bar.modules.center") },
+                right: { def: ["tray", "status", "battery", "keyboard", "controlCenter"],
                          coerce: c.arrayOf(c.string, "bar.modules.right") }
             },
+
+            // The two ceilings #37 needed and #36 did not: a track title and a
+            // window title are arbitrary text from another application, and an
+            // uncapped one walks across the bar and pushes the clock off centre
+            // (the #80 class of overflow). Both elide from the right.
+            //
+            // JSON-only for now, which #9 allows for the long tail: they are
+            // two numbers in px that depend on a screen width the Bar tab has
+            // no preview of.
+            mediaMaxWidth: { def: 180, coerce: c.integer(60, 600) },
+            windowMaxWidth: { def: 220, coerce: c.integer(60, 800) },
 
             // The two styling groups, declared knob by knob (`group()` above):
             // the group's default object, its knob-by-knob coercer and the

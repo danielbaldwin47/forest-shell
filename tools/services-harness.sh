@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Bring the five system services up inside a nested Hyprland, and check they
-# are really running (#36).
+# Bring the system services up inside a nested Hyprland, and check they are
+# really running (#36, extended by #37).
 #
 #   tools/services-harness.sh                 # run the checks, print PASS/FAIL
 #   tools/services-harness.sh --keep          # leave the session up to poke at
@@ -15,27 +15,33 @@
 # What it asserts:
 #
 #   1. the services construct in the **deferred** stage, not the sync one
-#   2. each of the five logs that it is up — or that it is inert, on a machine
-#      that has no such hardware
-#   3. the bar carries the status cluster and the battery by default
+#   2. each service logs that it is up — or that it is inert, on a machine that
+#      has no such hardware
+#   3. the bar carries #9's whole default inventory
 #   4. the state each service reports is the state the machine is actually in,
 #      cross-checked against the same fact read from outside the shell
 #   5. volume and mic mute round-trip: set it, and the service says so
 #   6. the backlight round-trips through `brightnessctl` — and a refusal is
 #      logged as a refusal (#78: an exit code nothing reads is a failure
 #      reported as success)
-#   7. nothing logged a binding loop while all five were live
+#   7. #37's four modules read the compositor they are running under: the
+#      keyboard layout and the focused window are cross-checked against
+#      `hyprctl` aimed at the nested instance, and the media pill's "nothing
+#      playing is no module" rule is checked against the bus
+#   8. the launcher and control-centre buttons say in the log that their
+#      surfaces do not exist yet (#39, #44) — the graceful-no-op criterion
+#   9. nothing logged a binding loop while all of them were live
 #
 # Two phases, because two things are being tested and only one of them can be
 # driven: `shell.qml` is the real staged startup and is what proves 1-3, then
-# `services-harness.qml` replaces it to prove 4-6 over IPC.
+# `services-harness.qml` replaces it to prove 4-8 over IPC.
 #
 # **Check 6 moves the machine's own backlight.** A nested compositor is nested;
 # the panel underneath it is not. The script reads what it finds, nudges one
 # step, and puts it back — `--no-backlight` skips it entirely.
 #
 # What no seam covers, and this one least of all: the idle budget (≤ 0.5 % CPU,
-# < 5 wakeups/s with all five running). Wakeups are a property of a real session
+# < 5 wakeups/s with all of them running). Wakeups are a property of a real session
 # over minutes, measured the way #95 measures them, and a nested compositor that
 # never presents a frame (see tools/nested-session.sh) cannot stand in for one.
 set -uo pipefail
@@ -86,6 +92,30 @@ expect_log() {
 
 nested_up || exit 1
 
+# The tray and the media pill are the two modules whose contents belong to other
+# applications, and a machine with neither exercises only the shell's half of
+# them. `tools/fake-dbus-clients.py` is the other half: one StatusNotifierItem
+# and one MPRIS player, on the **session** bus — which is shared with the
+# desktop running this, so they briefly appear in whatever else is watching.
+#
+# Started before the shell, because the ordering is part of what is being
+# checked: an application that registered its icon before the tray host did must
+# still turn up (Core/ServiceInit.qml's argument for constructing the tray at
+# all).
+FAKE_CLIENTS_PID=""
+if python3 -c 'import dbus, gi' 2>/dev/null; then
+    python3 "$(dirname "${BASH_SOURCE[0]}")/fake-dbus-clients.py" both \
+        > "$NESTED_WORK/fake-clients.log" 2>&1 &
+    FAKE_CLIENTS_PID=$!
+    nested_await "$NESTED_WORK/fake-clients.log" 'mpris org.mpris' 5 || true
+    nested_note 'a fake tray item and a fake media player are on the session bus'
+    # Chained onto the teardown the nested session installed, not over it: a
+    # trap that replaced it would leave a nested Hyprland running.
+    trap 'kill "$FAKE_CLIENTS_PID" 2>/dev/null; nested_down' EXIT
+else
+    nested_note 'no python dbus bindings — the tray and media checks read the empty case'
+fi
+
 # --- phase one: the real shell, staged the way it really starts --------------
 
 nested_shell shell.qml 'startup: stage interactive' || exit 1
@@ -101,8 +131,8 @@ else
 fi
 
 deferred_line=$(grep -a 'services: deferred stage' "$NESTED_SHELL_LOG" | head -1)
-if [[ "$deferred_line" == *"8 object(s)"* ]]; then
-    nested_pass 'the deferred stage constructs all eight services'
+if [[ "$deferred_line" == *"10 object(s)"* ]]; then
+    nested_pass 'the deferred stage constructs all ten services'
 else
     nested_fail "the deferred stage is not what it should be: ${deferred_line:-<no line>}"
 fi
@@ -123,14 +153,43 @@ expect_log 'network: (networkmanager facade ready|no networkmanager)' 'the netwo
 expect_log 'bluetooth: (bluez facade ready|no bluetooth adapter)' 'the bluetooth facade reports its state'
 expect_log 'power: upower facade ready' 'the power facade reports its state'
 expect_log 'backlight: (panel |no backlight device)' 'the backlight facade reports its state'
+# #37's two. The tray line is the one that matters most: the StatusNotifier host
+# is registered by the singleton being touched, so a tray that logs nothing is a
+# tray no application can ever appear in.
+expect_log 'tray: statusnotifier host registered' 'the tray registers a statusnotifier host'
+expect_log 'media: mpris facade ready' 'the mpris facade reports its state'
 
 # 3 — the bar carries them. The registry resolves names from config, and a
 # module that fails to load drops out with a warning rather than taking the bar
 # with it — which means a broken module looks like a bar that is merely quiet.
-if grep -qaE 'bar: content ready on .* \(1/1/2 modules\)' "$NESTED_SHELL_LOG"; then
-    nested_pass 'the bar carries the status cluster and the battery by default'
+if grep -qaE 'bar: content ready on .* \(3/2/5 modules\)' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the bar carries the whole default inventory (#9, completed by #37)'
 else
-    nested_fail "the default bar is not 1/1/2 modules: $(grep -a 'bar: content ready' "$NESTED_SHELL_LOG" | head -1)"
+    nested_fail "the default bar is not 3/2/5 modules: $(grep -a 'bar: content ready' "$NESTED_SHELL_LOG" | head -1)"
+fi
+
+# A name the registry does not know is dropped with a warning, and the default
+# layout must never be the thing that trips it (tests/tst_barregistry.qml checks
+# the same claim against the schema; this checks it against the shell that
+# actually resolved it).
+if grep -qa 'bar: no such module' "$NESTED_SHELL_LOG"; then
+    nested_fail "the default bar names a module the registry does not have: $(grep -a 'bar: no such module' "$NESTED_SHELL_LOG" | head -1)"
+else
+    nested_pass 'every module in the default bar is one the registry knows'
+fi
+
+# The tray delegate is the one piece of #37 that only exists when an application
+# has registered an icon: with an empty tray the Repeater builds nothing, and a
+# mistyped property inside it would never be evaluated. With the fake item on the
+# bus it is built, and a bad binding shows up here as a QML warning naming the
+# file.
+if [[ -n "$FAKE_CLIENTS_PID" ]]; then
+    if grep -qaE '(Tray|Media|ActiveWindow|KeyboardLayout|LauncherButton|ControlCenterButton)\.qml:[0-9]+' \
+            "$NESTED_SHELL_LOG"; then
+        nested_fail "a #37 module reported a QML error: $(grep -aE '(Tray|Media|ActiveWindow|KeyboardLayout|LauncherButton|ControlCenterButton)\.qml:[0-9]+' "$NESTED_SHELL_LOG" | head -1)"
+    else
+        nested_pass 'the tray delegate builds against a real item without complaint'
+    fi
 fi
 
 if grep -qa 'module failed to load' "$NESTED_SHELL_LOG"; then
@@ -283,7 +342,268 @@ else
     nested_note 'brightness checks skipped by request'
 fi
 
-# 7 — nothing is fighting itself. A binding loop is a warning rather than a
+# 7 — #37's modules, against the compositor they are reading. The keyboard
+# layout and the focused window are the two facts here that the *nested* session
+# owns, so both are cross-checked against `hyprctl` aimed at that instance
+# rather than at the machine's own session.
+snapshot=$(ipc snapshot)
+
+hypr_layout=$(nested_hyprctl -j devices 2>/dev/null | python3 -c '
+import json, sys
+try:
+    keyboards = json.load(sys.stdin).get("keyboards", [])
+except ValueError:
+    sys.exit(0)
+main = next((k for k in keyboards if k.get("main")), keyboards[0] if keyboards else None)
+if main:
+    layouts = [x.strip() for x in str(main.get("layout", "")).split(",") if x.strip()]
+    index = main.get("active_layout_index", 0)
+    index = index if isinstance(index, int) and 0 <= index < len(layouts) else 0
+    print("%s|%s" % (main.get("name", ""), layouts[index].upper() if layouts else ""))
+' || true)
+hypr_device="${hypr_layout%%|*}"
+hypr_code="${hypr_layout##*|}"
+shell_device=$(snapshot_field "$snapshot" keyboard.device)
+
+if [[ -z "$hypr_layout" ]]; then
+    nested_note 'the nested compositor reported no keyboards — the layout checks are skipped'
+elif [[ "$shell_device" == "$hypr_device" ]]; then
+    nested_pass "the shell reads the compositor's main keyboard ($hypr_device)"
+    shell_code=$(snapshot_field "$snapshot" keyboard.layout)
+    switchable=$(snapshot_field "$snapshot" keyboard.switchable)
+    if [[ "$switchable" == "true" && "$shell_code" == "$hypr_code" ]]; then
+        nested_pass "the layout module shows the live layout ($shell_code)"
+    elif [[ "$switchable" == "false" ]]; then
+        # The single-layout machine, which is the acceptance criterion: the
+        # module is off the bar, and asking it to cycle says so rather than
+        # dispatching a switch that would do nothing.
+        nested_pass 'one layout configured — the module is hidden (#37)'
+        mark=$(wc -l < "$NESTED_SHELL_LOG")
+        ipc cycleLayout > /dev/null
+        sleep 0.3
+        if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'one keyboard layout'; then
+            nested_pass 'a cycle with nothing to cycle to is refused, in the log'
+        else
+            nested_fail 'a cycle on a single-layout machine logged nothing'
+        fi
+    else
+        nested_fail "the shell says layout $shell_code, hyprctl says $hypr_code"
+    fi
+else
+    nested_fail "the shell read keyboard '$shell_device', hyprctl says '$hypr_device'"
+fi
+
+# The same path with two layouts, which is the case the module exists for and
+# the one no single-layout machine can reach. The nested compositor is given a
+# second layout live, and switched from *outside* the shell — that is what makes
+# this a test of the `activelayout` wiring rather than of the dispatch: nothing
+# tells the shell what happened except the event.
+if [[ "$(snapshot_field "$snapshot" keyboard.switchable)" == "false" && -n "$hypr_layout" ]]; then
+    if nested_hyprctl keyword input:kb_layout "us,de" | grep -qa '^ok'; then
+        nested_hyprctl switchxkblayout current next > /dev/null
+        two_layouts=""
+        for _ in $(seq 1 25); do
+            two_layouts=$(ipc snapshot)
+            [[ "$(snapshot_field "$two_layouts" keyboard.switchable)" == "true" ]] && break
+            sleep 0.2
+        done
+
+        if [[ "$(snapshot_field "$two_layouts" keyboard.switchable)" == "true" ]]; then
+            nested_pass "a second layout appears without being asked ($(snapshot_field "$two_layouts" keyboard.layout))"
+
+            before=$(snapshot_field "$two_layouts" keyboard.layout)
+            ipc cycleLayout > /dev/null
+            after="$before"
+            for _ in $(seq 1 25); do
+                after=$(snapshot_field "$(ipc snapshot)" keyboard.layout)
+                [[ "$after" != "$before" ]] && break
+                sleep 0.2
+            done
+            if [[ "$after" != "$before" ]]; then
+                nested_pass "the module's click cycles the layout ($before → $after)"
+            else
+                nested_fail "a cycle left the layout at $before"
+            fi
+        else
+            nested_fail 'a second layout was configured and the shell never noticed'
+        fi
+
+        nested_hyprctl keyword input:kb_layout "${hypr_code,,}" > /dev/null
+    else
+        nested_note 'the nested compositor refused a second layout — the cycle check is skipped'
+    fi
+fi
+
+# The focused window. A bare nested session has no windows at all, and the
+# module is *supposed* to be absent then — so the empty case is the assertion,
+# and a session with something focused is checked against its title.
+#
+# One is spawned where there is a terminal to spawn, because "tracks focus" is
+# the criterion and an empty session only proves the other half of it.
+terminal=$(command -v kitty || command -v alacritty || command -v foot || true)
+if [[ -n "$terminal" ]]; then
+    nested_hyprctl dispatch exec "$terminal" > /dev/null
+    for _ in $(seq 1 40); do
+        [[ -n "$(snapshot_field "$(ipc snapshot)" window.title)" ]] && break
+        sleep 0.25
+    done
+    snapshot=$(ipc snapshot)
+else
+    nested_note 'no terminal to open in the nested session — the focus check reads the empty case'
+fi
+
+## What the nested compositor says is focused, in the shape the module shows it:
+## the title, or the window class where the application has not set one.
+focused_title() {
+    nested_hyprctl -j activewindow 2>/dev/null | python3 -c '
+import json, sys
+try:
+    window = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+print(" ".join(str(window.get("title") or window.get("class") or "").split()))
+' || true
+}
+
+# Retried, because a window that has just mapped renames itself once or twice as
+# its shell starts up — the two readings are taken a moment apart, and a
+# disagreement is only interesting if it survives the title settling.
+for _ in $(seq 1 10); do
+    hypr_title=$(focused_title)
+    shell_title=$(snapshot_field "$(ipc snapshot)" window.title)
+    [[ "$shell_title" == "$hypr_title" ]] && break
+    sleep 0.3
+done
+if [[ "$shell_title" == "$hypr_title" ]]; then
+    if [[ -z "$hypr_title" ]]; then
+        nested_pass 'nothing is focused, and the window module has nothing to show'
+    else
+        nested_pass "the window module tracks the focused window ($shell_title)"
+    fi
+else
+    nested_fail "the window module says '$shell_title', hyprctl says '$hypr_title'"
+fi
+
+# The tray, against the item that was put on the bus before the shell started.
+tray_count=$(snapshot_field "$snapshot" tray.count)
+if [[ -z "$FAKE_CLIENTS_PID" ]]; then
+    nested_note "no fake clients — the tray host holds $tray_count item(s)"
+elif [[ "$tray_count" -ge 1 ]]; then
+    nested_pass "the tray host picked up the item that registered before it ($tray_count item(s))"
+
+    # Activation, which is the other half of the first acceptance criterion.
+    # Asserted on the *item's* side: what matters is that the application heard
+    # the click, and the shell reporting that it sent one is not that.
+    meant=$(ipc trayPress left)
+    sleep 0.5
+    if [[ "$meant" == *activate* ]] && grep -qa '^activated' "$NESTED_WORK/fake-clients.log"; then
+        nested_pass 'a left click on a tray icon reaches the application'
+    else
+        nested_fail "a left click meant '$meant' and the item never heard it"
+    fi
+
+    ipc trayPress middle > /dev/null
+    sleep 0.5
+    if grep -qa '^secondary-activated' "$NESTED_WORK/fake-clients.log"; then
+        nested_pass 'a middle click reaches the application'\''s secondary action'
+    else
+        nested_fail 'a middle click never reached the item'
+    fi
+
+    # The fake item exports no menu, which is the case the policy answers
+    # "none" for — and the shell must say so rather than silently doing
+    # nothing (#81).
+    mark=$(wc -l < "$NESTED_SHELL_LOG")
+    right=$(ipc trayPress right)
+    sleep 0.3
+    if [[ "$right" == *none* ]] \
+            && tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'has no menu'; then
+        nested_pass 'a right click on an item with no menu is refused, in the log'
+    else
+        nested_fail "a right click on a menuless item answered '$right' and logged nothing"
+    fi
+else
+    nested_fail 'a tray item was on the bus before the shell started and the tray never saw it'
+fi
+
+# The media pill, against the player. Both halves of its rule are checked: what
+# it says while something is playing, and that a click reaches the player —
+# which is the acceptance criterion, and the one thing about this module that a
+# snapshot alone cannot show.
+players=$(snapshot_field "$snapshot" media.players)
+showing=$(snapshot_field "$snapshot" media.showing)
+if [[ -z "$FAKE_CLIENTS_PID" ]]; then
+    if [[ "$players" == "0" && "$showing" == "false" ]]; then
+        nested_pass 'nothing is playing, and the media pill is off the bar (#37)'
+    else
+        nested_note "$players player(s) on this machine — showing \"$(snapshot_field "$snapshot" media.label)\""
+    fi
+elif [[ "$showing" == "true" && "$(snapshot_field "$snapshot" media.label)" == *"Test Track"* ]]; then
+    nested_pass "the media pill shows the playing track (\"$(snapshot_field "$snapshot" media.label)\")"
+
+    was_playing=$(snapshot_field "$snapshot" media.playing)
+    was_icon=$(snapshot_field "$snapshot" media.icon)
+    ipc playPause > /dev/null
+    now_playing="$was_playing"
+    for _ in $(seq 1 25); do
+        now_playing=$(snapshot_field "$(ipc snapshot)" media.playing)
+        [[ "$now_playing" != "$was_playing" ]] && break
+        sleep 0.2
+    done
+    now_icon=$(snapshot_field "$(ipc snapshot)" media.icon)
+    if [[ "$now_playing" != "$was_playing" && "$now_icon" != "$was_icon" ]]; then
+        nested_pass "a click on the pill reaches the player ($was_icon → $now_icon)"
+    else
+        nested_fail "play/pause left the player at playing=$now_playing icon=$now_icon"
+    fi
+    ipc playPause > /dev/null
+
+    # "Hidden when nothing plays" (#37), against the case that decides it: a
+    # player that stops keeps its name and its metadata on the bus, so a pill
+    # that read only the track would stay on the bar forever.
+    busctl --user call org.mpris.MediaPlayer2.foresttest /org/mpris/MediaPlayer2 \
+        org.mpris.MediaPlayer2.Player Stop > /dev/null 2>&1
+    stopped_showing="true"
+    for _ in $(seq 1 25); do
+        stopped_showing=$(snapshot_field "$(ipc snapshot)" media.showing)
+        [[ "$stopped_showing" == "false" ]] && break
+        sleep 0.2
+    done
+    if [[ "$stopped_showing" == "false" ]]; then
+        nested_pass 'a player that stops takes the pill off the bar, name still on the bus'
+    else
+        nested_fail 'the player stopped and the pill stayed on the bar'
+    fi
+    busctl --user call org.mpris.MediaPlayer2.foresttest /org/mpris/MediaPlayer2 \
+        org.mpris.MediaPlayer2.Player Play > /dev/null 2>&1
+else
+    nested_fail "a player is on the bus and the pill says showing=$showing players=$players"
+fi
+
+# 8 — the two buttons whose surfaces do not exist yet (#39, #44). The criterion
+# is a *logged* no-op: a button that does nothing quietly is indistinguishable
+# from a button that is broken (#81).
+for surface in launcher controlcenter; do
+    mark=$(wc -l < "$NESTED_SHELL_LOG")
+    ipc surface "$surface" > /dev/null
+    sleep 0.3
+    if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa "surfaces: no .* surface yet — ignoring toggle"; then
+        nested_pass "the $surface button says in the log that its surface is not built yet"
+    else
+        nested_fail "pressing the $surface button logged nothing"
+    fi
+done
+
+mark=$(wc -l < "$NESTED_SHELL_LOG")
+ipc surface dashboard > /dev/null
+sleep 0.3
+if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'no such surface: dashboard'; then
+    nested_pass 'a surface nobody declared reads as a shell bug rather than a missing one'
+else
+    nested_fail 'an undeclared surface name was accepted silently'
+fi
+
+# 9 — nothing is fighting itself. A binding loop is a warning rather than a
 # failure, so it would otherwise pass unnoticed until the bar visibly flickered.
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"

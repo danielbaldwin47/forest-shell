@@ -23,9 +23,12 @@ QtObject {
     /// bar; `label` is what the settings GUI (#55) will call it.
     ///
     /// The Standard-14 inventory (#9) lands across three tickets: #35 brought
-    /// the two modules that make the bar usable, this one the status cluster,
-    /// the battery and the optional brightness readout, #37 the tray, media,
-    /// active window and keyboard layout.
+    /// the two modules that make the bar usable, #36 the status cluster, the
+    /// battery and the optional brightness readout, and #37 the rest — the
+    /// tray, media, active window, keyboard layout and the two surface
+    /// buttons. What is left of the fourteen is the notification indicator,
+    /// which lands with the notification centre (#43), and the three other
+    /// off-by-default optionals (system monitor, night light, recorder).
     ///
     /// `status` is one entry and not four: #9 groups network, bluetooth, volume
     /// and mic into a single quiet icon cluster, and four entries would let a
@@ -35,6 +38,15 @@ QtObject {
         clock: { file: "Clock.qml", label: "Clock" },
         status: { file: "Status.qml", label: "Status" },
         battery: { file: "Battery.qml", label: "Battery" },
+        // #37. Four readouts and two doors: the doors dispatch through
+        // Core/SurfaceBus.qml to surfaces that do not exist yet (#39, #44) and
+        // log a line until they do.
+        launcher: { file: "LauncherButton.qml", label: "Launcher button" },
+        activeWindow: { file: "ActiveWindow.qml", label: "Active window" },
+        media: { file: "Media.qml", label: "Media" },
+        tray: { file: "Tray.qml", label: "System tray" },
+        keyboard: { file: "KeyboardLayout.qml", label: "Keyboard layout" },
+        controlCenter: { file: "ControlCenterButton.qml", label: "Control centre button" },
         // Shipped, and in no default list (#9). A module that is off is a
         // module no cluster names — see the note on enablement above.
         brightness: { file: "Brightness.qml", label: "Brightness" }

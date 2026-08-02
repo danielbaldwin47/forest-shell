@@ -20,7 +20,7 @@ import qs.Surfaces.Bar.Modules
 BarIndicator {
     id: root
 
-    visible: Backlight.available
+    shown: Backlight.available
     // Two glyphs rather than a ladder of five: this is a continuous value, and
     // the number beside it is the precise half of the reading.
     icon: Backlight.percent >= 50 ? "sun" : "sun-dim"

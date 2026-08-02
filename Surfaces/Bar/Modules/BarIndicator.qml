@@ -43,6 +43,27 @@ Item {
     /// than a red battery — it is only harder to read.
     property color labelTint: Theme.textSecondary
 
+    /// Whether this belongs on the bar at all — the module contract
+    /// Surfaces/Bar/BarContent.qml reads, and the reason a module says `shown`
+    /// rather than `visible`. The bar owns the item's visibility: a hidden
+    /// module has to take its module gap with it, which only the Loader above
+    /// it can do, and a module that hid *itself* would leave a 14px hole where
+    /// it is not. (An indicator used inside another module — the four in the
+    /// status cluster — is not a module and uses `visible` as usual.)
+    property bool shown: true
+
+    visible: indicator.shown
+
+    /// A ceiling on the text, in px, or 0 for "as wide as it needs" — which is
+    /// what every reading in #36 wanted, since a percentage has a known width.
+    ///
+    /// #37 brought the two that do not: a track title and a window title are
+    /// both arbitrary text arriving from another application, and an uncapped
+    /// one pushes the clock off the centre of the bar (the #80 class of
+    /// overflow). Capped, they elide from the right — the front of a title is
+    /// the part worth keeping.
+    property int labelMaxWidth: 0
+
     /// Whether the reading can be *changed* from here — the wheel and a click.
     /// Off by default: most of what the bar shows is a readout, and a pointer
     /// that silently does something over one glyph and nothing over the next is
@@ -74,6 +95,8 @@ Item {
         }
 
         Text {
+            id: reading
+
             text: indicator.label
             visible: indicator.label !== ""
             color: indicator.labelTint
@@ -83,6 +106,14 @@ Item {
             // `font.pixelSize` is an int (#10, measured the hard way).
             font.pointSize: Theme.pt(12.5)
             anchors.verticalCenter: parent.verticalCenter
+
+            // Only bound when there is a ceiling. An unconditional `width`
+            // would take the text out of its implicit sizing, and every #36
+            // reading would then be laid out in a box rather than sized by
+            // its own glyphs.
+            width: indicator.labelMaxWidth > 0
+                ? Math.min(implicitWidth, indicator.labelMaxWidth) : implicitWidth
+            elide: indicator.labelMaxWidth > 0 ? Text.ElideRight : Text.ElideNone
         }
     }
 

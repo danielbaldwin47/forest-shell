@@ -68,6 +68,22 @@ TestCase {
             compare(registry.resolve(null)[cluster], []);
     }
 
+    function test_the_registry_and_the_settings_pool_agree() {
+        // The Bar tab offers `Config.schema.barModules` as the pool you drag
+        // from (Surfaces/Settings/Tabs/BarTab.qml), and the registry is what
+        // resolves the result. A module in the registry that the vocabulary
+        // does not list is one the GUI can never add — and one the GUI removes
+        // and cannot put back.
+        //
+        // Only one way round: the vocabulary deliberately names modules that
+        // are not built yet (the notification indicator, the three optional
+        // readouts), which is how a config written for a newer shell keeps
+        // them.
+        for (const name in registry.modules)
+            verify(settings.barModules.indexOf(name) >= 0,
+                   name + " is in the registry but not in the settings vocabulary");
+    }
+
     function test_every_registered_module_names_a_file_and_a_label() {
         for (const name in registry.modules) {
             const entry = registry.modules[name];

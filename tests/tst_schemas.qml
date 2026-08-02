@@ -152,13 +152,14 @@ TestCase {
     }
 
     function test_module_order_is_three_lists_of_names() {
-        // #9's default inventory, in #9's order, completed by #37 — bar the
-        // notification indicator, which lands with the notification centre.
+        // #9's default inventory, in #9's order: #37 brought all of it but the
+        // notification indicator, which lands with the centre it opens (#43).
         const modules = store.defaults(settings.spec).bar.modules;
         compare(modules.left, ["launcher", "workspaces", "activeWindow"]);
         compare(modules.center, ["clock", "media"]);
         // The machine's condition, with the one door on that side outermost.
-        compare(modules.right, ["tray", "status", "battery", "keyboard", "controlCenter"]);
+        compare(modules.right, ["tray", "status", "battery", "keyboard", "notifications",
+                                "controlCenter"]);
     }
 
     function test_a_reordered_bar_writes_back_only_the_module_key() {
@@ -175,10 +176,81 @@ TestCase {
     function test_empty_sections_are_sections_and_not_leaves() {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["controlCenter", "dashboard", "weatherTime"]) {
+        for (const section of ["dashboard"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
             compare(store.leafPathsUnder(settings.spec, section).length, 0);
         }
+    }
+
+    function test_the_osd_keys_live_under_the_control_centre() {
+        // #46's geometry and timeout. Here rather than in a tenth section
+        // because #21 fixes the section list at nine and the tabs at ten
+        // (tests/tst_settingstabs.qml), and because the OSD reports exactly the
+        // three channels the control centre puts sliders on — Core/
+        // SettingsSchema.qml argues it where the keys are.
+        compare(store.leafPathsUnder(settings.spec, "controlCenter").sort(),
+                ["controlCenter.osd.margin",
+                 "controlCenter.osd.position",
+                 "controlCenter.osd.timeout"]);
+    }
+
+    function test_the_night_light_keys_live_under_weather_time() {
+        // #44 puts them here rather than under `appearance` because this is the
+        // section that will own sunset (#50) — the schedule needs a location,
+        // and a warmth key three sections away from the times that drive it is
+        // a key nobody finds.
+        compare(store.leafPathsUnder(settings.spec, "weatherTime").sort(),
+                ["weatherTime.nightLight.command",
+                 "weatherTime.nightLight.offCommand",
+                 "weatherTime.nightLight.temperature"]);
+    }
+
+    function test_the_idle_ladder_lives_under_system() {
+        // #48's four rungs, under the section that already owns the lock and the
+        // session commands — the ladder's last rung *runs* one of those commands,
+        // and a timeout three sections away from what it triggers is a key
+        // nobody finds. Settings › System is the tab (#55).
+        const leaves = store.leafPathsUnder(settings.spec, "system")
+            .filter(path => path.startsWith("system.idle."));
+
+        compare(leaves.sort(), [
+            "system.idle.dim.ac", "system.idle.dim.battery",
+            "system.idle.dim.enabled", "system.idle.dim.level",
+            "system.idle.dpms.ac", "system.idle.dpms.battery",
+            "system.idle.dpms.enabled", "system.idle.dpms.lockedSeconds",
+            "system.idle.dpms.offCommand", "system.idle.dpms.onCommand",
+            "system.idle.lock.ac", "system.idle.lock.battery",
+            "system.idle.lock.enabled",
+            "system.idle.suspend.ac", "system.idle.suspend.battery",
+            "system.idle.suspend.enabled"
+        ]);
+    }
+
+    function test_the_ladder_has_no_key_for_what_it_may_not_offer() {
+        // Two rules from #30 that are deliberately not settings: inhibitors are
+        // respected on every rung, and the audio gate is on suspend alone. A key
+        // for either would be a key that makes a film stop halfway, or one that
+        // suspends the machine under the music it is playing.
+        compare(store.leafAt(settings.spec, "system.idle.respectInhibitors"), null);
+        compare(store.leafAt(settings.spec, "system.idle.suspend.audioGate"), null);
+        // And there is no second suspend command: the ladder's last rung runs
+        // the session menu's, so the two cannot disagree.
+        compare(store.leafAt(settings.spec, "system.idle.suspend.command"), null);
+        verify(store.leafAt(settings.spec, "system.session.commands.suspend") !== null);
+    }
+
+    function test_a_hand_edited_ladder_cannot_be_armed_at_zero_seconds() {
+        // The worst thing this file can express: a rung that fires the moment
+        // the shell starts. The coercer floors at 0, and 0 is read as "off on
+        // this power source" by Services/System/IdlePolicy.qml rather than as
+        // "immediately".
+        const raw = { system: { idle: { lock: { battery: -3, ac: "soon" } } } };
+        const idle = store.resolve(settings.spec, raw).values.system.idle;
+        compare(idle.lock.battery, 0);
+        // An unreadable value falls back to its default rather than to zero,
+        // which is the ordinary coercion rule and is safe here for the same
+        // reason.
+        compare(idle.lock.ac, 10);
     }
 
     // --- the keys the settings window is built on (#54) ----------------------

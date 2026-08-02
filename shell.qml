@@ -24,6 +24,7 @@ import qs.Surfaces.Lock
 import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
 import qs.Surfaces.Drawers
+import qs.Surfaces.Osd
 
 ShellRoot {
     id: shell
@@ -62,6 +63,19 @@ ShellRoot {
         component: DrawerWindow {}
     }
 
+    // The OSD's windows (#46) — one per screen, mapped only while there is a
+    // level to report, so an idle shell has no surface here either. Deferred
+    // for the same reason the two above are: per-screen layer surfaces are
+    // created after the first frame rather than on the way to it.
+    //
+    // The state and the three services it watches are the `Osd` singleton,
+    // constructed in the deferred stage below — naming it is what arms the
+    // watchers and registers `qs ipc call osd …`.
+    LazyLoader {
+        id: osdWindows
+        component: OsdWindow {}
+    }
+
     Connections {
         target: Startup
         function onDeferredStage() {
@@ -69,10 +83,11 @@ ShellRoot {
             // Naming the singleton is what constructs it, and constructing it
             // is what registers `qs ipc call settings …`. The window itself is
             // not built until something opens it (#54).
-            ServiceInit.initSurfaces([SettingsWindow, Drawers]);
+            ServiceInit.initSurfaces([SettingsWindow, Drawers, Osd]);
             lock.active = true;
             notificationPopups.active = true;
             drawerWindows.active = true;
+            osdWindows.active = true;
         }
     }
 

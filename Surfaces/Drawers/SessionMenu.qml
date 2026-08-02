@@ -47,7 +47,13 @@ FocusScope {
         if (root.policy.routesToLock(id)) {
             Logger.log("session", root.policy.fired(id, ""));
             root.closeRequested("lock");
-            SessionLock.lock("session menu");
+            // Out through logind rather than straight at the surface (#30, and
+            // the note #47 left for #48): `loginctl lock-session` is what makes
+            // logind's own `LockedHint` true, so anything else on the machine
+            // that asks whether this session is locked gets the right answer.
+            // The bridge falls back to `SessionLock.lock()` when the round trip
+            // cannot work, so this is never a lock that quietly did not happen.
+            LogindBridge.lockSession("session menu");
             return;
         }
 

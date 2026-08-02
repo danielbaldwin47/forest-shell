@@ -362,7 +362,141 @@ QtObject {
         return count;
     }
 
-    /// The rows of a history that are objects at all. Both readers above take
+    // --- what the center shows (#43) -----------------------------------------
+
+    /// History as the center draws it: one entry per app, newest app first,
+    /// rows inside a group still newest first.
+    ///
+    /// `{ appKey, appName, appIcon, count, latest, rows }`. The order is the
+    /// order the apps appear in history, which — history being newest first —
+    /// is "the app that notified most recently is at the top", and it is stable
+    /// while nothing arrives. Sorting by name instead would put a burst from
+    /// one app under a group the user has to go looking for.
+    ///
+    /// `appName` and `appIcon` come off the newest row of the group rather than
+    /// the oldest: an app that has changed either since is displayed as it
+    /// describes itself now.
+    ///
+    /// Rows whose app has no key (see `appKey`) are kept, in a group of their
+    /// own keyed `""`. They cannot be *ruled* on, but they are in history and
+    /// history has to be clearable — a row that cannot be grouped and so is
+    /// never drawn is a row nothing can dismiss.
+    function groups(history: var): var {
+        const out = [];
+        const byKey = ({});
+        for (const entry of rowsOf(history)) {
+            const key = text(entry.appKey);
+            let group = byKey[key];
+            if (group === undefined) {
+                group = {
+                    appKey: key,
+                    // The name is what a person reads, and a keyless row has
+                    // only ever had one of these. Falling back to the key keeps
+                    // a group from drawing a blank header.
+                    appName: text(entry.appName) || key,
+                    appIcon: text(entry.appIcon),
+                    count: 0,
+                    latest: 0,
+                    rows: []
+                };
+                byKey[key] = group;
+                out.push(group);
+            }
+            group.rows.push(entry);
+            group.count++;
+            if (typeof entry.time === "number")
+                group.latest = Math.max(group.latest, entry.time);
+        }
+        return out;
+    }
+
+    /// History without one app's rows — the center's per-app clear.
+    ///
+    /// Matched on the folded key both sides, so clearing `firefox` takes the
+    /// row a client sent as `Firefox` with it. A new list, for the reason
+    /// `remember` returns one.
+    function withoutApp(history: var, appKey: var): var {
+        const key = text(appKey).trim().toLowerCase();
+        return rowsOf(history).filter(entry => text(entry.appKey).trim().toLowerCase() !== key);
+    }
+
+    /// History without one row — the center's per-row dismiss.
+    ///
+    /// Keyed on the row identity (#76) and not on the daemon's id, which is not
+    /// unique across a restart: dismissing one row must never take a second,
+    /// unrelated one with it.
+    ///
+    /// A key that matches nothing returns the list unchanged rather than
+    /// complaining. The row may have fallen off the end of `historyLimit`
+    /// between the click and here, and the user's intent — "that row is gone" —
+    /// is satisfied either way.
+    function withoutRow(history: var, key: var): var {
+        const wanted = text(key);
+        return rowsOf(history).filter(entry => keyOf(entry) !== wanted);
+    }
+
+    /// A row's identity as stored, recomputed rather than read: `record()` is
+    /// the one place a key is made, and a row that came off a hand-edited
+    /// state.json may carry a `key` that does not describe it.
+    function keyOf(entry: var): string {
+        return keyFor(entry.time, seqOf(entry), entry.appKey);
+    }
+
+    // --- the bar's unread count (#43) ----------------------------------------
+
+    /// How many notifications have arrived since the center was last looked at
+    /// — the number on the bar indicator.
+    ///
+    /// "Unread" in this shell means "arrived since the center was last open",
+    /// for the same reason the lock's count means "since the lock went up":
+    /// nothing marks a single notification read, and there is no seam at which
+    /// one could honestly be marked so. Opening the center is the one act that
+    /// says "I have looked at these".
+    ///
+    /// A `seenAt` of zero is "never opened", and then everything remembered is
+    /// unread — not nothing. The opposite reading would hide a first day's
+    /// notifications behind a badge that never lit.
+    function unreadSince(history: var, seenAt: var): int {
+        if (typeof seenAt !== "number" || seenAt <= 0)
+            return rowsOf(history).length;
+        return countSince(history, seenAt);
+    }
+
+    /// The count as the bar draws it: "" for nothing waiting, and a ceiling
+    /// past which the exact number stops being information and starts being a
+    /// module wide enough to push the clock off centre (the #80 class).
+    function countLabel(count: var): string {
+        const value = typeof count === "number" ? Math.floor(count) : 0;
+        if (value <= 0)
+            return "";
+        return value > 99 ? "99+" : String(value);
+    }
+
+    /// How long ago a row arrived, short enough to sit at the end of its line.
+    ///
+    /// Coarse on purpose — a notification from Tuesday does not become more
+    /// useful for saying 3d 4h. Anything inside a minute is "now", because a
+    /// row that ticks 1s → 2s under the pointer is movement the shell has not
+    /// earned (#22 §5: an idle shell does not animate).
+    ///
+    /// `now` is passed in rather than read from the clock so this is a
+    /// function, and so a test can ask about a fixed moment.
+    function relativeTime(then: var, now: var): string {
+        if (typeof then !== "number" || typeof now !== "number" || then <= 0)
+            return "";
+        const seconds = Math.floor((now - then) / 1000);
+        // A row from the future is a clock that moved, not a row to argue
+        // with: it reads as having just arrived.
+        if (seconds < 60)
+            return "now";
+        if (seconds < 3600)
+            return Math.floor(seconds / 60) + "m";
+        if (seconds < 86400)
+            return Math.floor(seconds / 3600) + "h";
+        return Math.floor(seconds / 86400) + "d";
+    }
+
+    /// The rows of a history that are objects at all. Every reader above takes
     /// history as it comes off state.json, which is hand-editable (#21) — one
     /// wrecked row must cost one row and not the answer.
     function rowsOf(history: var): var {

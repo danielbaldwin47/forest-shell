@@ -14,10 +14,17 @@
 // type, motion — is a fixed constant and is declared as a plain property.
 //
 // The dark row is the board design brief §2 verbatim, names included. The light
-// row is the brief's light table, which is a *seed*: #8 recorded it as
-// incomplete, so roles it does not name fall back to their dark value per
-// token rather than being invented here. v1 ships dark-first; light polish is
-// post-v1 and gates nothing.
+// row was the brief's light table plus a per-token fallback to dark for the
+// seven roles it never sampled; #44 filled those, because the Dark/Light tile
+// is the first thing in the shell that flips this palette live and a fallback
+// to dark is a near-black hover on a white card. The fallback machinery stays —
+// a theme preset (#56) can reintroduce a partial row.
+//
+// Both rows are gated by `tests/tst_tokens.qml`, which computes every
+// text-on-surface ratio in both modes. That is a seam-1 check and not seam 3's
+// `--contrast` on purpose: these are opaque tokens, so the ratio is arithmetic
+// over two constants. Seam 3 measures a *composite* — a translucent fill over a
+// wallpaper (#79) — which is a number no table can predict.
 import QtQuick
 
 QtObject {
@@ -62,11 +69,23 @@ QtObject {
         fogWash: "#beced1"          // the mist a scrim is made of (brief §3.1)
     })
 
-    // Light — the brief's light table, seed only.
+    // Light — the brief's light table, completed.
     //
-    // Deliberately partial: seven roles the brief never sampled are absent and
-    // resolve to dark. Filling them is the light-theme ticket's work, and
-    // guessing them here would commit values that ticket would have to undo.
+    // The first ten are the brief's own samples. The last six are #44's: the
+    // Dark/Light tile is the first thing in the shell that flips this palette
+    // live, and a mode where seven roles fell back to their *dark* values was a
+    // mode that painted a near-black hover over a white card, an unreadable
+    // pale-lichen success line, and a 10% pale wash over an already pale
+    // desktop — a fog that obscured nothing.
+    //
+    // The added six are measured rather than authored, which after #79 and #94
+    // is the rule: the ratios in the comments are computed against this row's
+    // own `bgBase`, and the whole row is gated by the contrast tests in
+    // `tests/tst_tokens.qml` — every text role against every surface, in both
+    // modes. Where a dark counterpart exists, the light value is aimed at the same
+    // *step* rather than the same number — the two rows are the same design at
+    // opposite ends, so what has to match is the separation between a surface
+    // and the thing raised above it.
     //
     // The brief also lists an `accent-secondary` (#1a5f77, deeper lake blue)
     // with no dark counterpart. #8 flagged it provisional pending role
@@ -74,19 +93,43 @@ QtObject {
     // a role that exists in one mode only is not mode-blind.
     readonly property var lightSeed: ({
         bgBase: "#eef1ec",          // warm-cool paper, not white
+        bgSunken: "#e0e5df",        // wells sink *below* paper — 1.12:1 step (dark: 1.04:1)
         surface: "#f7f9f5",         // cards sit *above* the base here
         surfaceRaised: "#ffffff",
+        surfaceOverlay: "#edf2eb",  // hover darkens where dark's lightens — 1.14:1
+                                    // under `surfaceRaised`, the same step dark
+                                    // puts over it
         borderSubtle: "#dbe1da",
+        borderStrong: "#94a397",    // 2.5:1 on surface (dark: 2.2:1)
         textPrimary: "#1b241f",     // 14.0:1
         textSecondary: "#46564d",   // 6.8:1
         textMuted: "#6b7a71",       // 4.0:1 — large text only
         accentPrimary: "#0c757b",   // teal darkens for a light bg — 4.8:1
+        // The one added role that does not simply darken. `accentDeep` is a
+        // *fill* — the selected chip (#54), the active session row, the lit
+        // control-centre tile — and every one of those draws `textPrimary` on
+        // it. In dark that pairing is #e6ece8 on a saturated teal, 4.6:1. A
+        // light row that darkened this to match would put light mode's *dark*
+        // textPrimary on a dark fill, which is the one combination that cannot
+        // be read at all. So the fill inverts with the mode the text does:
+        // 9.6:1 under #1b241f, and 1.6:1 against `surface`, which is what makes
+        // a selected row look selected.
+        accentDeep: "#a9d0d3",      // pale lake — 9.6:1 under textPrimary
         accentWarm: "#8a5a2f",      // wood brown — 5.1:1
-        accentEmber: "#b0512f"      // 4.5:1
+        accentEmber: "#b0512f",     // 4.5:1
+        accentLichen: "#59682c",    // meadow in daylight — 5.4:1
+        accentStone: "#68695b",     // 4.9:1 — dormant, and still AA
+        // The one role that inverts rather than darkening by degrees. The fog
+        // is a 10% wash whose whole job is to obscure, and 10% of a pale mist
+        // over a pale desktop is a scrim you can read straight through — so in
+        // light the mist is the *shadow* between the trees rather than the
+        // light in them.
+        fogWash: "#4a5a5e"
     })
 
-    // Roles the light row borrows from dark. Derived, never hand-listed, so it
-    // shrinks on its own as the light table is filled in.
+    // Roles the light row borrows from dark. Derived, never hand-listed: it was
+    // seven before #44 and is empty now, and it stays here because a preset
+    // (#56) can reintroduce a partial row.
     readonly property var lightFallbackRoles: colorRoles.filter(
         role => lightSeed[role] === undefined)
 

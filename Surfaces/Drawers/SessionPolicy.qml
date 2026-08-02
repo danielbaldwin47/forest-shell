@@ -5,10 +5,15 @@
 // this file. Logging out, suspending, rebooting and shutting down are things
 // only the system can do, they differ by init system and by machine, and so
 // they are strings in `settings.json` (`system.session.commands.*`). Locking is a
-// surface this shell already owns (#47): it is reached in-process through
-// `SessionLock.lock()`, not by spawning `loginctl lock-session` so that the
-// shell can ask itself to do something it is sitting on top of — the mistake
-// Core/SurfaceBus.qml exists to avoid, one process further out.
+// surface this shell already owns (#47), so it is never one of those strings —
+// there is no `commands.lock` and there will not be one.
+//
+// It does still leave the process, and #48 is why: the menu's Lock goes through
+// `LogindBridge.lockSession()`, which runs `loginctl lock-session` and lets
+// logind ask the shell back. That is what keeps logind's own `LockedHint` true
+// for everything else on the machine, and it falls back to the in-process call
+// whenever the round trip cannot work. What this file decides is only that the
+// row is not a config string; SessionMenu.qml decides who to hand it to.
 //
 // The ticket was written before the lock landed and asks for the lock action to
 // "no-op with a log until the lock surface lands". It has landed, so it does

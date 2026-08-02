@@ -103,11 +103,21 @@ Singleton {
     /// here is still shown — the pill's first job is to say what is playing —
     /// but the click is a logged no-op rather than a silent one.
     ///
-    /// Play/pause is the only transport the shell has a caller for: the pill is
-    /// one click (#37), and skipping a track belongs to the control centre's
-    /// media card (#44), which will want `next`/`previous` and the position
-    /// this facade also deliberately does not read.
+    /// The bar's pill is one click (#37); the control centre's media card is
+    /// three (#44), which is what `canSkip`/`canGoBack` below arrived with. The
+    /// track *position* is still deliberately not read here — a progress bar is
+    /// a property that changes every frame something is playing, and #22 §5
+    /// costs that in wakeups whether or not a surface is on screen.
     readonly property bool canToggle: root.player !== null && root.player.canTogglePlaying
+
+    readonly property bool canSkip: root.player !== null && root.player.canGoNext
+    readonly property bool canGoBack: root.player !== null && root.player.canGoPrevious
+
+    /// The artist alone, for a card with room for two lines where the bar had
+    /// one. Empty when the client did not say, which is common enough that the
+    /// card has to lay out without it.
+    readonly property string trackTitle: root.player?.trackTitle ?? ""
+    readonly property string trackArtist: root.player?.trackArtist ?? ""
 
     // --- driving it ----------------------------------------------------------
 
@@ -119,6 +129,30 @@ Singleton {
             return;
         }
         root.player.togglePlaying();
+    }
+
+    /// The two the control centre's card adds (#44). Both refuse loudly rather
+    /// than silently: a transport button that does nothing and says nothing is
+    /// #81, and "this player will not skip from here" is a real answer for the
+    /// browsers that advertise MPRIS without implementing all of it.
+    function next() {
+        if (!root.canSkip) {
+            Logger.warn("media", root.player === null
+                ? "no player — ignoring skip"
+                : root.player.identity + " cannot skip from here");
+            return;
+        }
+        root.player.next();
+    }
+
+    function previous() {
+        if (!root.canGoBack) {
+            Logger.warn("media", root.player === null
+                ? "no player — ignoring previous"
+                : root.player.identity + " cannot go back from here");
+            return;
+        }
+        root.player.previous();
     }
 
     // --- what a harness reads ------------------------------------------------

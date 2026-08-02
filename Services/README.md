@@ -43,6 +43,11 @@ Fourteen of them exist so far:
   do-not-disturb and the persisted history. The rules about an arriving
   notification are split into `NotificationPolicy.qml`, which imports nothing
   but QtQuick so `tests/` can reach them; the singleton next door is the wiring.
+  Since #43 the same split carries what the centre *shows*: `groups()`,
+  `withoutApp()`, `withoutRow()` and `unreadSince()` are pure functions here,
+  and `Surfaces/Drawers/NotificationCenter.qml` is only the picture. The surface
+  sets `centerOpen` while it is up — the service reads that flag, and no
+  service ever imports a surface to get it.
 - `Compositor/` (#35, #42) — the Hyprland facade. It reports workspaces as
   plain data, focuses them, owns the one `hyprctl` call the shell makes — the
   layer rule that asks Hyprland to blur behind the bar, spelled and read by

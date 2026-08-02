@@ -341,7 +341,174 @@ else
     nested_ipc call settings close > /dev/null
 fi
 
-# --- 5. the lock counts what arrived while it was up (#71) --------------------
+# --- 5. the three-way rule, enforced end to end (#43) -------------------------
+#
+# `NotificationPolicy.decide()` is unit-checked over every combination there is
+# (tests/tst_notificationpolicy.qml). What only exists here is the enforcement:
+# a rule written into settings.json by hand, read by a running Config, matched
+# against the app id a *real* client put on the bus, and acted on by a real
+# server. The unit test cannot see any of that hand-off, and #71 is the reminder
+# of what a seam that is only checked on one side is worth.
+#
+# Silent and blocked differ in exactly one thing — whether the notification is
+# remembered — so both halves of both rules are asserted, and the absence is
+# asserted as carefully as the presence.
+
+cat > "$XDG_CONFIG_HOME/forest-shell/settings.json" <<'EOF'
+{
+  "notifications": {
+    "honorClientTimeout": true,
+    "maxVisible": 5,
+    "apps": {
+      "quietapp": "silent",
+      "blockedapp": "blocked"
+    }
+  }
+}
+EOF
+
+if nested_await "$NESTED_SHELL_LOG" 'config: reloaded ' 10; then
+    nested_pass "the per-app rules reached the running shell"
+else
+    nested_fail "settings.json never reloaded with the rules in it"
+fi
+
+notify-send -a quietapp "silent-one" > /dev/null 2>&1
+if nested_await "$NESTED_SHELL_LOG" 'suppressed \(silent\): quietapp' 10; then
+    nested_pass "a silent app does not pop"
+else
+    nested_fail "a silent app popped anyway"
+    grep -a 'notifications: ' "$NESTED_SHELL_LOG" | tail -3
+fi
+
+# The other half, and the half that separates silent from blocked: it is still
+# in history, which is where the centre reads it.
+if nested_await "$NESTED_SHELL_LOG" 'remembered .*silent-one' 10; then
+    nested_pass "a silent app is still remembered"
+else
+    nested_fail "a silent notification was not kept in history"
+fi
+
+notify-send -a blockedapp "blocked-one" > /dev/null 2>&1
+if nested_await "$NESTED_SHELL_LOG" 'suppressed \(blocked\): blockedapp' 10; then
+    nested_pass "a blocked app does not pop"
+else
+    nested_fail "a blocked app popped anyway"
+    grep -a 'notifications: ' "$NESTED_SHELL_LOG" | tail -3
+fi
+
+# An absence, so it is a wait and then a look: the `remembered` line for a
+# notification that *is* kept lands within a frame or two of the suppression
+# line above, and this one has to still be missing after that.
+sleep 0.5
+if grep -qa 'remembered .*blocked-one' "$NESTED_SHELL_LOG"; then
+    nested_fail "a blocked notification was written to history"
+else
+    nested_pass "a blocked app leaves no trace at all"
+fi
+
+# --- 5b. the open centre suppresses popups (#43) ------------------------------
+#
+# The last of the three situational suppressions, and the only one whose cause
+# is a surface: `centerOpen` is set by the panel itself, so this is the drawer
+# window, the tenant and the service in one line. The notification is still
+# remembered — the list the centre is showing is where it lands.
+
+if ipc_until 'drawers: notificationcenter opened on ' notificationcenter open; then
+    nested_pass "the notification centre opened over IPC"
+else
+    nested_fail "the notification centre never opened"
+fi
+
+notify-send -a harness "under-the-centre" > /dev/null 2>&1
+if nested_await "$NESTED_SHELL_LOG" 'suppressed \(center\): harness' 10; then
+    nested_pass "a notification arriving under the open centre does not pop"
+else
+    nested_fail "a popup appeared over the open notification centre"
+    grep -a 'notifications: ' "$NESTED_SHELL_LOG" | tail -3
+fi
+
+if nested_await "$NESTED_SHELL_LOG" 'remembered .*under-the-centre' 10; then
+    nested_pass "...and is remembered, which is what the centre is showing"
+else
+    nested_fail "a notification suppressed by the centre was not remembered"
+fi
+
+nested_ipc call notificationcenter close > /dev/null
+
+# --- 5c. the bar's unread count, and clearing (#43) ---------------------------
+#
+# "Unread" here means "arrived since the centre was last open", which is the
+# only reading this shell can support — nothing marks a single row read. Closing
+# the centre stamps `seenAt`, so the count is zero on the way out and counts
+# from there.
+
+unread_now() { nested_ipc call notifications unread | tr -dc '0-9'; }
+
+if [[ "$(unread_now)" == "0" ]]; then
+    nested_pass "closing the centre leaves nothing unread"
+else
+    nested_fail "the count did not empty when the centre was looked at: $(unread_now)"
+fi
+
+notify-send -a harness "unread-one" > /dev/null 2>&1
+nested_await "$NESTED_SHELL_LOG" 'remembered .*unread-one' 10 \
+    || nested_fail "the shell never remembered 'unread-one'"
+
+if [[ "$(unread_now)" == "1" ]]; then
+    nested_pass "a notification arriving after that counts as one unread"
+else
+    nested_fail "one notification since the centre was open counted $(unread_now)"
+fi
+
+# Clear-all, which the centre's header button and this door are two faces of.
+# The evidence is the file: an emptied list that is not written back comes
+# straight back on the next start.
+nested_ipc call notifications clear > /dev/null
+if nested_await "$NESTED_SHELL_LOG" 'notifications: cleared history' 10; then
+    nested_pass "clearing empties history"
+else
+    nested_fail "clearing history said nothing"
+fi
+
+# The store writes *sparsely* — a value that is the schema's default is left out
+# of the file entirely (Core/SpecStore.qml) — so an emptied history is an absent
+# key and not a `[]`, and the evidence has to be the rows being gone rather than
+# a literal to grep for. This is measured, not assumed: the first version of
+# this check waited for `"history": []` and timed out on a file that was
+# perfectly correct.
+cleared=""
+for _ in $(seq 1 100); do
+    file=$(state_file)
+    if [[ -n "$file" ]] && ! grep -qa 'unread-one' "$file"; then
+        cleared=$(cat "$file")
+        break
+    fi
+    sleep 0.1
+done
+
+if [[ -n "$cleared" ]]; then
+    nested_pass "the emptied history is written back to the state file"
+else
+    nested_fail "history was cleared in the shell but not on disk"
+    state_file | xargs -r tail -5
+fi
+
+# The counter is *not* lowered with it. It is a high-water mark, and a cleared
+# history taking it away is how #76's collision comes back.
+if grep -qE '"seq": *[1-9]' <<< "${cleared:-}"; then
+    nested_pass "clearing does not lower the sequence counter"
+else
+    nested_fail "the sequence counter went back to zero with the history"
+fi
+
+if [[ "$(unread_now)" == "0" ]]; then
+    nested_pass "an empty history has nothing unread in it"
+else
+    nested_fail "an emptied history still counts $(unread_now) unread"
+fi
+
+# --- 6. the lock counts what arrived while it was up (#71) --------------------
 #
 # `SessionLock.notificationCount` is the seam the lock's status strip renders
 # (#47), and it is written from here — so what it holds is only checkable with

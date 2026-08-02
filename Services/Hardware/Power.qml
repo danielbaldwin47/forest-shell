@@ -60,8 +60,10 @@ Singleton {
 
     readonly property string state: root.policy.stateName(root.deviceState)
     readonly property bool onMains: root.policy.onMains(root.deviceState)
+    // Read by the lock's battery pill, which is why "low" is a property here
+    // and "critical" is not: the two thresholds are the policy's, and only one
+    // of them has a caller outside the glyph and the tint it already decides.
     readonly property bool low: root.policy.low(root.fraction)
-    readonly property bool critical: root.policy.critical(root.fraction)
 
     readonly property string icon: root.policy.icon(root.fraction, root.deviceState)
     readonly property string emphasis: root.policy.emphasis(root.fraction, root.deviceState)

@@ -43,9 +43,17 @@ Item {
     /// than a red battery — it is only harder to read.
     property color labelTint: Theme.textSecondary
 
-    /// 16px at a 32px bar: the icon occupies half the bar's height, which is
-    /// the proportion #10 settled on for the workspace strata too.
-    property int iconSize: 16
+    /// Whether the reading can be *changed* from here — the wheel and a click.
+    /// Off by default: most of what the bar shows is a readout, and a pointer
+    /// that silently does something over one glyph and nothing over the next is
+    /// worse than one that never does anything.
+    property bool interactive: false
+
+    /// One notch of the wheel, up (1) or down (-1). The direction and not the
+    /// delta: a high-resolution wheel sends many small deltas, and a value that
+    /// moved by the raw number would jump.
+    signal stepped(int direction)
+    signal clicked()
 
     implicitWidth: row.width
     implicitHeight: row.height
@@ -57,7 +65,9 @@ Item {
 
         Icon {
             name: indicator.icon
-            size: indicator.iconSize
+            // 16px at a 32px bar: the icon occupies half the bar's height,
+            // which is the proportion #10 settled on for the workspace strata.
+            size: 16
             color: indicator.tint
             visible: indicator.icon !== ""
             anchors.verticalCenter: parent.verticalCenter
@@ -73,6 +83,24 @@ Item {
             // `font.pixelSize` is an int (#10, measured the hard way).
             font.pointSize: Theme.pt(12.5)
             anchors.verticalCenter: parent.verticalCenter
+        }
+    }
+
+    // One handler for both gestures, here rather than in each module: the two
+    // that take a wheel wrote the same four lines and the same comment about
+    // `angleDelta`, which is one place too many for a rule about pointers.
+    MouseArea {
+        anchors.fill: parent
+        enabled: indicator.interactive
+        visible: indicator.interactive
+        acceptedButtons: Qt.LeftButton
+
+        onClicked: indicator.clicked()
+        // `angleDelta.y` is in eighths of a degree and a notch is 120; only the
+        // sign is used, and the module decides what a notch means.
+        onWheel: wheel => {
+            if (wheel.angleDelta.y !== 0)
+                indicator.stepped(wheel.angleDelta.y > 0 ? 1 : -1);
         }
     }
 }

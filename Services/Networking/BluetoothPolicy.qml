@@ -42,12 +42,6 @@ QtObject {
         return discovering ? "bluetooth-searching" : "bluetooth";
     }
 
-    function emphasis(enabled: bool, connected: int): string {
-        if (!enabled)
-            return "off";
-        return connected > 0 ? "connected" : "idle";
-    }
-
     function label(enabled: bool, connected: int): string {
         if (!enabled)
             return "Bluetooth off";

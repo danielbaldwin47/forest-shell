@@ -106,16 +106,18 @@ TestCase {
         verify(complaint.indexOf("No such device") >= 0);
     }
 
-    function test_the_sysfs_paths_are_derived_from_the_device_name() {
+    function test_the_sysfs_path_is_derived_from_the_device_name() {
         // Reading is a file read and not a subprocess: it is free, it is live,
         // and `actual_brightness` is what the panel is really doing rather than
-        // what was last asked for.
+        // what was last asked for. There is no second path for the range — the
+        // probe already reported it, and it cannot change while the machine is
+        // up.
         compare(policy.valuePath("intel_backlight"),
                 "/sys/class/backlight/intel_backlight/actual_brightness");
-        compare(policy.maxPath("intel_backlight"),
-                "/sys/class/backlight/intel_backlight/max_brightness");
+        // Before the probe has answered, and on a machine with no backlight:
+        // an empty path is what keeps the FileView from reading `/sys/class/
+        // backlight//actual_brightness`.
         compare(policy.valuePath(""), "");
-        compare(policy.maxPath(""), "");
     }
 
     function test_a_sysfs_read_survives_whitespace_and_nonsense() {

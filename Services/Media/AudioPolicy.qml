@@ -68,9 +68,4 @@ QtObject {
         return muted === true;
     }
 
-    /// The readout under a slider, or in a tooltip. "Muted" rather than "0%",
-    /// because a muted sink still has a level and the two are different states.
-    function readable(volume: real, muted: bool): string {
-        return muted ? "Muted" : policy.percent(volume) + "%";
-    }
 }

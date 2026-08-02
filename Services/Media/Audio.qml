@@ -72,7 +72,6 @@ Singleton {
     /// a caller reaching through the service into its policy is a caller that
     /// would keep working if the service stopped answering.
     readonly property bool showSource: root.policy.showSource(root.sourceMuted)
-    readonly property string readable: root.policy.readable(root.volume, root.muted)
 
     // --- setting it ----------------------------------------------------------
 

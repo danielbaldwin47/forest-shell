@@ -4,7 +4,7 @@ pragma Singleton
 // what a BlueZ adapter is.
 //
 //     Bluetooth.present         // does this machine have a radio at all
-//     Bluetooth.enabled         // is it on — writable via setEnabled()
+//     Bluetooth.enabled         // is it on
 //     Bluetooth.connectedCount  // how many devices are on the other end
 //     Bluetooth.icon
 //
@@ -56,23 +56,15 @@ Singleton {
     readonly property int connectedCount: root.enabled ? root.policy.connectedCount(root.devices) : 0
 
     readonly property string icon: root.policy.icon(root.enabled, root.connectedCount, root.discovering)
-    readonly property string emphasis: root.policy.emphasis(root.enabled, root.connectedCount)
     readonly property string label: root.policy.label(root.enabled, root.connectedCount)
 
-    /// Turn the radio on or off. A function rather than a writable property, so
-    /// the read stays a live binding — see Networking.qml for what assigning to
-    /// a bound property costs.
-    function setEnabled(enabled: bool) {
-        if (!root.present) {
-            Logger.warn("bluetooth", "no adapter — ignoring enable " + enabled);
-            return;
-        }
-        root.adapter.enabled = enabled;
-    }
+    // Read-only, like the network facade next door and for the same reason:
+    // pairing and the radio toggle are the control centre's (#44), and a setter
+    // with no caller is one nobody has ever run.
 
     // A line per state change worth asserting on (#81).
     onEnabledChanged: Logger.log("bluetooth", "radio " + (root.enabled ? "on" : "off"))
-    onConnectedCountChanged: Logger.log("bluetooth", root.connectedCount + " device(s) connected")
+    onConnectedCountChanged: Logger.log("bluetooth", root.label)
 
     Component.onCompleted: Logger.log("bluetooth", root.present
         ? "bluez facade ready — adapter " + root.adapter.name

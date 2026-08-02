@@ -19,6 +19,10 @@
 #   switches   < 5 /s, voluntary + involuntary, from /proc/<pid>/status
 #   frames     one repaint a minute and nothing else — the count and the gaps.
 #              Needs QSG_RENDER_TIMING, which this exports.
+#   startup    first frame ≤ 1.5 s, interactive ≤ 2 s (#22 §4), read off the
+#              same run's log. Here rather than at the second seam because a
+#              nested compositor never presents a frame (#85), so a first-frame
+#              time measured in one is a claim about a frame nobody saw.
 #
 # Idle means idle: do not touch the machine while it runs. A pointer crossing
 # the bar is a hover, a hover is a repaint, and a repaint is the thing being
@@ -145,16 +149,22 @@ cpu_percent=$(python3 -c "print((($end_ticks - $start_ticks) / $ticks_per_second
 switch_rate=$(python3 -c "print(($end_switches - $start_switches) / ($end_time - $start_time))")
 frame_count=$((end_frames - start_frames))
 # The budget is "one repaint a minute" (#22 §5), and two things turn that into
-# a frame count. The shell has two windows per screen — the bar and the
-# background — and Qt renders both when either repaints, so a repaint moment
-# costs two frames. And a minute's worth of slack covers the readings that
-# legitimately change on their own: the battery percentage ticks once every few
-# minutes while discharging, and that repaint is data, not animation.
+# a frame count. The shell has two windows *per screen* — the bar and the
+# background — and Qt renders both when either repaints, so one repaint moment
+# costs two frames per screen; the screen count is read off the log rather than
+# assumed, because a docked laptop has three and would otherwise fail this
+# criterion while sitting perfectly still. And a minute's worth of slack covers
+# the readings that legitimately change on their own: the battery percentage
+# ticks every few minutes while discharging, and that repaint is data rather
+# than animation.
 #
-# Measured on the T480 at 195 s: 9 frames — three clock ticks and one battery
-# tick, doubled. The failure this catches is an order of magnitude away from
-# that: an animation that never settles measures in the hundreds.
-expected_frames=$(python3 -c "import math; print(2 * (math.ceil($SECONDS_WINDOW / 60) + 1))")
+# Measured on the T480, one screen, 195 s: 7-9 frames. The failure this catches
+# is an order of magnitude away from that — an animation that never settles
+# measures in the hundreds.
+screens=$(grep -ac 'bar: content ready on' "$LOG")
+screens=${screens:-1}
+(( screens )) || screens=1
+expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
 
 printf '\n'
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then
@@ -176,6 +186,39 @@ if (( frame_count <= expected_frames )); then
     pass "$frame_count frames in ${SECONDS_WINDOW}s — the clock, and nothing else"
 else
     fail "$frame_count frames in ${SECONDS_WINDOW}s, expected at most $expected_frames"
+fi
+
+# --- the startup gates, from the same run ------------------------------------
+#
+# #22 §4 budgets startup from process launch: the first frame — wallpaper *and*
+# bar — within 1.5 s, and everything reachable within 2 s. Both are read off the
+# log, which is why every line carries the age of the process (Core/Logger.qml).
+#
+# They live here rather than at the second seam because a nested compositor
+# never presents (#85), so "first frame painted" in there is a claim about a
+# frame nobody could see. #36's own criterion is that the gates still hold with
+# five more services in the deferred stage — which is a question about this
+# session, on this machine.
+gate_ms() { sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a "startup: stage $1" | head -1 \
+                | grep -o '+[0-9]*ms' | head -1 | tr -d '+ms'; }
+
+first_frame_ms=$(gate_ms 'first frame painted')
+interactive_ms=$(gate_ms 'interactive')
+
+if [[ -n "$first_frame_ms" ]] && (( first_frame_ms <= 1500 )); then
+    pass "first frame at ${first_frame_ms}ms ≤ 1500ms"
+elif [[ -n "$first_frame_ms" ]]; then
+    fail "first frame at ${first_frame_ms}ms, over the 1500ms gate"
+else
+    fail 'the log never said a first frame was painted'
+fi
+
+if [[ -n "$interactive_ms" ]] && (( interactive_ms <= 2000 )); then
+    pass "interactive at ${interactive_ms}ms ≤ 2000ms"
+elif [[ -n "$interactive_ms" ]]; then
+    fail "interactive at ${interactive_ms}ms, over the 2000ms gate"
+else
+    fail 'the log never said the shell became interactive'
 fi
 
 printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'

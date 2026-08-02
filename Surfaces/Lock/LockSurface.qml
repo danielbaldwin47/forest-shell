@@ -502,12 +502,16 @@ Item {
         StatusItem {
             id: batteryPill
 
-            readonly property bool low: Power.low
-
             visible: !Power.onMains && Power.hasBattery
-            icon: batteryPill.low ? "battery-low" : "battery-medium"
+            // The service's own glyph, not a second opinion about it: a lock
+            // and a bar that drew different batteries for the same charge would
+            // be the disagreement this read was meant to end.
+            icon: Power.icon
             label: Power.label
-            tint: batteryPill.low ? Theme.accentEmber : Theme.textMuted
+            // Ember here and not on the bar: the lock's status strip sits over
+            // the fog wash rather than over a wallpaper, so the colour that
+            // fails the bar's contrast rule passes on this surface.
+            tint: Power.low ? Theme.accentEmber : Theme.textMuted
         }
 
         // The lamplight role: attention, exactly one element at a time (#8).

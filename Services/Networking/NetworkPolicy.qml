@@ -9,12 +9,6 @@ import QtQuick
 QtObject {
     id: policy
 
-    /// The two device kinds the bar can speak for. VPN and the rest of
-    /// NetworkManager's zoo are the control centre's business (#44); a bar
-    /// glyph answers one question, which is whether this machine is on a
-    /// network and how well.
-    readonly property var kinds: ["wired", "wifi"]
-
     /// Signal strength as a whole percent, whichever scale it arrived in.
     ///
     /// NetworkManager reports 0-100 and Quickshell types `signalStrength` as a
@@ -99,10 +93,14 @@ QtObject {
         if (was < 0 || was === now)
             return policy.barGlyphs[now];
 
-        // Rising: the threshold being left behind is the one above the old
-        // bucket. Falling: it is the one above the new bucket. Both are
-        // `barThresholds[min(was, now)]`, widened away from where we are.
-        const boundary = policy.barThresholds[Math.min(was, now)];
+        // The boundary to clear is the one at the edge of the bucket being
+        // *left*: the threshold above it when rising, the one below it when
+        // falling. Taken from `was` and never from `now`, because a signal that
+        // collapses several buckets at once still only has to get out of the
+        // one it is in — reading it off `now` instead asks a 20% signal to fall
+        // below 17 before full bars will admit anything changed.
+        const boundary = now > was ? policy.barThresholds[was]
+                                   : policy.barThresholds[was - 1];
         const moved = now > was ? strength >= boundary + policy.barHysteresis
                                 : strength <= boundary - policy.barHysteresis;
         return policy.barGlyphs[moved ? now : was];
@@ -114,16 +112,6 @@ QtObject {
             if (strength >= threshold)
                 bucket++;
         return bucket;
-    }
-
-    /// How loudly to draw it: "off", "idle" or "connected". A word rather than
-    /// a colour, because this file has no Theme to ask — and because the three
-    /// indicators in the cluster then share one rule for what each state looks
-    /// like instead of three near-identical ones.
-    function emphasis(wifiEnabled: bool, device: var): string {
-        if (device && device.connected)
-            return "connected";
-        return wifiEnabled ? "idle" : "off";
     }
 
     /// The words for a tooltip or the control centre's row (#44). Nothing on

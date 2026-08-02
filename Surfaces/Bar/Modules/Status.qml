@@ -48,7 +48,11 @@ Row {
     // on the bar spends them, and the control centre (#44) will: its rows sit
     // on an opaque surface where a dimmed row is both legible and meaningful.
 
+    // Only where there is a NetworkManager to ask: on a machine running iwd or
+    // systemd-networkd alone the facade is inert, and a permanent `wifi-off`
+    // there would be the same furniture the bluetooth gate below avoids.
     BarIndicator {
+        visible: Networking.available
         icon: Networking.icon
         anchors.verticalCenter: parent.verticalCenter
     }
@@ -74,18 +78,9 @@ Row {
         icon: Audio.icon
         anchors.verticalCenter: parent.verticalCenter
 
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            onClicked: Audio.toggleMute()
-            // `angleDelta.y` is in eighths of a degree; a notch is 120. Sign
-            // only — a high-resolution wheel sends many small deltas and a
-            // volume that moved by the raw value would jump.
-            onWheel: wheel => {
-                if (wheel.angleDelta.y !== 0)
-                    Audio.stepVolume(wheel.angleDelta.y > 0 ? 1 : -1);
-            }
-        }
+        interactive: true
+        onClicked: Audio.toggleMute()
+        onStepped: direction => Audio.stepVolume(direction)
     }
 
     // The mic is the cluster's one surprise, so it is the one thing here drawn
@@ -103,9 +98,7 @@ Row {
         tint: Theme.accentWarm
         anchors.verticalCenter: parent.verticalCenter
 
-        MouseArea {
-            anchors.fill: parent
-            onClicked: Audio.toggleSourceMute()
-        }
+        interactive: true
+        onClicked: Audio.toggleSourceMute()
     }
 }

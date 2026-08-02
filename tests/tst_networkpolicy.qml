@@ -99,8 +99,16 @@ TestCase {
         // Walking out of range is not a boundary wobble: three buckets in one
         // step is a real change, and the deadband must not hold the glyph at
         // full bars because the drop was too large to be a nudge.
+        //
+        // The middle two are the ones that caught the first version, which
+        // measured the deadband from the bucket being *arrived at* rather than
+        // the one being left: a 20% signal then drew full bars, and needed to
+        // fall below 17 before the glyph would admit anything had happened.
+        compare(policy.icon(true, wifi(true, 40), "wifi"), "wifi-low");
+        compare(policy.icon(true, wifi(true, 20), "wifi"), "wifi-zero");
         compare(policy.icon(true, wifi(true, 5), "wifi"), "wifi-zero");
         compare(policy.icon(true, wifi(true, 95), "wifi-zero"), "wifi");
+        compare(policy.icon(true, wifi(true, 60), "wifi-zero"), "wifi-high");
     }
 
     function test_a_connected_wire_has_its_own_glyph() {
@@ -117,16 +125,6 @@ TestCase {
     function test_wifi_that_is_on_but_unconnected_reads_as_no_bars() {
         compare(policy.icon(true, wifi(false, 0)), "wifi-zero");
         compare(policy.icon(true, null), "wifi-zero");
-    }
-
-    function test_emphasis_is_a_word_rather_than_a_colour() {
-        // The policy has no Theme to ask — it names the state and the module
-        // maps it to a role, which is also what keeps the three indicators in
-        // the cluster tinted by the same rule.
-        compare(policy.emphasis(false, wifi(false, 0)), "off");
-        compare(policy.emphasis(true, wifi(false, 0)), "idle");
-        compare(policy.emphasis(true, wifi(true, 50)), "connected");
-        compare(policy.emphasis(true, wired(true)), "connected");
     }
 
     function test_the_label_names_the_network_it_is_on() {

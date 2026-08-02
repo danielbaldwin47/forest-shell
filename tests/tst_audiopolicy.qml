@@ -67,8 +67,4 @@ TestCase {
         compare(policy.sourceIcon(false), "mic");
     }
 
-    function test_the_readout_says_muted_rather_than_a_number() {
-        compare(policy.readable(0.4, false), "40%");
-        compare(policy.readable(0.4, true), "Muted");
-    }
 }

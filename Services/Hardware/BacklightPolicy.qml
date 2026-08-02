@@ -113,10 +113,6 @@ QtObject {
         return device ? "/sys/class/backlight/" + device + "/actual_brightness" : "";
     }
 
-    function maxPath(device: string): string {
-        return device ? "/sys/class/backlight/" + device + "/max_brightness" : "";
-    }
-
     /// A sysfs read, which arrives as text with a trailing newline and can
     /// arrive as nothing at all while the FileView is still catching up.
     function number(text: string): int {

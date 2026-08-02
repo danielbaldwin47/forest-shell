@@ -33,12 +33,6 @@ TestCase {
         compare(policy.icon(false, 0, true), "bluetooth-off");
     }
 
-    function test_emphasis_matches_the_other_indicators() {
-        compare(policy.emphasis(false, 0), "off");
-        compare(policy.emphasis(true, 0), "idle");
-        compare(policy.emphasis(true, 1), "connected");
-    }
-
     function test_the_label_counts_what_is_connected() {
         compare(policy.label(false, 0), "Bluetooth off");
         compare(policy.label(true, 0), "No devices");

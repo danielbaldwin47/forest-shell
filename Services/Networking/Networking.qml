@@ -6,7 +6,7 @@ pragma Singleton
 //     Networking.icon           // the glyph the bar draws
 //     Networking.connected      // is this machine on a network at all
 //     Networking.label          // "PUMPKINCURRY", "Not connected", "Wi-Fi off"
-//     Networking.wifiEnabled    // the radio switch — writable
+//     Networking.wifiEnabled    // the radio switch, read-only until #44
 //     Networking.devices        // [{ kind, connected, name, strength }]
 //
 // Native, and that is newer than most shells assume: `Quickshell.Networking` is
@@ -57,19 +57,15 @@ Singleton {
 
     /// The wifi radio's own switch — airplane mode.
     ///
-    /// Read as a binding and written through a function, rather than shipped as
-    /// a plain writable property: assigning to a property that carries a
-    /// binding *destroys* the binding, so the one call that turned the radio
-    /// off would also be the last time this facade heard about it changing.
+    /// Read-only, and the facade is read-only throughout: nothing in this
+    /// ticket turns a radio on or off, and a setter with no caller is a setter
+    /// nobody has ever run. The toggle belongs to the control centre (#44),
+    /// which will arrive with a caller and a check for it. When it does, the
+    /// write goes through a *function* rather than making this property
+    /// writable — assigning to a property that carries a binding destroys the
+    /// binding, so the one call that turned the radio off would also be the
+    /// last time this facade heard about it changing.
     readonly property bool wifiEnabled: Nm.Networking.wifiEnabled
-
-    function setWifiEnabled(enabled: bool) {
-        if (!root.available) {
-            Logger.warn("network", "no networkmanager — ignoring wifi " + enabled);
-            return;
-        }
-        Nm.Networking.wifiEnabled = enabled;
-    }
 
     /// Every device the bar could speak for, as plain data — which is what lets
     /// the policy next door decide between them without meeting NetworkManager.
@@ -118,7 +114,6 @@ Singleton {
 
     readonly property var primary: root.policy.primary(root.devices)
     readonly property bool connected: root.primary !== null && root.primary.connected === true
-    readonly property string emphasis: root.policy.emphasis(root.wifiEnabled, root.primary)
     readonly property string label: root.policy.label(root.wifiEnabled, root.primary)
 
     /// The glyph — and the one property here that is *not* a binding, because

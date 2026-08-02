@@ -26,16 +26,8 @@ BarIndicator {
     icon: Backlight.percent >= 50 ? "sun" : "sun-dim"
     label: Backlight.percent + "%"
 
-    MouseArea {
-        anchors.fill: parent
-
-        // Sign only, and one policy step per notch: a high-resolution wheel
-        // sends many small deltas, and a brightness that moved by the raw value
-        // would strobe. The facade coalesces the writes underneath, so holding
-        // the wheel down ramps rather than queueing a subprocess per notch.
-        onWheel: wheel => {
-            if (wheel.angleDelta.y !== 0)
-                Backlight.step(wheel.angleDelta.y > 0 ? 1 : -1);
-        }
-    }
+    // One policy step per notch. The facade coalesces the writes underneath, so
+    // spinning the wheel ramps rather than queueing a subprocess per notch.
+    interactive: true
+    onStepped: direction => Backlight.step(direction)
 }

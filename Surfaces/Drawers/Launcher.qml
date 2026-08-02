@@ -66,14 +66,17 @@ FocusScope {
 
     readonly property var provider: root.policy.route(root.query, root.providerSettings)
     readonly property string body: root.policy.bodyOf(root.query, root.providerSettings)
-    readonly property var emptyAnswer: root.policy.empty(root.query, root.providerSettings,
-                                                        Apps.indexed)
+    readonly property var emptyAnswer: Providers.silence(root.query, root.providerSettings,
+                                                         Apps.indexed)
 
     /// Every match, and the slice of it that fits. Both, because the label at
     /// the fold is a count of the difference.
-    readonly property var matches: root.policy.answers(root.query, root.providerSettings)
-                                   ? Apps.rank(root.body)
-                                   : []
+    ///
+    /// Through the dispatcher rather than through `Apps` by name (#40): which
+    /// provider answers is the dispatcher's question, and the delegate below
+    /// renders whatever shape comes back because every provider hands over the
+    /// same one.
+    readonly property var matches: Providers.rows(root.query, root.providerSettings)
     readonly property int maxRows: root.policy.fold(root.height, root.chrome)
     readonly property var rows: root.matches.slice(0, root.maxRows)
     readonly property string hiddenLabel: root.policy.hidden(root.matches.length,
@@ -105,22 +108,42 @@ FocusScope {
     /// The row the keyboard is on. Reset by every change to the query, because
     /// a selection held across a filter is pointing at a different app.
     property int selected: 0
-    onQueryChanged: root.selected = 0
+    onQueryChanged: {
+        root.selected = 0;
+        // The calculator cannot answer from the query alone — it has to spawn
+        // something. Pushed here, once per change, rather than started from
+        // inside the `matches` binding: see `Providers.prime()`.
+        Providers.prime(root.query, root.providerSettings);
+    }
 
     focus: true
 
     // --- what Enter does -----------------------------------------------------
 
     function activate(): void {
-        const entry = root.rows[root.selected];
-        if (!entry) {
+        const row = root.rows[root.selected];
+        if (!row) {
             Logger.log("launcher", root.policy.launchedNothing(root.query));
             return;
         }
-        // Closed first, so the drawer is on its way out while the process
-        // starts rather than after it — the same order the session menu uses.
-        root.closeRequested("launched");
-        Apps.launch(entry);
+
+        // #39 closed the drawer *first*, so it was on its way out while the
+        // process started. That order cannot survive three verbs: `activate()`
+        // returns false for a row that turned out to be stale — an app
+        // uninstalled between the keystroke and the Enter, a descriptor with no
+        // case — and a launcher that vanished without doing anything is worse
+        // than one that stayed put and said so.
+        //
+        // Nothing is lost by the swap, because every verb behind it is
+        // non-blocking: `DesktopEntry.execute()` hands off to the compositor, a
+        // clipboard write is a property assignment, and `SettingsWindow.show()`
+        // activates a `LazyLoader`. The close still happens in the same frame.
+        //
+        // The reason travels with it — `launched`, `emoji`, `actions` — because
+        // a drawer that closed after a copy and one that closed after a launch
+        // look identical afterwards (#81).
+        if (Providers.activate(row))
+            root.closeRequested(row.provider === "apps" ? "launched" : row.provider);
     }
 
     function move(delta: int): void {
@@ -428,6 +451,13 @@ FocusScope {
                             anchors.fill: parent
                             spacing: Theme.space3
 
+                            // The icon slot, and exactly one of three things is
+                            // in it: a real application icon, an emoji, or a
+                            // Lucide glyph. Three items rather than a `Loader`
+                            // per row, for the reason the delegates themselves
+                            // are fixed — a component swapped per keystroke is
+                            // the #75 cost, and two hidden `Item`s are cheaper
+                            // than one created one.
                             Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 22
@@ -439,11 +469,28 @@ FocusScope {
                                     anchors.fill: parent
                                     visible: false
                                     cache: true
-                                    source: row.entry && row.entry.icon
-                                            ? Quickshell.iconPath(row.entry.icon, true)
-                                            : ""
+                                    source: row.entry ? (row.entry.iconSource ?? "") : ""
                                     sourceSize: Qt.size(44, 44)
                                     fillMode: Image.PreserveAspectFit
+                                }
+
+                                // An emoji is drawn as text, at the size the
+                                // application icons are, so a `:` list scans
+                                // down the same column as an app list rather
+                                // than stepping in and out.
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: text.length > 0
+                                    text: row.entry ? (row.entry.glyph ?? "") : ""
+                                    font.family: Theme.fontUi
+                                    font.pointSize: Theme.pt(16)
+                                    // Not dimmed when unselected the way the
+                                    // app icons are: the haze is a desaturation
+                                    // pass, and desaturating the thing the user
+                                    // is choosing *by its colour* is the one
+                                    // place #11 §4's atmospheric perspective
+                                    // would work against the row.
+                                    opacity: 1.0
                                 }
 
                                 // Unselected rows sit in the haze (#11 §4).
@@ -460,9 +507,11 @@ FocusScope {
                                     opacity: row.active || !Theme.drawDecoration ? 1.0 : 0.72
                                 }
 
-                                // The affordance for an app whose icon the
-                                // theme has nothing for. Rendering nothing
-                                // would leave the title hanging off a gap.
+                                // The Lucide glyph: a provider's own icon on a
+                                // calculator or action row, and the affordance
+                                // for an app whose icon the theme has nothing
+                                // for. Rendering nothing would leave the title
+                                // hanging off a gap.
                                 //
                                 // It does *not* warm to amber when selected,
                                 // even though it is a Lucide glyph and #11 §4
@@ -473,11 +522,17 @@ FocusScope {
                                 // where the selected row is sometimes amber and
                                 // sometimes not — depending on whether the icon
                                 // theme happened to have that app — is the
-                                // encoding coming apart.
+                                // encoding coming apart. The `/` and `=` rows
+                                // are held to the same rule rather than given
+                                // their own, because a launcher whose selection
+                                // colour depends on which provider you are in
+                                // teaches the encoding twice.
                                 Icon {
                                     anchors.centerIn: parent
                                     visible: appIcon.status !== Image.Ready
-                                    name: "box"
+                                             && (row.entry?.glyph ?? "") === ""
+                                    name: row.entry && row.entry.icon !== ""
+                                          ? row.entry.icon : "box"
                                     size: 19
                                     color: row.active ? Theme.textPrimary : Theme.textSecondary
                                 }
@@ -491,7 +546,7 @@ FocusScope {
                                 Text {
                                     width: parent.width
                                     elide: Text.ElideRight
-                                    text: row.entry ? row.entry.name : ""
+                                    text: row.entry ? row.entry.title : ""
                                     color: row.active ? Theme.textPrimary : Theme.textSecondary
                                     font.family: Theme.fontUi
                                     font.pointSize: Theme.pt(14.5)
@@ -506,9 +561,7 @@ FocusScope {
                                     width: parent.width
                                     elide: Text.ElideRight
                                     visible: text.length > 0
-                                    text: row.entry
-                                          ? (row.entry.genericName || row.entry.comment || "")
-                                          : ""
+                                    text: row.entry ? row.entry.subtitle : ""
                                     color: Theme.textSecondary
                                     font.family: Theme.fontUi
                                     font.pointSize: Theme.pt(12)
@@ -518,11 +571,20 @@ FocusScope {
                             // On every row, which is #11 §7's decision — the
                             // quieter selected-only variant was the one it
                             // turned down.
+                            //
+                            // Off the *row* rather than off the routed
+                            // provider (#40). They agree today — one query is
+                            // in one provider — and they will not the first
+                            // time a query returns rows from two, which is
+                            // what the `?` provider's "the app I meant, and
+                            // the answer" shape wants (#41). A label derived
+                            // from the route would then say the same word on
+                            // every row of a mixed list.
                             Text {
                                 id: categoryLabel
 
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: root.provider.category.toUpperCase()
+                                text: row.entry ? String(row.entry.category).toUpperCase() : ""
                                 color: Theme.textSecondary
                                 font.family: Theme.fontUi
                                 font.pointSize: Theme.pt(Theme.capsSize)

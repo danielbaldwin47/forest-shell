@@ -93,16 +93,51 @@ TestCase {
 
     // --- what has landed -----------------------------------------------------
 
-    function test_only_the_apps_provider_has_landed() {
-        compare(policy.route("", testCase.allOn).landed, true);
-        compare(policy.unavailable(policy.route("", testCase.allOn)), "");
+    function test_four_providers_have_landed() {
+        // Apps with #39; calculator, emoji and actions with #40.
+        for (const query of ["", "=2+2", ":tree", "/lock"]) {
+            compare(policy.route(query, testCase.allOn).landed, true);
+            compare(policy.unavailable(policy.route(query, testCase.allOn)), "");
+        }
     }
 
     function test_an_unlanded_provider_names_the_ticket_that_lands_it() {
-        compare(policy.unavailable(policy.route("=2+2", testCase.allOn)),
-                "Calculate lands with #40");
+        // The clipboard's owner was `#40` from the day the table was written
+        // and #40 is not the clipboard — #53 is. Not a comment: this string is
+        // what a user typing `;` reads, so a wrong owner sends them to the
+        // wrong ticket.
+        compare(policy.unavailable(policy.route(";", testCase.allOn)),
+                "Clipboard lands with #53");
         compare(policy.unavailable(policy.route("?hello", testCase.allOn)),
                 "Ask Claude lands with #41");
+    }
+
+    // --- routing without a prefix --------------------------------------------
+
+    function test_a_leading_digit_is_the_calculator_without_saying_so() {
+        compare(policy.route("12 * 60 * 24", testCase.allOn).id, "calculator");
+        compare(policy.impliedId("2+2", testCase.allOn), "calculator");
+        // No prefix was typed, so there is none to strip.
+        compare(policy.bodyOf("2+2", testCase.allOn), "2+2");
+    }
+
+    function test_anything_else_bare_is_still_the_apps_provider() {
+        compare(policy.route("fire", testCase.allOn).id, "apps");
+        compare(policy.impliedId("fire", testCase.allOn), "");
+        compare(policy.impliedId("", testCase.allOn), "");
+        // The two an implicit route would have to be right about and is not.
+        compare(policy.route("(3+4)*2", testCase.allOn).id, "apps");
+        compare(policy.route("-5", testCase.allOn).id, "apps");
+    }
+
+    function test_a_calculator_switched_off_does_not_swallow_a_bare_query() {
+        // The same rule `prefixOf` follows for a disabled prefix: a provider
+        // that is off claims nothing, so the query falls through to apps.
+        const noCalculator = { apps: true, calculator: false, clipboard: true,
+                               emoji: true, actions: true, claude: true };
+        compare(policy.impliedId("2048", noCalculator), "");
+        compare(policy.route("2048", noCalculator).id, "apps");
+        compare(policy.answers("2048", noCalculator), true);
     }
 
     // --- fuzzy matching ------------------------------------------------------
@@ -346,8 +381,15 @@ TestCase {
     }
 
     function test_a_provider_that_has_not_landed_does_not_answer() {
-        compare(policy.answers("=2+2", testCase.allOn), false);
+        compare(policy.answers(";", testCase.allOn), false);
         compare(policy.answers("?hello", testCase.allOn), false);
+    }
+
+    function test_the_providers_that_landed_with_this_ticket_answer() {
+        compare(policy.answers("=2+2", testCase.allOn), true);
+        compare(policy.answers(":tree", testCase.allOn), true);
+        compare(policy.answers("/lock", testCase.allOn), true);
+        compare(policy.answers("2+2", testCase.allOn), true);
     }
 
     function test_switching_apps_off_actually_switches_apps_off() {
@@ -359,33 +401,82 @@ TestCase {
         compare(policy.answers("fire", noApps), false);
         compare(policy.answers("", noApps), false);
         // ...and it says so rather than showing an empty list.
-        compare(policy.empty("fire", noApps, true).text, "Apps is switched off");
+        compare(policy.empty("fire", noApps, true, null).text, "Apps is switched off");
     }
 
     // --- the empty state -----------------------------------------------------
 
-    function test_the_four_silences_are_told_apart() {
-        // #81's lesson on a surface: one picture for four causes is how a bug
+    function test_the_five_silences_are_told_apart() {
+        // #81's lesson on a surface: one picture for five causes is how a bug
         // gets two candidate explanations.
-        compare(policy.empty("=2+2", testCase.allOn, true).text,
-                "Calculate lands with #40");
-        compare(policy.empty("fire", testCase.allOn, false).text,
+        compare(policy.empty(";", testCase.allOn, true, null).text,
+                "Clipboard lands with #53");
+        compare(policy.empty("fire", testCase.allOn, false, null).text,
                 "Looking for applications…");
-        compare(policy.empty("fire", testCase.allOn, true).text, "No matches");
-        compare(policy.empty("", testCase.allOn, true).text, "No applications found");
+        compare(policy.empty("fire", testCase.allOn, true, null).text, "No matches");
+        compare(policy.empty("", testCase.allOn, true, null).text,
+                "No applications found");
+        // The fifth: the routed provider had something of its own to say.
+        compare(policy.empty("=2+", testCase.allOn, true,
+                             { icon: "loader", text: "Working…" }).text, "Working…");
+    }
+
+    function test_a_provider_note_outranks_no_matches_but_not_the_provider_itself() {
+        const note = { icon: "loader", text: "Working…" };
+        // Switched off and not landed are facts about the provider; a note is
+        // the provider talking, and it cannot talk if it is not there.
+        const noCalculator = { apps: true, calculator: false, clipboard: true,
+                               emoji: true, actions: true, claude: true };
+        compare(policy.empty(";", testCase.allOn, true, note).text,
+                "Clipboard lands with #53");
+        // With the calculator off, `=2+2` is not the calculator at all — it
+        // falls through to apps, which is where the note stops applying.
+        compare(policy.empty("=2+2", noCalculator, true, null).text, "No matches");
+    }
+
+    function test_a_non_apps_provider_is_never_waiting_on_the_apps_scan() {
+        // `indexed` is a fact about the desktop-entry model. An emoji query
+        // answering "Looking for applications…" would be the launcher blaming
+        // a scan the query does not depend on.
+        compare(policy.empty(":zzzz", testCase.allOn, false, null).text, "No matches");
     }
 
     function test_every_silence_brings_an_icon() {
         const cases = [
-            policy.empty("=2+2", testCase.allOn, true),
-            policy.empty("fire", testCase.allOn, false),
-            policy.empty("fire", testCase.allOn, true),
-            policy.empty("", testCase.allOn, true)
+            policy.empty(";", testCase.allOn, true, null),
+            policy.empty("fire", testCase.allOn, false, null),
+            policy.empty("fire", testCase.allOn, true, null),
+            policy.empty("", testCase.allOn, true, null),
+            policy.empty(":zzzz", testCase.allOn, true, null)
         ];
         for (const answer of cases) {
             verify(answer.icon.length > 0);
             verify(answer.text.length > 0);
         }
+    }
+
+    // --- the row shape -------------------------------------------------------
+
+    function test_a_desktop_entry_becomes_a_row() {
+        const row = policy.appRow(testCase.entries[0]);
+        compare(row.provider, "apps");
+        compare(row.id, "app:firefox");
+        compare(row.title, "Firefox");
+        compare(row.subtitle, "Web Browser");
+        compare(row.entryId, "firefox");
+        compare(row.category, "App");
+        // The icon *path* is not here: resolving one is `Quickshell.iconPath`,
+        // which is the far side of the line.
+        compare(row.iconSource, "");
+        compare(row.copy, "");
+        compare(row.run, null);
+    }
+
+    function test_a_row_with_no_generic_name_falls_back_to_the_comment() {
+        compare(policy.appRow({ id: "x", name: "X", comment: "Does a thing" }).subtitle,
+                "Does a thing");
+        compare(policy.appRow({ id: "x", name: "X" }).subtitle, "");
+        compare(policy.appRow(null), null);
     }
 
     // --- what the log says ---------------------------------------------------

@@ -70,6 +70,28 @@ Singleton {
                                 Date.now());
     }
 
+    /// The same ranking, as launcher rows — the shape every provider hands the
+    /// surface (`LauncherPolicy`'s row section).
+    ///
+    /// The mapping is in the policy so `tests/` can check it; the icon *path*
+    /// is added here, because resolving one is `Quickshell.iconPath` and that
+    /// is the whole of what keeps this function on this side of the line. The
+    /// second argument asks for "" rather than a fallback glyph when the theme
+    /// has nothing: the delegate draws its own affordance in that case, and a
+    /// theme's generic placeholder would look like an icon the app chose.
+    ///
+    /// `rank()` stays beside it rather than being folded in. It is what
+    /// launcher-harness.qml asks over IPC — ids in order, with nothing between
+    /// the ranking and the assertion — and a harness that had to unwrap a row
+    /// to check an order would be testing the wrapper.
+    function rows(query: string): var {
+        return root.rank(query).map(entry => {
+            const row = root.policy.appRow(entry);
+            row.iconSource = entry.icon ? Quickshell.iconPath(entry.icon, true) : "";
+            return row;
+        });
+    }
+
     // --- launching -----------------------------------------------------------
 
     /// Run an entry and remember it.

@@ -48,14 +48,18 @@ QtObject {
           category: "App", placeholder: "Search", landed: true, owner: "#39" },
         { prefix: "=", id: "calculator", name: "Calculate",
           icon: "calculator", category: "Calculator", placeholder: "12 * 60 * 24",
-          landed: false, owner: "#40" },
+          landed: true, owner: "#40" },
+        // Clipboard *history* is #53, not #40 — #40 is the three providers
+        // below it. The owner was wrong here from the day the table was
+        // written, and it is not a comment: `unavailable()` puts it on screen,
+        // so a user typing `;` was being sent to the wrong ticket.
         { prefix: ";", id: "clipboard", name: "Clipboard",
           icon: "clipboard-list", category: "Clipboard", placeholder: "Search clipboard",
-          landed: false, owner: "#40" },
+          landed: false, owner: "#53" },
         { prefix: ":", id: "emoji", name: "Emoji", icon: "smile",
-          category: "Emoji", placeholder: "Search emoji", landed: false, owner: "#40" },
+          category: "Emoji", placeholder: "Search emoji", landed: true, owner: "#40" },
         { prefix: "/", id: "actions", name: "Actions", icon: "command",
-          category: "Action", placeholder: "Run an action", landed: false, owner: "#40" },
+          category: "Action", placeholder: "Run an action", landed: true, owner: "#40" },
         { prefix: "?", id: "claude", name: "Ask Claude", icon: "sparkles",
           category: "Claude", placeholder: "Ask anything", landed: false, owner: "#41" }
     ]
@@ -105,10 +109,35 @@ QtObject {
         return prefix === "" ? text : text.slice(1).replace(/^ /, "");
     }
 
+    /// The provider a query reaches with no prefix in front of it, or `""` for
+    /// apps. One rule today: a query that opens with a digit is a sum (#40).
+    ///
+    /// This is the only place in the launcher where a provider is reached
+    /// without the user naming it, so it is deliberately a table of one. `=` is
+    /// still there for `(3+4)*2` and for `2048` when 2048 is the game — an
+    /// implicit route has to be right nearly always, and "a leading digit means
+    /// arithmetic" is, where "a leading bracket does" would not be.
+    ///
+    /// Gated on `enabled` and on `landed` for the same reason `prefixOf` gates
+    /// its own: a calculator switched off in the settings must not swallow a
+    /// query the apps provider would have answered.
+    function impliedId(query: string, settings: var): string {
+        if (!/^[0-9]/.test(String(query ?? "")))
+            return "";
+        const calculator = policy.providers.find(entry => entry.id === "calculator");
+        return calculator && calculator.landed && policy.enabled(calculator, settings)
+            ? "calculator" : "";
+    }
+
     /// The provider a query routes to. Never null: apps is the fallback, which
     /// is what makes the empty prefix the default rather than a special case.
     function route(query: string, settings: var): var {
         const prefix = policy.prefixOf(query, settings);
+        if (prefix === "") {
+            const implied = policy.impliedId(query, settings);
+            if (implied !== "")
+                return policy.providers.find(entry => entry.id === implied);
+        }
         return policy.providers.find(entry => entry.prefix === prefix)
             ?? policy.providers[0];
     }
@@ -294,6 +323,53 @@ QtObject {
         return scored.map(row => row.entry);
     }
 
+    // --- the row -------------------------------------------------------------
+    //
+    // Every provider hands the surface the same object, and this is it:
+    //
+    //     provider    which provider made it — what activation switches on
+    //     id          unique within the list, and the delegate's identity
+    //     title       the line the eye lands on
+    //     subtitle    the quieter line under it, or ""
+    //     icon        a Lucide glyph name, or ""
+    //     glyph       literal text drawn in the icon slot (an emoji), or ""
+    //     iconSource  an image path (a real application icon), or ""
+    //     category    the label at the right-hand end of the row
+    //     copy        what Enter puts on the clipboard, or ""
+    //     entryId     the desktop-entry id, for the apps provider
+    //     run         an action descriptor, for the actions provider
+    //
+    // One shape and not four, because the delegate is built once at the fold
+    // count and survives every keystroke (Surfaces/Drawers/Launcher.qml): a row
+    // whose *shape* changed with the provider would need a Loader per row and a
+    // component swap per keystroke, which is the #75 cost the launcher was
+    // built to avoid. The three icon fields are the price — exactly one is
+    // ever set — and they are cheap because they are strings the delegate
+    // binds to rather than items it creates.
+
+    /// A desktop entry as a row. Pure, so `tests/` can check the mapping; the
+    /// icon *path* is not here, because resolving one is `Quickshell.iconPath`
+    /// and that is the far side of the line — Apps.qml adds it.
+    function appRow(entry: var): var {
+        if (!entry)
+            return null;
+        return {
+            provider: "apps",
+            id: "app:" + entry.id,
+            title: String(entry.name ?? ""),
+            subtitle: String(entry.genericName || entry.comment || ""),
+            // The affordance for an app the icon theme has nothing for. It does
+            // *not* warm to amber when selected — see the delegate's own note.
+            icon: "box",
+            glyph: "",
+            iconSource: "",
+            category: "App",
+            copy: "",
+            entryId: String(entry.id ?? ""),
+            run: null
+        };
+    }
+
     // --- geometry ------------------------------------------------------------
     //
     // The clearing, as measured in #11 §6: horizon at 32% of screen height, a
@@ -333,18 +409,34 @@ QtObject {
     /// What the launcher shows when it has no rows — an icon and a line, as one
     /// answer rather than two cascades that can disagree.
     ///
-    /// Four silences, and they are not the same news: a provider that has been
-    /// switched off, one that has not landed, a scan that has not finished, and
-    /// a query that genuinely matched nothing. #81 is the ticket about a
-    /// failure with two candidate causes; showing "No matches" for all four is
-    /// how that happens on a surface.
-    function empty(query: string, settings: var, indexed: bool): var {
+    /// Five silences now, and they are not the same news: a provider that has
+    /// been switched off, one that has not landed, one with something of its
+    /// own to say, a scan that has not finished, and a query that genuinely
+    /// matched nothing. #81 is the ticket about a failure with two candidate
+    /// causes; showing "No matches" for all five is how that happens on a
+    /// surface.
+    ///
+    /// `note` is the routed provider's own silence — `qalc` missing, an emoji
+    /// query that matched nothing — or null when it has none. It is passed in
+    /// rather than looked up because the providers that produce one need
+    /// Quickshell to know it, and this file must not; Services/Launcher/
+    /// Providers.qml is what asks them and hands the answer down.
+    ///
+    /// It sits *after* the two questions about the provider itself and before
+    /// the two about the apps scan, which is the order of scope: a provider
+    /// switched off has nothing to say, and a provider that does say something
+    /// is talking about a narrower thing than "no matches".
+    function empty(query: string, settings: var, indexed: bool, note: var): var {
         const provider = policy.route(query, settings);
 
         if (!policy.enabled(provider, settings))
             return { icon: "eye-off", text: provider.name + " is switched off" };
         if (!provider.landed)
             return { icon: "hourglass", text: policy.unavailable(provider) };
+        if (note)
+            return note;
+        if (provider.id !== "apps")
+            return { icon: "circle-slash", text: "No matches" };
         if (!indexed)
             return { icon: "loader", text: "Looking for applications…" };
         return String(query ?? "").length > 0

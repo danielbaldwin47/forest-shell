@@ -101,13 +101,14 @@ ShellRoot {
                     count: SystemTray.count
                 },
                 keyboard: {
-                    device: Compositor.keyboardDevice,
-                    layouts: Compositor.keyboardLayouts,
+                    device: Compositor.keyboard.device,
+                    layouts: Compositor.keyboard.layouts,
                     layout: Compositor.keyboardLayout,
                     switchable: Compositor.keyboardSwitchable
                 },
                 window: {
-                    title: Compositor.activeWindow
+                    title: Compositor.activeWindow,
+                    shown: Compositor.hasActiveWindow
                 }
             });
         }

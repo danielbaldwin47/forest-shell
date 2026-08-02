@@ -34,6 +34,14 @@ QtObject {
     /// `settings` is not here, and that is not an oversight: it is reached as a
     /// QML singleton by everything inside the shell (`SettingsWindow.toggle()`)
     /// because it already exists. This table is for surfaces that do not.
+    ///
+    /// One surface, three spellings, and each answers to a different
+    /// convention: the registry and config key is `controlCenter` (camelCase,
+    /// like every other key in settings.json), the IPC target is
+    /// `controlcenter` (lowercase, matching the surface name — the rule
+    /// SettingsWindow fixed for `settings`, and what a person types into a
+    /// keybind), and the file is `ControlCenterButton.qml` (a QML type). The
+    /// name below is the *bus* name, so it is the lowercase one.
     readonly property var surfaces: ({
         launcher: {
             target: "launcher",

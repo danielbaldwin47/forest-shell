@@ -58,18 +58,28 @@ QtObject {
         return playing ? "pause" : "play";
     }
 
-    /// Whether a player is worth showing at all: it has something to say.
+    /// Whether a player is worth showing at all: it is holding a track, and it
+    /// has something to say about it.
     ///
-    /// `canControl` is deliberately not part of this. A player that cannot be
+    /// **`stopped` is what "nothing plays" means** (#37's criterion). A player
+    /// that is playing or paused is holding something you were listening to and
+    /// can get back to with one click; a stopped one — and a browser tab that
+    /// has registered an MPRIS name and never played anything is stopped — is a
+    /// name on the bus and nothing more. Without this the pill would be
+    /// permanently on the bar saying "Firefox" on any machine with a browser
+    /// open, which is exactly the furniture #9 keeps off the bar.
+    ///
+    /// `canControl` is deliberately *not* part of it. A player that cannot be
     /// paused from here is still the thing that is playing, and the pill's
     /// first job is to say so; the click degrades to a logged no-op.
     function eligible(player: var): bool {
         return player !== undefined && player !== null
+            && player.stopped !== true
             && policy.label(player.title, player.artist, player.identity) !== "";
     }
 
     /// Which player the pill is about — an index into `players`, or -1 for
-    /// none. Each entry is `{ id, playing, title, artist, identity }`.
+    /// none. Each entry is `{ id, playing, stopped, title, artist, identity }`.
     ///
     /// `previousId` is what the pill was showing a moment ago, and it is why
     /// this takes an argument at all: without it, a second player starting up

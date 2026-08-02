@@ -1,7 +1,8 @@
 // What the tray shows and what a click on it means, as pure functions (#37).
 //
-// Split out of Services/System/Tray.qml so tests/ can reach it — the facade
-// next door imports the StatusNotifier client and is unreachable from there.
+// Split out of Services/System/SystemTray.qml so tests/ can reach it — the
+// facade next door imports the StatusNotifier client and is unreachable from
+// there.
 //
 // The tray is the one module whose contents the shell does not choose: an
 // application registers an icon and the bar draws it. So the decisions here are
@@ -29,14 +30,6 @@ QtObject {
     readonly property string passive: "passive"
     readonly property string active: "active"
     readonly property string attention: "attention"
-
-    /// Whether an item belongs on the bar — see the header: everything that
-    /// registered does. The function exists so that the day this stops being
-    /// true (a per-app hide list, say) there is one place for it, and so the
-    /// rule is written down somewhere a test can read it.
-    function showing(status: var): bool {
-        return true;
-    }
 
     /// Whether this item is asking for something. The only status that changes
     /// how the icon is drawn.

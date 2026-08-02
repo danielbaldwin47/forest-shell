@@ -8,7 +8,6 @@ pragma Singleton
 //     Mpris.playing
 //     Mpris.icon            // what a click would do
 //     Mpris.togglePlaying()
-//     Mpris.next() / Mpris.previous()
 //
 // Native — `Quickshell.Services.Mpris` is a real MPRIS client (#4 §2.5), so
 // nothing here shells out to `playerctl` and nothing polls. Every property is a
@@ -55,6 +54,9 @@ Singleton {
             out.push({
                 id: player.dbusName,
                 playing: player.playbackState === Mp.MprisPlaybackState.Playing,
+                // Not `!playing`: paused and stopped are different answers, and
+                // the difference is the whole of "hidden when nothing plays".
+                stopped: player.playbackState === Mp.MprisPlaybackState.Stopped,
                 title: player.trackTitle,
                 artist: player.trackArtist,
                 identity: player.identity
@@ -97,12 +99,15 @@ Singleton {
     readonly property bool showing: root.policy.showing(root.label)
     readonly property string icon: root.policy.icon(root.playing)
 
-    /// Whether the transport calls will do anything. A player that cannot be
-    /// paused from here is still shown — the pill's first job is to say what is
-    /// playing — but the click is a logged no-op rather than a silent one.
+    /// Whether a click will do anything. A player that cannot be paused from
+    /// here is still shown — the pill's first job is to say what is playing —
+    /// but the click is a logged no-op rather than a silent one.
+    ///
+    /// Play/pause is the only transport the shell has a caller for: the pill is
+    /// one click (#37), and skipping a track belongs to the control centre's
+    /// media card (#44), which will want `next`/`previous` and the position
+    /// this facade also deliberately does not read.
     readonly property bool canToggle: root.player !== null && root.player.canTogglePlaying
-    readonly property bool canGoNext: root.player !== null && root.player.canGoNext
-    readonly property bool canGoPrevious: root.player !== null && root.player.canGoPrevious
 
     // --- driving it ----------------------------------------------------------
 
@@ -114,22 +119,6 @@ Singleton {
             return;
         }
         root.player.togglePlaying();
-    }
-
-    function next() {
-        if (!root.canGoNext) {
-            Logger.warn("media", "no player that can skip forward");
-            return;
-        }
-        root.player.next();
-    }
-
-    function previous() {
-        if (!root.canGoPrevious) {
-            Logger.warn("media", "no player that can skip back");
-            return;
-        }
-        root.player.previous();
     }
 
     // --- what a harness reads ------------------------------------------------

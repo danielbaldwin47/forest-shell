@@ -16,6 +16,12 @@ pragma Singleton
 // this ticket's acceptance criterion and the #81 lesson: a button that does
 // nothing quietly is indistinguishable from a button that is broken.
 //
+// **Core and not Services**, though it is a singleton that outlives every
+// caller: it holds no state about the machine and speaks to nothing outside
+// the process. It is the shell's own wiring between two of its surfaces, which
+// is what Core is for — and it is not in Core/ServiceInit.qml for the same
+// reason, since a bus with nothing registered has nothing to start.
+//
 // **This is a name table, not a message queue.** Nothing is buffered: a toggle
 // arriving before the surface registers is dropped with a line in the log, and
 // that is the correct behaviour — a launcher that opened by itself a minute

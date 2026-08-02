@@ -8,17 +8,6 @@ TestCase {
 
     TrayPolicy { id: policy }
 
-    function test_everything_registered_is_shown() {
-        // The SNI `Passive` status means "hide me if space is tight", and
-        // honouring it loses icons from the many applications that report
-        // Passive and never change it. A tray that silently drops an icon is
-        // indistinguishable from a tray that is broken.
-        verify(policy.showing(policy.passive));
-        verify(policy.showing(policy.active));
-        verify(policy.showing(policy.attention));
-        verify(policy.showing("something a future spec adds"));
-    }
-
     function test_attention_is_the_one_status_that_changes_the_icon() {
         verify(policy.attentive(policy.attention));
         verify(!policy.attentive(policy.active));

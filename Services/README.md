@@ -25,8 +25,9 @@ A third rule, added by #36, because two of these services collide by name with
 the upstream module they wrap:
 
 - **A facade that shadows an upstream singleton imports it under an alias.**
-  `Quickshell.Networking` and `Quickshell.Bluetooth` each export a singleton
-  named after the module, and so do we. Inside `Networking.qml` and
+  `Quickshell.Networking`, `Quickshell.Bluetooth`, `Quickshell.Services.Mpris`
+  and `Quickshell.Services.SystemTray` each export a singleton named after the
+  module, and so do we — `Nm.`, `Bz.`, `Mp.` and `Sni.` respectively. Inside `Networking.qml` and
   `Bluetooth.qml`, `Nm.` and `Bz.` mean upstream's; everywhere else in the
   shell the unqualified name means the facade. Two types with one name is the
   failure mode Core/Config.qml documents for a singleton called `State` — no

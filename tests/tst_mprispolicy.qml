@@ -74,6 +74,28 @@ TestCase {
         compare(policy.pick(players, undefined), 0);
     }
 
+    function test_a_stopped_player_is_not_playing_anything() {
+        // The ticket's criterion, and the case that decides it: a browser that
+        // has registered an MPRIS name and never played is *stopped*, and it
+        // reports an identity and often a title. Reading only the label would
+        // put a permanent "Firefox" on the bar of every machine with a browser
+        // open — the furniture #9 keeps off it.
+        const stopped = [
+            { id: "a", playing: false, stopped: true,
+              title: "", artist: "", identity: "Firefox" }
+        ];
+        compare(policy.pick(stopped, undefined), -1);
+        compare(policy.pick(stopped, "a"), -1);
+        verify(!policy.eligible(stopped[0]));
+
+        // Paused is not stopped: it is the thing you were listening to, one
+        // click from playing again.
+        const paused = { id: "b", playing: false, stopped: false,
+                         title: "Reckoner", artist: "", identity: "Spotify" };
+        verify(policy.eligible(paused));
+        compare(policy.pick([stopped[0], paused], undefined), 1);
+    }
+
     function test_a_player_with_nothing_to_say_is_not_the_pill() {
         const players = [
             { id: "a", playing: true, title: "", artist: "", identity: "" },

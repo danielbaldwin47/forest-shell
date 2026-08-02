@@ -557,6 +557,25 @@ elif [[ "$showing" == "true" && "$(snapshot_field "$snapshot" media.label)" == *
         nested_fail "play/pause left the player at playing=$now_playing icon=$now_icon"
     fi
     ipc playPause > /dev/null
+
+    # "Hidden when nothing plays" (#37), against the case that decides it: a
+    # player that stops keeps its name and its metadata on the bus, so a pill
+    # that read only the track would stay on the bar forever.
+    busctl --user call org.mpris.MediaPlayer2.foresttest /org/mpris/MediaPlayer2 \
+        org.mpris.MediaPlayer2.Player Stop > /dev/null 2>&1
+    stopped_showing="true"
+    for _ in $(seq 1 25); do
+        stopped_showing=$(snapshot_field "$(ipc snapshot)" media.showing)
+        [[ "$stopped_showing" == "false" ]] && break
+        sleep 0.2
+    done
+    if [[ "$stopped_showing" == "false" ]]; then
+        nested_pass 'a player that stops takes the pill off the bar, name still on the bus'
+    else
+        nested_fail 'the player stopped and the pill stayed on the bar'
+    fi
+    busctl --user call org.mpris.MediaPlayer2.foresttest /org/mpris/MediaPlayer2 \
+        org.mpris.MediaPlayer2.Player Play > /dev/null 2>&1
 else
     nested_fail "a player is on the bus and the pill says showing=$showing players=$players"
 fi

@@ -24,6 +24,13 @@ QtObject {
 
     /// Whitespace-normalised: a title is whatever the application wrote, and
     /// some write tabs and newlines into it.
+    ///
+    /// The same four lines as `MprisPolicy.clean`, and deliberately not
+    /// shared: a policy imports nothing but QtQuick so `tests/` can load it
+    /// from a directory (CLAUDE.md, seam 1), and a common home for this would
+    /// have to be reached by a relative import out of one service domain and
+    /// into another. Two copies of a whitespace rule is the cheaper of the two
+    /// prices — the third copy is when that stops being true.
     function clean(text: var): string {
         if (text === undefined || text === null)
             return "";

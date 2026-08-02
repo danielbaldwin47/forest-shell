@@ -54,8 +54,6 @@ Row {
             implicitHeight: 16
             anchors.verticalCenter: parent.verticalCenter
 
-            visible: SystemTray.policy.showing(SystemTray.status(entry.modelData))
-
             IconImage {
                 anchors.fill: parent
                 // A URL Quickshell's own image provider serves, whether the

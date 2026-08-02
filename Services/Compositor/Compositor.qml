@@ -153,15 +153,26 @@ Singleton {
     /// would answer the same question compositor-agnostically: this is the
     /// Hyprland facade, everything else here is already Hyprland's, and the
     /// toplevel it hands back carries the workspace and monitor a later module
-    /// will want. The app id is the one field that is not a property on it —
-    /// Hyprland calls it `class` and only exposes it through the IPC snapshot.
+    /// will want.
+    ///
+    /// The app id comes off `toplevel.wayland` — the Wayland handle for the
+    /// same window — and **not** off `lastIpcObject.class`, which is the
+    /// obvious-looking field and is a trap: that snapshot is only refreshed by
+    /// an explicit `refreshToplevels()`, which nothing here calls, so for any
+    /// window mapped after startup it is empty. The fallback would then be
+    /// dead exactly where it is needed, and the module would hide instead of
+    /// naming the application.
     readonly property string activeWindow: {
         const toplevel = Hyprland.activeToplevel;
         if (!toplevel)
             return "";
-        const snapshot = toplevel.lastIpcObject;
-        return windows.label(toplevel.title, snapshot ? snapshot.class : "");
+        return windows.label(toplevel.title,
+                             toplevel.wayland ? toplevel.wayland.appId : "");
     }
+
+    /// Whether the module belongs on the bar — an empty workspace has no
+    /// focused window and nothing to say about one.
+    readonly property bool hasActiveWindow: windows.showing(root.activeWindow)
 
     // One line per focused window, which is a keypress and not a frame — and
     // the evidence tools/services-harness.sh reads to check the module tracks
@@ -183,28 +194,28 @@ Singleton {
     // keypress — and none at all on a machine with one layout, since the event
     // never fires.
 
-    /// The keyboard Hyprland switches layouts on, by name. Empty until the
-    /// first reply lands, or on a machine the shell could not read.
-    property string keyboardDevice: ""
-
-    /// The configured layout codes, in the order Hyprland cycles them.
-    property var keyboardLayouts: []
-
-    /// Which of them is live.
-    property int keyboardActiveIndex: 0
+    /// What the last `hyprctl devices` reply said, as the policy reads it:
+    /// `{ device, layouts, active }` — the keyboard to switch on, the layout
+    /// codes in the order Hyprland cycles them, and which of them is live.
+    ///
+    /// One property and not three, because it is one answer: three flat
+    /// properties assigned from the same reply can be read a frame apart, and
+    /// a device paired with another read's layouts is a switch aimed at the
+    /// wrong keyboard.
+    property var keyboard: ({ device: "", layouts: [], active: 0 })
 
     /// What the bar shows — "DE" — or "" when there is nothing to show.
     readonly property string keyboardLayout:
-        keys.label(root.keyboardLayouts, root.keyboardActiveIndex)
+        keys.label(root.keyboard.layouts, root.keyboard.active)
 
     /// Whether there is more than one layout to be in. False on the
     /// overwhelmingly common single-layout machine, which is what takes the
     /// module off the bar entirely (#9, and this ticket's own criterion).
-    readonly property bool keyboardSwitchable: keys.showing(root.keyboardLayouts)
+    readonly property bool keyboardSwitchable: keys.showing(root.keyboard.layouts)
 
     onKeyboardLayoutChanged: if (root.keyboardLayout !== "")
         Logger.log("compositor", "keyboard layout " + root.keyboardLayout
-                   + " (" + root.keyboardLayouts.join(",") + ")")
+                   + " (" + root.keyboard.layouts.join(",") + ")")
 
     /// Move to the next layout.
     ///
@@ -229,7 +240,7 @@ Singleton {
             Logger.warn("compositor", "a layout switch is already in flight");
             return;
         }
-        switcher.command = keys.cycleCommand(root.keyboardDevice);
+        switcher.command = keys.cycleCommand(root.keyboard.device);
         switcher.running = true;
         // No optimistic update: the `activelayout` event that follows is what
         // re-reads the devices, so the bar shows what the compositor did rather
@@ -249,7 +260,7 @@ Singleton {
             // when it refuses (#78). A refusal here is silent otherwise: the
             // layout simply does not change, which reads as a dead module.
             Logger.warn("compositor", "hyprland refused a layout switch on "
-                        + root.keyboardDevice + ": "
+                        + root.keyboard.device + ": "
                         + (String(switcherOut.text ?? "").trim()
                            || String(switcherErr.text ?? "").trim() || "no reply"));
         }
@@ -269,6 +280,10 @@ Singleton {
         deviceQuery.running = true;
     }
 
+    /// A refresh that arrived while the last one was still running — a held
+    /// key, or two layout switches in a burst. One is remembered rather than
+    /// queued: the reply is a snapshot of the current state, so any number of
+    /// missed asks are answered by one more read.
     property bool keyboardRefreshPending: false
 
     KeyboardPolicy { id: keys }
@@ -285,10 +300,7 @@ Singleton {
                             "hyprctl devices failed (exit " + exitCode + ") — "
                             + "the keyboard layout module has nothing to show");
             } else {
-                const read = keys.read(deviceOut.text);
-                root.keyboardDevice = read.device;
-                root.keyboardLayouts = read.layouts;
-                root.keyboardActiveIndex = read.active;
+                root.keyboard = keys.read(deviceOut.text);
             }
 
             if (root.keyboardRefreshPending) {

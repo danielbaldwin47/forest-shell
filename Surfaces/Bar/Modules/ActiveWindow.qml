@@ -25,7 +25,7 @@ BarIndicator {
 
     // An empty workspace has no focused window and the module goes with it
     // rather than showing a placeholder — the rule is in ActiveWindowPolicy.
-    shown: Compositor.activeWindow !== ""
+    shown: Compositor.hasActiveWindow
     label: Compositor.activeWindow
     labelMaxWidth: Config.values.bar.windowMaxWidth
 }

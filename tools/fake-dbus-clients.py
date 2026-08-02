@@ -144,6 +144,14 @@ class MprisPlayer(Properties):
         self.announce()
 
     @dbus.service.method("org.mpris.MediaPlayer2.Player")
+    def Stop(self):
+        # The state the bar's "hidden when nothing plays" rule turns on: a
+        # stopped player still holds its name on the bus and its metadata.
+        self.state = "Stopped"
+        self.announce()
+        print("playback Stopped", flush=True)
+
+    @dbus.service.method("org.mpris.MediaPlayer2.Player")
     def Next(self):
         print("next", flush=True)
 

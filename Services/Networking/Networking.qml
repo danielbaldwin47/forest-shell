@@ -359,9 +359,25 @@ Singleton {
     property string lastFailure: ""
     property string lastFailureSsid: ""
 
+    /// The one handler currently attached, and what it is attached to.
+    ///
+    /// One, and that is the whole of why this is a property rather than a
+    /// closure left to look after itself. `connectionFailed` carries a reason
+    /// and no SSID, so the only way to say *which* join failed is to close over
+    /// the name — but a handler that only removes itself when it fires is one
+    /// that stays attached forever after a join that *worked*, and the tenth
+    /// successful join to the same access point would leave ten of them waiting
+    /// to report the eleventh failure ten times over.
+    ///
+    /// So the attachment is single: taking a new one releases the old, and so
+    /// does leaving the panel.
+    property var failureWatch: null
+
     function watchFailure(network: var, ssid: string): void {
+        root.unwatchFailure();
+
         const handler = reason => {
-            network.connectionFailed.disconnect(handler);
+            root.unwatchFailure();
             root.lastFailureSsid = ssid;
             root.lastFailure = root.wifi.failureWords(
                 Nm.ConnectionFailReason.toString(reason));
@@ -369,11 +385,30 @@ Singleton {
                 ssid, Nm.ConnectionFailReason.toString(reason)));
         };
         network.connectionFailed.connect(handler);
+        root.failureWatch = { network: network, handler: handler };
+    }
+
+    function unwatchFailure(): void {
+        if (root.failureWatch === null)
+            return;
+        // The network object can outlive the access point it stands for —
+        // NetworkManager drops one that goes off the air — so this is guarded
+        // rather than trusted.
+        try {
+            root.failureWatch.network.connectionFailed.disconnect(
+                root.failureWatch.handler);
+        } catch (error) {
+            // Already gone. Nothing to release, and nothing worth a line: this
+            // is the ordinary end of an access point that stopped broadcasting.
+        }
+        root.failureWatch = null;
     }
 
     /// Cleared when the user starts over, so a stale "wrong passphrase" does
-    /// not sit under a second attempt at a different network.
+    /// not sit under a second attempt at a different network — and the watch
+    /// goes with it, which is what bounds the attachment to the panel's life.
     function clearFailure(): void {
+        root.unwatchFailure();
         root.lastFailure = "";
         root.lastFailureSsid = "";
     }

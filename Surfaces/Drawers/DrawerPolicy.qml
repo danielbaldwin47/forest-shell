@@ -37,6 +37,7 @@ QtObject {
     /// topology exists to enforce untested for three tickets.
     property var tenants: ["session"]
 
+    /// Whether a drawer exists to be opened at all.
     function known(name: string): bool {
         return policy.tenants.indexOf(name) >= 0;
     }
@@ -50,21 +51,6 @@ QtObject {
         if (!policy.known(requested))
             return current;
         return current === requested ? "" : requested;
-    }
-
-    /// What the motion has to do to get from one state to the other. Named
-    /// rather than derived at the call site because the three cases run
-    /// different choreography (#27): an open animates the scrim and the
-    /// content together, a close reverses it, and a switch leaves the scrim
-    /// alone and crossfades only what is inside it.
-    function transition(from: string, to: string): string {
-        if (from === to)
-            return "none";
-        if (from === "")
-            return "open";
-        if (to === "")
-            return "close";
-        return "switch";
     }
 
     // --- which screen --------------------------------------------------------
@@ -121,11 +107,10 @@ QtObject {
     /// replaces another. #27 variant A: out 140, in 240 beginning at +100 ms,
     /// so the two overlap by about 40 ms and the fog is never briefly empty.
     ///
-    /// Reduced, there is no delay — a delay is a stagger, and rung 3 of the
-    /// ladder has none (Core/EffectsPolicy.qml).
-    function crossfadeDelay(reduced: bool): int {
-        return reduced === true ? 0 : 100;
-    }
+    /// The value only; what `reducedEffects` does to it is `Theme.stagger`,
+    /// because "no stagger anywhere" is a rung of the ladder rather than a fact
+    /// about drawers (Core/EffectsPolicy.qml).
+    readonly property int crossfadeDelayMs: 100
 
     /// What a drawer's contents scale from as they arrive: 1% under, settling
     /// to 1 (#27). Reduced, the entrance is the fade alone, so there is nothing
@@ -133,7 +118,8 @@ QtObject {
     ///
     /// Takes `Theme.animateTransforms` rather than the knob, because a scale is
     /// exactly what that rung governs and reading the knob directly is a rung
-    /// nobody wrote down (Core/Theme.qml).
+    /// nobody wrote down (Core/Theme.qml). One call and no branch at the call
+    /// site: the rung is asked once, here.
     function entryScale(animateTransforms: bool): real {
         return animateTransforms === true ? 0.99 : 1.0;
     }
@@ -145,14 +131,17 @@ QtObject {
     // contract: #81 was a lifecycle with no log line, and one bug then had two
     // candidate causes for a week.
 
+    /// A drawer arrived, and on which screen.
     function opened(name: string, screenName: string): string {
         return name + " opened on " + screenName;
     }
 
+    /// A drawer left, and what sent it away.
     function closed(name: string, reason: string): string {
         return name + " closed (" + (reason ? reason : "request") + ")";
     }
 
+    /// One drawer replaced another without the fog going anywhere.
     function switched(from: string, to: string): string {
         return from + " → " + to;
     }

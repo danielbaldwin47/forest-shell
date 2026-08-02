@@ -4,9 +4,9 @@
 // slot is a thing rather than a `Loader` with a `Behavior` on it: #27's
 // cross-drawer transition (variant A) overlaps an outgoing drawer with an
 // incoming one by about 40 ms, so for that moment both exist and each is
-// running a different duration at a different anchor. Variant B — take one
-// down, then put the other up — was rejected there for popping the compositor
-// blur off and back on in the gap.
+// running a different duration. Variant B — take one down, then put the other
+// up — was rejected there for popping the compositor blur off and back on in
+// the gap.
 //
 // Timings, all from #27:
 //
@@ -19,9 +19,24 @@
 // The entrance is opacity plus a 1% scale settle. The exit is opacity alone,
 // and an entrance interrupted by an exit *freezes* its scale where it got to
 // rather than reversing — #27 says so, and it is also the only reading that
-// does not look like the drawer bouncing. That is why the settle is an explicit
-// animation rather than a `Behavior` on a bound property: a binding would
-// animate the scale back down on the way out.
+// does not look like the drawer bouncing.
+//
+// ## Why the animations are explicit
+//
+// Every property here was a binding with a `Behavior` on it first, and the
+// entrance did not animate at all: **a `Behavior` does not run during component
+// creation**, and a slot is created already `shown` — it exists because its
+// drawer just opened. So the initial binding evaluated straight to 1 and the
+// card appeared at full opacity while the fog behind it faded in over 320 ms.
+// The +100 ms of variant A had the same problem one level down: the incoming
+// slot is a fresh delegate, so the `PauseAnimation` guarding its entrance never
+// ran either and there was no crossfade, only a cut.
+//
+// Explicit animations, started from `enter()` and `leave()`, are what make the
+// first frame of a slot's life the same as every later one. It is also what
+// makes "an interrupted entrance freezes its transform" true rather than
+// aspirational: stopping the entrance leaves the scale where it stood, where a
+// binding would have animated it back down.
 import QtQuick
 import qs.Core
 
@@ -46,32 +61,86 @@ Item {
 
     anchors.fill: parent
 
-    readonly property int enterMs: slot.switching ? Theme.motionStandard : Theme.motionSlow
-    readonly property int exitMs: slot.switching ? Theme.duration(Theme.motionFast)
-                                                 : Theme.exitDuration(Theme.motionSlow)
+    // Both already through the ladder, so a call site never has to remember
+    // which of the two still owes it a `Theme.duration`.
+    readonly property int enterMs: Theme.duration(slot.switching ? Theme.motionStandard
+                                                                 : Theme.motionSlow)
+    readonly property int exitMs: slot.switching
+                                  ? Theme.duration(Theme.motionFast)
+                                  : Theme.exitDuration(Theme.motionSlow)
 
-    /// The +100 ms head start the outgoing drawer gets. Reduced, there is none:
-    /// a delay is a stagger and rung 3 of the ladder has no staggers. Reading
-    /// `Theme.reducedEffects` here is asking the ladder a question — the policy
-    /// function *is* the rung — rather than branching on the knob.
+    /// The head start the outgoing drawer gets. `Theme.stagger` is the rung
+    /// that takes it away under reduced effects; the 100 is the drawer's.
     readonly property int enterDelay: slot.switching
-                                      ? slot.policy.crossfadeDelay(Theme.reducedEffects)
+                                      ? Theme.stagger(slot.policy.crossfadeDelayMs)
                                       : 0
 
-    opacity: slot.shown ? 1 : 0
+    // Arrives invisible and is animated in, rather than bound to `shown` — see
+    // the header for what that cost the first time round.
+    opacity: 0
 
-    Behavior on opacity {
-        SequentialAnimation {
-            PauseAnimation { duration: slot.shown ? slot.enterDelay : 0 }
+    /// Start arriving. Cancels an exit, because a drawer toggled back on while
+    /// it is still fading out is one surface changing its mind, not two.
+    function enter(): void {
+        exit.stop();
+        body.scale = slot.policy.entryScale(Theme.animateTransforms);
+        entrance.restart();
+    }
+
+    /// Start leaving. The entrance is stopped rather than reversed, so an
+    /// interrupted one keeps the scale it reached.
+    function leave(): void {
+        entrance.stop();
+        exit.restart();
+    }
+
+    SequentialAnimation {
+        id: entrance
+
+        PauseAnimation { duration: slot.enterDelay }
+
+        ParallelAnimation {
             NumberAnimation {
-                duration: slot.shown ? Theme.duration(slot.enterMs) : slot.exitMs
+                target: slot
+                property: "opacity"
+                to: 1
+                duration: slot.enterMs
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+
+            // Reduced, `entryScale` already handed back 1, so this animates
+            // nothing — which is rung 3's "the property snaps" arriving as an
+            // absence of movement rather than as a branch here.
+            NumberAnimation {
+                target: body
+                property: "scale"
+                to: 1.0
+                duration: slot.enterMs
                 easing.type: Easing.Bezier
                 easing.bezierCurve: Theme.fogEase
             }
         }
     }
 
-    onOpacityChanged: if (!slot.shown && slot.opacity === 0) slot.retired()
+    NumberAnimation {
+        id: exit
+
+        target: slot
+        property: "opacity"
+        to: 0
+        duration: slot.exitMs
+        easing.type: Easing.Bezier
+        easing.bezierCurve: Theme.fogEase
+
+        onFinished: slot.retired()
+    }
+
+    onShownChanged: slot.shown ? slot.enter() : slot.leave()
+
+    // A slot is created already `shown` — it exists because its drawer just
+    // opened — so `onShownChanged` never fires for the first one.
+    Component.onCompleted: if (slot.shown) slot.enter();
 
     Loader {
         id: body
@@ -93,32 +162,4 @@ Item {
             onCloseRequested: reason => Drawers.close(reason)
         }
     }
-
-    // The 1% settle. Explicit, and only ever run upwards — see the header.
-    NumberAnimation {
-        id: settle
-
-        target: body
-        property: "scale"
-        to: 1.0
-        duration: Theme.duration(slot.enterMs)
-        easing.type: Easing.Bezier
-        easing.bezierCurve: Theme.fogEase
-    }
-
-    function enter(): void {
-        if (!Theme.animateTransforms) {
-            body.scale = 1.0;
-            return;
-        }
-        body.scale = slot.policy.entryScale(true);
-        settle.start();
-    }
-
-    onShownChanged: if (slot.shown) slot.enter();
-
-    // A slot is created already `shown` — it exists because its drawer just
-    // opened — so `onShownChanged` never fires for the first one. Deferred by a
-    // frame so the starting scale is on screen before the settle begins.
-    Component.onCompleted: if (slot.shown) Qt.callLater(slot.enter);
 }

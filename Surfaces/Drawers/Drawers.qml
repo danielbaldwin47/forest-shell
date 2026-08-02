@@ -44,18 +44,21 @@ Singleton {
 
     /// The open drawer's name, or `""`. One value and not a flag per surface,
     /// which is what makes two drawers open at once unrepresentable.
-    readonly property string current: root.openName
+    ///
+    /// Written by `open()` and `close()` below and by nothing else — those two
+    /// are where the log line lives, and a state change that did not go through
+    /// them is one the harness cannot see (#81).
+    property string current: ""
 
     /// The screen it is open on, by name. A name and not a `ShellScreen`, for
     /// the reason Compositor.qml holds the focused screen as one.
-    readonly property string screen: root.openScreen
-
-    property string openName: ""
-    property string openScreen: ""
+    property string screen: ""
 
     /// The window currently drawing the open drawer, which is the window the
     /// grab is held for. Set by DrawerWindow.qml as it opens — see the header
-    /// for why it arrives that way round.
+    /// for why it arrives that way round — and dropped again on close, because
+    /// a per-screen window held past its usefulness is the dangling reference
+    /// the header says this file refuses to have.
     property var grabWindow: null
 
     readonly property var screenNames: Quickshell.screens.map(output => output.name)
@@ -78,30 +81,31 @@ Singleton {
         // A drawer replacing another is #27's cross-drawer transition: the
         // scrim is untouched and only the contents change, so this is one
         // assignment and the window does the choreography.
-        if (root.openName !== "" && root.openName !== name)
-            Logger.log("drawers", root.policy.switched(root.openName, name));
+        if (root.current !== "" && root.current !== name)
+            Logger.log("drawers", root.policy.switched(root.current, name));
         else
             Logger.log("drawers", root.policy.opened(name, target));
 
-        root.openName = name;
-        root.openScreen = target;
+        root.current = name;
+        root.screen = target;
     }
 
     /// `reason` travels into the log because a drawer that was dismissed and
     /// one that was toggled shut look identical afterwards, and the harness has
     /// to tell them apart (#81).
     function close(reason: string): void {
-        if (root.openName === "")
+        if (root.current === "")
             return;
 
-        Logger.log("drawers", root.policy.closed(root.openName, reason));
-        root.openName = "";
-        root.openScreen = "";
+        Logger.log("drawers", root.policy.closed(root.current, reason));
+        root.current = "";
+        root.screen = "";
+        root.grabWindow = null;
     }
 
     function toggle(name: string): void {
-        const next = root.policy.next(root.openName, name);
-        if (next === root.openName)
+        const next = root.policy.next(root.current, name);
+        if (next === root.current)
             return;         // a drawer nobody built; the bus has already said so
         if (next === "")
             close("toggle");
@@ -123,11 +127,12 @@ Singleton {
         windows: root.grabWindow
                  ? [root.grabWindow].concat(FocusGrabWindows.windows)
                  : []
-        active: root.openName !== "" && root.grabWindow !== null
+        active: root.current !== "" && root.grabWindow !== null
 
         // Also fires when the shell drops the grab itself, one assignment after
-        // `close()` has already emptied the state — `close("")` on an already
-        // closed drawer is a no-op, so the second reason never reaches the log.
+        // `close()` has already emptied the state. `close()` on an already
+        // closed drawer returns without logging, so this second, wrong reason
+        // never reaches the log.
         onCleared: root.close("dismissed")
     }
 
@@ -137,9 +142,9 @@ Singleton {
         const before = root.seenScreens;
         root.seenScreens = root.screenNames.slice();
 
-        if (root.openName === "")
+        if (root.current === "")
             return;
-        if (!root.policy.survivesScreenChange(root.openScreen, before, root.screenNames))
+        if (!root.policy.survivesScreenChange(root.screen, before, root.screenNames))
             root.close("monitor change");
     }
 
@@ -199,7 +204,7 @@ Singleton {
         function open(): void { root.open("session"); }
         function close(): void { root.close("ipc"); }
         function toggle(): void { root.toggle("session"); }
-        function isOpen(): bool { return root.openName === "session"; }
+        function isOpen(): bool { return root.current === "session"; }
     }
 
     Component.onCompleted: {

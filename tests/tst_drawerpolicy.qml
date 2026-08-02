@@ -45,14 +45,6 @@ TestCase {
         compare(policy.next("", "dashboard"), "");
     }
 
-    function test_the_transition_names_what_the_motion_has_to_do() {
-        compare(policy.transition("", "session"), "open");
-        compare(policy.transition("session", ""), "close");
-        compare(policy.transition("session", "launcher"), "switch");
-        compare(policy.transition("session", "session"), "none");
-        compare(policy.transition("", ""), "none");
-    }
-
     // --- which screen --------------------------------------------------------
 
     function test_a_drawer_opens_on_the_focused_screen() {
@@ -98,16 +90,10 @@ TestCase {
     function test_the_cross_drawer_swap_starts_the_entrance_late() {
         // #27 variant A: out 140, in 240 starting at +100ms — about 40ms of
         // overlap, which is what keeps the fog from reading as empty between
-        // two drawers.
-        compare(policy.crossfadeDelay(false), 100);
-    }
-
-    function test_reduced_effects_takes_the_overlap_out() {
-        // "All motion collapses to opacity-only 140 crossfades" (#27) — a
-        // delay is a stagger, and the ladder's rung 3 has none of those. The
-        // durations either side of this are Theme's (Core/EffectsPolicy.qml);
-        // the delay is the one timing this file owns.
-        compare(policy.crossfadeDelay(true), 0);
+        // two drawers. What `reducedEffects` does to it is the ladder's
+        // (`Theme.stagger`, checked in tests/tst_effectspolicy.qml); the value
+        // is the one timing this file owns.
+        compare(policy.crossfadeDelayMs, 100);
     }
 
     function test_the_entrance_settles_one_percent_and_only_when_transforms_run() {

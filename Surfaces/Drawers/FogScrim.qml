@@ -58,7 +58,7 @@ Item {
 
     Image {
         anchors.fill: parent
-        opacity: 0.03
+        opacity: Theme.fogGrain
         source: Qt.resolvedUrl("../../assets/noise.png")
         fillMode: Image.Tile
     }

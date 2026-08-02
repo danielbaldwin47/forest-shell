@@ -101,10 +101,15 @@ Variants {
                 // grants the shell exactly one translate animation, and this is
                 // it. Entrances and exits are the card's own business, so there
                 // is no `add` transition here to fight them.
+                //
+                // Being the shell's one translate makes it the clearest thing
+                // reduced effects takes away: the cards below a dismissed one
+                // arrive at their new place rather than travelling to it (#69).
                 move: Transition {
+                    enabled: Theme.animateTransforms
                     NumberAnimation {
                         properties: "y"
-                        duration: Theme.motionFast
+                        duration: Theme.duration(Theme.motionFast)
                         easing.type: Easing.Bezier
                         easing.bezierCurve: Theme.fogEase
                     }

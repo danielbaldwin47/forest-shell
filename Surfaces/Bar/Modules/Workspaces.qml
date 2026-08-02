@@ -31,7 +31,6 @@ Ridgeline {
     id: root
 
     readonly property var settings: Config.values.bar.ridgeline
-    readonly property bool reduced: Config.values.appearance.reducedEffects
 
     cells: slots.row(Compositor.workspaces, root.settings.slots)
 
@@ -52,10 +51,12 @@ Ridgeline {
 
     // One surface changing in place, so the standard step (#27). Reduced
     // effects collapses it to an opacity-only fade at the fastest step, which
-    // is the bottom of the degrade ladder (#22 §7).
-    motionMs: reduced ? Theme.motionFast : Theme.motionStandard
+    // is the bottom of the degrade ladder (#22 §7, #69) — the widget takes the
+    // two halves of that as properties because it is dumb by contract and has
+    // no Theme to ask.
+    motionMs: Theme.duration(Theme.motionStandard)
     easingCurve: Theme.fogEase
-    animateExtent: !reduced
+    animateExtent: Theme.animateTransforms
 
     onCellActivated: id => Compositor.focusWorkspace(id)
 

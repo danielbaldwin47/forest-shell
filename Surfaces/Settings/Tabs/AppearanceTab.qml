@@ -1,4 +1,5 @@
-// Appearance — theming mode, dark/light, palette overrides (#54).
+// Appearance — theming mode, dark/light, reduced effects, palette overrides
+// (#54).
 //
 // The three theming modes are all listed and only one is selectable: fixed
 // forest is what the shell does today, and the constrained accent (#58) and the
@@ -55,6 +56,20 @@ TabPage {
         ConfigBinding { id: darkBinding; path: "appearance.darkMode" }
 
         SettingSwitch { binding: darkBinding }
+    }
+
+    SectionHeader { text: "Effects" }
+
+    SettingRow {
+        label: "Reduced effects"
+        hint: "The one degrade knob, in cost order: no compositor blur, no decorative "
+              + "effects, and every transition becomes a 140 ms fade with nothing moving. "
+              + "A supported look, not a stripped one."
+        binding: reducedBinding
+
+        ConfigBinding { id: reducedBinding; path: "appearance.reducedEffects" }
+
+        SettingSwitch { binding: reducedBinding }
     }
 
     SectionHeader { text: "Palette overrides" }

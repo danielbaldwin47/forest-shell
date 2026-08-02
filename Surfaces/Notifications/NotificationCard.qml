@@ -100,21 +100,24 @@ Rectangle {
 
     opacity: card.settled && !card.toast.leaving ? 1 : 0
     // Deliberately not tied to `leaving`: the exit is opacity-only (#27), so
-    // the scale settle happens on the way in and then stays put.
-    scale: card.settled ? 1 : 0.99
+    // the scale settle happens on the way in and then stays put. Reduced
+    // effects drops the settle outright — the card arrives at full size and
+    // only fades, which is rung 3 (#69).
+    scale: card.settled || !Theme.animateTransforms ? 1 : 0.99
 
     Behavior on opacity {
         NumberAnimation {
             duration: card.toast.leaving ? Theme.exitDuration(Theme.motionStandard)
-                                         : Theme.motionStandard
+                                         : Theme.duration(Theme.motionStandard)
             easing.type: Easing.Bezier
             easing.bezierCurve: Theme.fogEase
         }
     }
 
     Behavior on scale {
+        enabled: Theme.animateTransforms
         NumberAnimation {
-            duration: Theme.motionStandard
+            duration: Theme.duration(Theme.motionStandard)
             easing.type: Easing.Bezier
             easing.bezierCurve: Theme.fogEase
         }
@@ -296,7 +299,7 @@ Rectangle {
 
             Behavior on opacity {
                 NumberAnimation {
-                    duration: Theme.motionFast
+                    duration: Theme.duration(Theme.motionFast)
                     easing.type: Easing.Bezier
                     easing.bezierCurve: Theme.fogEase
                 }

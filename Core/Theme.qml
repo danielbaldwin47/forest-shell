@@ -12,7 +12,11 @@ pragma Singleton
 //
 //   color: Theme.surface
 //   anchors.margins: Theme.space4
-//   NumberAnimation { duration: Theme.motionStandard; easing.bezierCurve: Theme.fogEase }
+//   NumberAnimation { duration: Theme.duration(Theme.motionStandard) }
+//
+// A transition asks the *ladder* for its duration rather than naming a step
+// directly, because `appearance.reducedEffects` collapses every one of them
+// (#22 §7, #69) — see "reduced effects" at the foot of this file.
 //
 // Consumers are **mode-blind**: they read a role, never a mode. `Theme.dark`
 // exists for the one control that is *about* the mode — the Dark/Light tile —
@@ -36,6 +40,13 @@ Singleton {
     // The token table. Held as a child object with an id so the constants below
     // can alias it — an alias needs something to point at.
     Tokens { id: tokenData }
+
+    // The `reducedEffects` ladder (Core/EffectsPolicy.qml, #69). Here for the
+    // same reason the tokens are: it is a design-system rule stated as pure
+    // functions, and this singleton is the one thing that already holds both
+    // the motion ladder and a wire into Config. Surfaces call the wrapped forms
+    // below and never read the key themselves — one place names it.
+    EffectsPolicy { id: ladder }
 
     // --- mode ----------------------------------------------------------------
 
@@ -136,7 +147,39 @@ Singleton {
     readonly property alias motionStandard: tokenData.motionStandard
     readonly property alias motionSlow: tokenData.motionSlow
 
-    function exitDuration(enterMs: int): int { return tokenData.exitDuration(enterMs); }
+    // --- reduced effects ------------------------------------------------------
+    // The one degrade knob (#22 §7), applied (#69). Every rung is a live
+    // binding on the key, so flipping the toggle re-evaluates the whole shell
+    // with no restart — the same mechanism `dark` above rides.
+    //
+    // What each of these means, and why "opacity-only" is read the way it is,
+    // is in the header of Core/EffectsPolicy.qml.
+
+    /// The knob. Read this only to *ask the ladder something* — a surface that
+    /// branches on it directly is a rung nobody wrote down.
+    readonly property bool reducedEffects: Config.values.appearance.reducedEffects
+
+    /// Rung 1 — whether to ask the compositor for blur, given what the
+    /// surface's own blur setting wants.
+    function blurRequested(wanted: bool): bool {
+        return ladder.blurRequested(wanted, root.reducedEffects);
+    }
+
+    /// Rung 2 — whether decoration that exists only to look like something is
+    /// drawn. No shipped surface has any yet; the next one binds to this.
+    readonly property bool drawDecoration: ladder.drawsDecoration(root.reducedEffects)
+
+    /// Rung 3 — how long a transition runs, and whether the ones that move
+    /// something run at all.
+    function duration(requestedMs: int): int {
+        return ladder.duration(requestedMs, root.reducedEffects);
+    }
+
+    function exitDuration(enterMs: int): int {
+        return ladder.exitDuration(enterMs, root.reducedEffects);
+    }
+
+    readonly property bool animateTransforms: ladder.animatesTransforms(root.reducedEffects)
 
     Component.onCompleted: Logger.stage("theme ready (" + (root.dark ? "dark" : "light") + ")")
 }

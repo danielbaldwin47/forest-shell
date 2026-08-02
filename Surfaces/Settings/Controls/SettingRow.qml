@@ -101,7 +101,7 @@ RowLayout {
 
         Behavior on opacity {
             NumberAnimation {
-                duration: Theme.motionFast
+                duration: Theme.duration(Theme.motionFast)
                 easing.type: Easing.Bezier
                 easing.bezierCurve: Theme.fogEase
             }

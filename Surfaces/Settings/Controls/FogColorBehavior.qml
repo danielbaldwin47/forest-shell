@@ -13,7 +13,10 @@ import qs.Core
 
 Behavior {
     ColorAnimation {
-        duration: Theme.motionFast
+        // A crossfade, so `reducedEffects` keeps it — and 140 is already the
+        // step the ladder collapses to, so the call is here for the rule
+        // rather than for the number (#69).
+        duration: Theme.duration(Theme.motionFast)
         easing.type: Easing.Bezier
         easing.bezierCurve: Theme.fogEase
     }

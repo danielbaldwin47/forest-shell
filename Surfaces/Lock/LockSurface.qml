@@ -147,14 +147,16 @@ Item {
 
         SequentialAnimation {
             id: fogPulse
+            // Opacity, so it is the half of the refusal gesture that survives
+            // reduced effects — the shake next to it is not (#69).
             NumberAnimation {
                 target: fog; property: "opacity"; to: Theme.fogPulseOpacity
-                duration: Theme.motionFast
+                duration: Theme.duration(Theme.motionFast)
                 easing.type: Easing.Bezier; easing.bezierCurve: Theme.fogEase
             }
             NumberAnimation {
                 target: fog; property: "opacity"; to: Theme.fogWashOpacity
-                duration: Theme.motionStandard
+                duration: Theme.duration(Theme.motionStandard)
                 easing.type: Easing.Bezier; easing.bezierCurve: Theme.fogEase
             }
         }
@@ -221,22 +223,24 @@ Item {
         // reveals it and lands in it.
         opacity: surface.summoned ? 1 : 0
         // The 1% scale settle every entering surface uses (#27) — the field
-        // materializes out of the fog rather than sliding in.
-        scale: surface.summoned ? 1 : 0.99
+        // materializes out of the fog rather than sliding in. Reduced effects
+        // drops the settle and keeps the fade (#69).
+        scale: surface.summoned || !Theme.animateTransforms ? 1 : 0.99
 
         transform: Translate { id: nudge }
 
         Behavior on opacity {
             NumberAnimation {
-                duration: surface.summoned ? Theme.motionStandard
+                duration: surface.summoned ? Theme.duration(Theme.motionStandard)
                                            : Theme.exitDuration(Theme.motionStandard)
                 easing.type: Easing.Bezier; easing.bezierCurve: Theme.fogEase
             }
         }
 
         Behavior on scale {
+            enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.motionStandard
+                duration: Theme.duration(Theme.motionStandard)
                 easing.type: Easing.Bezier; easing.bezierCurve: Theme.fogEase
             }
         }
@@ -367,7 +371,7 @@ Item {
 
                 Behavior on color {
                     ColorAnimation {
-                        duration: Theme.motionFast
+                        duration: Theme.duration(Theme.motionFast)
                         easing.type: Easing.Bezier; easing.bezierCurve: Theme.fogEase
                     }
                 }
@@ -405,6 +409,11 @@ Item {
     // step of the ladder end to end — the legs are that step divided, not four
     // new durations — and it is a nudge, not a slide: nothing here travels far
     // enough to read as movement across the screen (#27).
+    //
+    // The shake is movement, so reduced effects drops it (#69) and the fog
+    // pulse carries the refusal on its own. That the two are separate
+    // animations is what makes dropping one of them leave a gesture rather than
+    // nothing: a refusal is still visibly a refusal with the knob on.
     SequentialAnimation {
         id: shake
 
@@ -421,7 +430,8 @@ Item {
         target: surface.auth
 
         function onFailed() {
-            shake.restart();
+            if (Theme.animateTransforms)
+                shake.restart();
             fogPulse.restart();
             // The retreat timer was last wound by the keystroke *before* the
             // Enter that failed, and PAM held it off while it was busy. Without

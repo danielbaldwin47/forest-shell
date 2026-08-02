@@ -23,6 +23,7 @@
 #   8. the tab rail answers the arrow keys
 #   9. the rail is one tab stop, so Tab reaches the page
 #  10. a switch can be toggled with Space, and writes sparsely
+#  11. that write keeps keys the schema has never heard of (#64's claim)
 #
 # The shell under test runs against a scratch XDG_CONFIG_HOME and
 # XDG_STATE_HOME: the last two checks press keys at a real settings window, and
@@ -88,8 +89,24 @@ key_until() {
 nested_up || exit 1
 
 SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config" "$SCRATCH/state"
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
 NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+
+# Seeded before the shell has ever read the file: a key no schema knows about,
+# next to a hand-set known one. #64 claims a GUI write preserves what it does
+# not recognise, and #73 could not test it — an unknown key survived every hand
+# edit there, but no GUI write ever landed on top of one, which is the only case
+# that can lose it. Check 11 reads both back after the keyboard has written.
+#
+# `wallpaper.path` is the known key, deliberately not one of the three the
+# sparse-write check greps for, and deliberately not in the subtree the switch
+# writes to.
+cat > "$SCRATCH/config/forest-shell/settings.json" <<'EOF'
+{
+  "wallpaper": { "path": "/nonexistent/hand-set.png" },
+  "somethingTheSchemaHasNeverHeardOf": { "kept": true, "count": 7 }
+}
+EOF
 
 nested_shell shell.qml 'settings window armed' || exit 1
 
@@ -227,7 +244,28 @@ else
     nested_pass 'the keyboard edit wrote one key and nothing else'
 fi
 
-# --- 11. nothing in the window is fighting itself ----------------------------
+# --- 11. a GUI write does not eat what it does not understand ----------------
+#
+# #64 claims settings.json keeps keys the schema has never heard of. #73 left it
+# untested with the exact reason it matters: an unknown key survived every hand
+# edit, but no GUI write had ever landed on top of one, and a write is where a
+# schema-shaped serializer drops what it cannot name. The keyboard has just
+# written `appearance.darkMode` over a file seeded with both an unknown subtree
+# and a hand-set `wallpaper.path`.
+
+if grep -qa 'somethingTheSchemaHasNeverHeardOf' "$SETTINGS_FILE"; then
+    nested_pass 'the GUI write kept a key no schema knows about'
+else
+    nested_fail "the GUI write dropped the unknown key: $(tr -d '\n' < "$SETTINGS_FILE")"
+fi
+
+if grep -qa 'hand-set.png' "$SETTINGS_FILE"; then
+    nested_pass 'the GUI write kept the hand-set key it did not touch'
+else
+    nested_fail "the GUI write dropped a hand-set key: $(tr -d '\n' < "$SETTINGS_FILE")"
+fi
+
+# --- 12. nothing in the window is fighting itself ----------------------------
 #
 # #80's fix gives the row's control slot a ceiling and lets the control read it,
 # which is the shape a binding loop comes from if the control's width is ever

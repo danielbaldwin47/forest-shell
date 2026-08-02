@@ -94,6 +94,11 @@ and typechecks redirect to a scratch file; grep the decisive lines back:
 Quote the shortest line that proves pass or fail. A full log dumped into
 context is paid for again on every call after it.
 
+**On a big file, grep first and Read a range.** `Grep -n` for the key or
+section name, then Read with offset/limit around the hit. Never write down or
+reuse line numbers across edits — they drift; the grep is the address. Section
+keys and knob names are unique in the schema files precisely so this works.
+
 ## Session workflow
 
 If you implemented anything during a session, when fully done: push the branch,

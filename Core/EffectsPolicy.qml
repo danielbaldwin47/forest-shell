@@ -33,7 +33,7 @@
 //      the rung is the contract: the next decorative effect binds its `visible`
 //      to `Theme.drawDecoration` rather than re-litigating the ladder.
 //   3. **Every transition is an opacity-only fade at 140 ms.** `duration`,
-//      `exitDuration`, `animatesTransforms`.
+//      `exitDuration`, `stagger`, `animatesTransforms`.
 //
 // ## What rung 3 means by "opacity-only"
 //
@@ -105,6 +105,18 @@ QtObject {
     /// and its exit are one duration.
     function exitDuration(enterMs: int, reduced: bool): int {
         return reduced === true ? tokens.motionFast : tokens.exitDuration(enterMs);
+    }
+
+    /// How long a transition waits before it starts. Reduced, it does not: #27
+    /// asks for "no entrance stagger anywhere", and the only difference between
+    /// a row cascade and the +100 ms an incoming drawer waits (#38) is how far
+    /// apart the two things being staggered are.
+    ///
+    /// Separate from `duration` because it collapses to nothing rather than to
+    /// the floor — a 140 ms *wait* is not a faster version of a 100 ms one, it
+    /// is a longer one.
+    function stagger(requestedMs: int, reduced: bool): int {
+        return reduced === true ? 0 : requestedMs;
     }
 
     /// Whether a transition that moves or resizes something runs at all. False

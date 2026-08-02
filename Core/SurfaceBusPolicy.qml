@@ -56,6 +56,15 @@ QtObject {
             target: "controlcenter",
             verb: "toggle",
             label: "Control centre"
+        },
+        // The first surface in this table that actually exists (#38). It
+        // registers a handler on construction like the rest will, so nothing
+        // about the bus changes when a name stops being a promise — which is
+        // the point of having declared it here first.
+        session: {
+            target: "session",
+            verb: "toggle",
+            label: "Session menu"
         }
     })
 

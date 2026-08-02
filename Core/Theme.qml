@@ -99,6 +99,7 @@ Singleton {
     // --- material ------------------------------------------------------------
     readonly property color fogWash: palette.fogWash
     readonly property alias fogWashOpacity: tokenData.fogWashOpacity
+    readonly property alias fogGrain: tokenData.fogGrain
     readonly property alias fogBlur: tokenData.fogBlur
     readonly property alias fogSaturation: tokenData.fogSaturation
     readonly property alias fogPulseOpacity: tokenData.fogPulseOpacity
@@ -180,6 +181,13 @@ Singleton {
     }
 
     readonly property bool animateTransforms: ladder.animatesTransforms(root.reducedEffects)
+
+    /// Rung 3, the other half — how long a transition waits before it starts.
+    /// Reduced there is no waiting: "no stagger anywhere" is #27's wording and
+    /// a delay is a stagger, whether it separates two rows or two surfaces.
+    function stagger(requestedMs: int): int {
+        return ladder.stagger(requestedMs, root.reducedEffects);
+    }
 
     Component.onCompleted: Logger.stage("theme ready (" + (root.dark ? "dark" : "light") + ")")
 }

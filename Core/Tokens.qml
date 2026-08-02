@@ -137,11 +137,18 @@ QtObject {
     // a black dim. Only the opacity ever animates — the blur never does, and is
     // likely delegated to a Hyprland layer rule.
     //
-    // The brief's other atmospheric devices — the vertical luminance gradient
-    // (§3.2) and the anti-banding grain (§3.5) — are ranges, not values. The
-    // surface ticket that picks one adds the token then; guessing here would
-    // commit a number that ticket would have to migrate away from.
+    // The brief's other atmospheric device — the vertical luminance gradient
+    // (§3.2) — is a range, not a value. The surface ticket that picks one adds
+    // the token then; guessing here would commit a number that ticket would
+    // have to migrate away from.
     readonly property real fogWashOpacity: 0.10   // the wash over a scrimmed desktop
+    // The anti-banding grain (§3.5), picked by the first surface that needed it
+    // as a constant rather than a setting — the drawer's fog (#38). The bar
+    // exposes its own grain as a Bar-tab knob because the bar is a surface you
+    // look at; the fog is one you look *through*, and 3% is the middle of the
+    // brief's 2–4% band, which is what the launcher prototype used
+    // (.wayfinder/prototypes/launcher-clearing/Fog.qml).
+    readonly property real fogGrain: 0.03
     readonly property real fogBlur: 14            // px; Hyprland layer blur live
     readonly property real fogSaturation: -0.20   // MultiEffect delta for saturate(0.8)
 

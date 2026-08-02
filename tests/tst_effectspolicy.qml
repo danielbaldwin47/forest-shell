@@ -98,4 +98,14 @@ TestCase {
             compare(ladder.exitDuration(step, false), tokens.exitDuration(step));
         }
     }
+
+    function test_a_stagger_collapses_to_nothing_rather_than_to_the_floor() {
+        // #27 asks for "no entrance stagger anywhere", and the +100ms an
+        // incoming drawer waits (#38) is one. A 140ms *wait* is not a faster
+        // version of a 100ms one, which is why this rung does not floor the way
+        // `duration` does.
+        compare(ladder.stagger(100, false), 100);
+        compare(ladder.stagger(100, true), 0);
+        compare(ladder.stagger(0, false), 0);
+    }
 }

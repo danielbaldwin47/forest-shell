@@ -14,6 +14,8 @@
 #   2. the bar's own rule is accepted on startup, and the old syntax is not
 #   3. a rule Hyprland refuses is logged as a warning, not as a success
 #   4. changing `bar.surface.blur` pushes the opposing rule, live
+#   4b. so does `appearance.reducedEffects`, whose first rung this is (#69), and
+#      it only ever subtracts — the bar's own setting cannot buy blur back
 #   5. two rules pushed at once are both applied, not one killing the other
 #
 # What it still cannot check is the picture: whether the bar looks blurred. That
@@ -127,6 +129,42 @@ if await_count "layerrule blur 1 → $NAMESPACE" $((was + 1)) 10; then
     nested_pass "turning it back on pushed blur 1 again, accepted"
 else
     nested_fail "turning blur back on did not re-push the rule"
+fi
+
+# 4b — the other switch the same rule is subject to: the first rung of the
+# `reducedEffects` ladder (#22 §7, #69). This is the seam that can answer "with
+# the toggle on, no compositor blur is requested" — the compositor's own reply
+# is the evidence, and it arrives without the shell being restarted.
+#
+# Counted rather than awaited: `blur 0` is already in the log from check 4, so
+# "is it there" would pass without this rule ever being pushed.
+seen_off=$(grep -ac "layerrule blur 0 → $NAMESPACE" "$NESTED_SHELL_LOG")
+ipc layerrule reduced true > /dev/null
+if await_count "layerrule blur 0 → $NAMESPACE" $((seen_off + 1)) 10; then
+    nested_pass "turning appearance.reducedEffects on pushed blur 0, accepted"
+else
+    nested_fail "reducedEffects did not take the blur away — $(grep -a 'layerrule' "$NESTED_SHELL_LOG" | tail -2)"
+fi
+
+# And the ladder only ever subtracts: with it on, the bar's own blur setting
+# cannot buy the blur back. Turning that setting off and on again is what would
+# re-push `blur 1` at any other time, so this is the case that would fail if
+# either switch were tested alone.
+was_off=$(grep -ac "layerrule blur 0 → $NAMESPACE" "$NESTED_SHELL_LOG")
+ipc layerrule blur false > /dev/null
+ipc layerrule blur true > /dev/null
+if await_count "layerrule blur 0 → $NAMESPACE" $((was_off + 2)) 10; then
+    nested_pass "with reducedEffects on, bar.surface.blur pushes blur 0 either way"
+else
+    nested_fail "reducedEffects was overridden by bar.surface.blur — $(grep -a 'layerrule' "$NESTED_SHELL_LOG" | tail -3)"
+fi
+
+was_on=$(grep -ac "layerrule blur 1 → $NAMESPACE" "$NESTED_SHELL_LOG")
+ipc layerrule reduced false > /dev/null
+if await_count "layerrule blur 1 → $NAMESPACE" $((was_on + 1)) 10; then
+    nested_pass "turning reducedEffects back off restored the blur, live"
+else
+    nested_fail "the blur never came back after reducedEffects went off"
 fi
 
 # 5 — two rules in the air at once. There is one hyprctl process, and handing

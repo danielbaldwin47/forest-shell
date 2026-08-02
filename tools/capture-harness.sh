@@ -20,6 +20,20 @@
 #   tools/capture-harness.sh out.png --surface bar-full --session   # with modules
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
+#   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
+#
+# --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
+# ladder is either the compositor's (blur), a transition, or an effect no
+# shipped surface draws yet, so a still frame of a surface at rest is
+# *byte-identical* either way, and that is the check reduced effects is a
+# supported look rather than a stripped one — two runs and a `cmp`:
+#
+#   tools/capture-harness.sh a.png --surface lock
+#   tools/capture-harness.sh b.png --surface lock --reduced
+#   cmp a.png b.png
+#
+# (The Appearance tab is the one exception, and only because the switch this
+# knob now has draws its own state.)
 #
 # --lock-state poses the lock: `quiet`, or any comma-separated combination of
 # `summoned` (the field revealed), `caps` (the caps-lock warning) and
@@ -74,6 +88,7 @@ SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
 DELAY_MS=600
+REDUCED=0
 
 while (( $# )); do
     case "$1" in
@@ -87,7 +102,8 @@ while (( $# )); do
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
-        --help|-h)     sed -n '2,59p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --reduced)     REDUCED=1; shift ;;
+        --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -141,7 +157,8 @@ fi
 [[ -f "$WALLPAPER" ]] || { echo "no such wallpaper: $WALLPAPER" >&2; exit 2; }
 
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-printf '{ "wallpaper": { "path": "%s" } }\n' "$WALLPAPER" \
+printf '{ "wallpaper": { "path": "%s" }, "appearance": { "reducedEffects": %s } }\n' \
+    "$WALLPAPER" "$( ((REDUCED)) && echo true || echo false )" \
     > "$SCRATCH/config/forest-shell/settings.json"
 
 # The offscreen platform takes its screen list from a config file; this is

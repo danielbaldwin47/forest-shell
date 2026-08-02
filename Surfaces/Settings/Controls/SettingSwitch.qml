@@ -37,9 +37,13 @@ Rectangle {
         x: root.checked ? parent.width - width - 3 : 3
         color: root.checked ? Theme.textPrimary : Theme.textMuted
 
+        // The knob travelling is movement, so reduced effects has it change
+        // ends instead (#69). The colour under it still crossfades, which is
+        // what keeps the control legible as a toggle rather than a jump.
         Behavior on x {
+            enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.motionFast
+                duration: Theme.duration(Theme.motionFast)
                 easing.type: Easing.Bezier
                 easing.bezierCurve: Theme.fogEase
             }

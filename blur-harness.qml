@@ -69,6 +69,14 @@ ShellRoot {
             return Config.set("bar.surface", group);
         }
 
+        /// Flip `appearance.reducedEffects` — the first rung of the degrade
+        /// ladder (#22 §7, #69), and the other switch the bar's blur rule is
+        /// subject to. A plain leaf, so unlike `bar.surface` above there is no
+        /// group to read back first.
+        function reduced(on: bool): bool {
+            return Config.set("appearance.reducedEffects", on);
+        }
+
         /// Whether the facade found a compositor at all. A harness asserting on
         /// layer rules against an inert facade would pass by never trying.
         function available(): bool {

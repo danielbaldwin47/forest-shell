@@ -71,7 +71,9 @@ Item {
 
         Behavior on opacity {
             NumberAnimation {
-                duration: Theme.motionSlow
+                // A fade, so it survives `reducedEffects` — at 140 rather than
+                // at fog scale (#69).
+                duration: Theme.duration(Theme.motionSlow)
                 easing.type: Easing.Bezier
                 easing.bezierCurve: Theme.fogEase
             }

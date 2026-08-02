@@ -80,8 +80,9 @@ Scope {
 
     function applyBlurRule() {
         // `reducedEffects` turns the compositor blur off first, at the top of
-        // its cost ladder (#22 §7).
-        const wanted = bar.settings.surface.blur && !Config.values.appearance.reducedEffects;
+        // its cost ladder (#22 §7) — the rung itself is in Core/EffectsPolicy,
+        // where the other two are and where it is unit-checked (#69).
+        const wanted = Theme.blurRequested(bar.settings.surface.blur);
         // Off is `blur 0`, not a rule being taken away: Hyprland's 0.5x syntax
         // has no clearing verb (`unset` answers `invalid field unset`), and a
         // boolean rule needs its value spelled out either way. Rules accumulate
@@ -197,15 +198,58 @@ Scope {
 
                 anchors.fill: parent
 
+                /// Where the content sits while the bar is away — out of the
+                /// window on the side the bar is anchored to.
+                readonly property real parkedY: window.atTop ? -height : height
+
                 // Slides out of the window rather than shrinking it: the window
                 // keeps its geometry, so nothing about the surface changes and
                 // the compositor is not asked to resize anything.
-                y: window.revealed ? 0 : (window.atTop ? -height : height)
+                //
+                // Reduced, it does not slide at all — it stays at y: 0 and
+                // fades. This is the one transform in the shell that *is* a
+                // surface's entrance, so it is the one rung 3 has to turn into
+                // a fade rather than simply drop: a bar that popped in and out
+                // would be the broken mode #22 §7 says this knob must not be
+                // (#69). Input is unaffected either way — the window's mask,
+                // not the content's position, is what stops a hidden bar
+                // swallowing clicks.
+                y: window.revealed || !Theme.animateTransforms ? 0 : content.parkedY
 
+                // Two jobs in one property, which is why it is written as a
+                // comparison rather than as `revealed`. Reduced, it is the
+                // whole of the reveal. Unreduced, it is what makes the parked
+                // content *gone* rather than merely off the window — and it
+                // waits for the slide to finish before saying so, so the slide
+                // is still visible, and so that turning the knob on while the
+                // bar is hidden does not flash it on screen to fade it out.
+                opacity: window.revealed
+                         || (Theme.animateTransforms && content.y !== content.parkedY) ? 1 : 0
+
+                // The second clause is about the knob rather than about the
+                // bar: flipping it moves `y` too, and that move is not a
+                // reveal. Without the guard, turning reduced effects *off*
+                // while the bar is hidden would find the content parked at
+                // y: 0 and slide a bar the user cannot see all the way out
+                // across the screen. Hidden in either mode means "not visible",
+                // so `opacity` is what tells the two kinds of move apart.
                 Behavior on y {
+                    enabled: Theme.animateTransforms
+                             && (window.revealed || content.opacity > 0)
                     NumberAnimation {
-                        duration: Config.values.appearance.reducedEffects
-                            ? Theme.motionFast : Theme.motionStandard
+                        duration: Theme.motionStandard
+                        easing.type: Easing.Bezier
+                        easing.bezierCurve: Theme.fogEase
+                    }
+                }
+
+                // Only reduced, where entrance and exit are one duration — so
+                // no ternary. Unreduced this property snaps, at the two moments
+                // the content is entirely off the window anyway.
+                Behavior on opacity {
+                    enabled: !Theme.animateTransforms
+                    NumberAnimation {
+                        duration: Theme.duration(Theme.motionStandard)
                         easing.type: Easing.Bezier
                         easing.bezierCurve: Theme.fogEase
                     }

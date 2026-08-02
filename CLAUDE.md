@@ -72,3 +72,7 @@ which did not exist yet.
 
 If you implemented anything during a session, when fully done: push the branch,
 open a PR, and merge it.
+
+If the work came from a ticket, close the ticket once the PR is open and the
+work is complete — even when you cannot merge (background sessions can't).
+Other sessions gate on ticket state, so an unclosed ticket stalls the chain.

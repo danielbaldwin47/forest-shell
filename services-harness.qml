@@ -23,9 +23,11 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Core
+import qs.Services.Compositor
 import qs.Services.Media
 import qs.Services.Networking
 import qs.Services.Hardware
+import qs.Services.System
 
 ShellRoot {
     id: harness
@@ -83,6 +85,29 @@ ShellRoot {
                     device: Backlight.device,
                     max: Backlight.max,
                     percent: Backlight.percent
+                },
+                // #37's four. Three of them are about a machine's *current*
+                // situation rather than its hardware — what is playing, what
+                // is focused, which layout is live — so the script drives the
+                // session to change them and reads this again.
+                media: {
+                    players: Mpris.snapshot.length,
+                    showing: Mpris.showing,
+                    playing: Mpris.playing,
+                    label: Mpris.label,
+                    icon: Mpris.icon
+                },
+                tray: {
+                    count: SystemTray.count
+                },
+                keyboard: {
+                    device: Compositor.keyboardDevice,
+                    layouts: Compositor.keyboardLayouts,
+                    layout: Compositor.keyboardLayout,
+                    switchable: Compositor.keyboardSwitchable
+                },
+                window: {
+                    title: Compositor.activeWindow
                 }
             });
         }
@@ -112,6 +137,53 @@ ShellRoot {
         function nudgeBrightness(direction: int): bool {
             Backlight.step(direction);
             return true;
+        }
+
+        /// Press one of the bar's two surface buttons, without a pointer (#37).
+        ///
+        /// This is how the "graceful no-op with a log line" criterion is
+        /// checked at all: the button itself needs a click on a bar inside a
+        /// compositor, and what it does when pressed is one call into
+        /// Core/SurfaceBus.qml — the same call, from here.
+        function surface(name: string): bool {
+            SurfaceBus.toggle(name);
+            return true;
+        }
+
+        /// Cycle the keyboard layout, as the bar module's click does. A no-op
+        /// with a logged complaint on a single-layout machine, which is what
+        /// the script asserts there.
+        function cycleLayout(): bool {
+            Compositor.cycleKeyboardLayout();
+            return true;
+        }
+
+        /// Play or pause, as the media pill's click does.
+        function playPause(): bool {
+            Mpris.togglePlaying();
+            return true;
+        }
+
+        /// Click the first tray icon, as the module's MouseArea does — the
+        /// activation half of #37's first acceptance criterion. Answers what
+        /// the click meant (`activate`, `menu`, `none`), which is what the bar
+        /// module acts on; whether the application heard it is checked on the
+        /// other side, in the item's own log.
+        ///
+        /// The menu half is not reachable from here and says so: opening one
+        /// needs a window and a position, which is why the bar module owns it
+        /// (Surfaces/Bar/Modules/Tray.qml) and why a real session is what
+        /// judges it.
+        function trayPress(button: string): string {
+            const items = SystemTray.items ? SystemTray.items.values : [];
+            if (items.length === 0)
+                return "no tray items";
+            if (button === "middle") {
+                SystemTray.middlePress(items[0]);
+                return "secondary";
+            }
+            return button === "right" ? SystemTray.secondaryPress(items[0])
+                                      : SystemTray.press(items[0]);
         }
     }
 }

@@ -19,6 +19,7 @@ import qs.Services.Compositor
 import qs.Services.Media
 import qs.Services.Networking
 import qs.Services.Hardware
+import qs.Services.System
 
 Singleton {
     id: root
@@ -60,8 +61,18 @@ Singleton {
         // second showing a shell that owns no radios and has no battery. Off
         // the critical path, because none of it is worth a frame: the
         // wallpaper does not depend on the volume.
+        // The tray and MPRIS (#37) are here for a sharper version of the same
+        // reason. Both upstream clients are lazy: nothing takes the
+        // `org.kde.StatusNotifierWatcher` name until something in QML first
+        // touches the tray singleton, and an application that registered its
+        // icon before that has to be restarted to get it back. A tray that
+        // only started when the bar happened to carry the module would lose
+        // every icon on a bar configured without it — and worse, would lose
+        // them on a bar that has it, since the modules load a beat after the
+        // services do.
         report("deferred", [ShellState, Notifications, Compositor,
-                            Audio, Networking, Bluetooth, Power, Backlight]);
+                            Audio, Networking, Bluetooth, Power, Backlight,
+                            SystemTray, Mpris]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

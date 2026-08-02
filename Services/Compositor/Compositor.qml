@@ -8,6 +8,9 @@ pragma Singleton
 //     Compositor.focusWorkspace(3)
 //     Compositor.focusedScreenName // popups render on the focused screen (#22 §1)
 //     Compositor.focusedFullscreen // a fullscreen focus suppresses popups (#9)
+//     Compositor.activeWindow      // what the bar's window module shows (#37)
+//     Compositor.keyboardLayout    // "DE", or "" with one layout configured
+//     Compositor.cycleKeyboardLayout()
 //
 // Everything above the facade speaks in workspace ids and intentions. That is
 // what keeps the compositor swappable in principle and, far more practically,
@@ -18,6 +21,11 @@ pragma Singleton
 //     something lands on it and destroys it when the last window leaves, so the
 //     list is not a fixed row of slots. Padding it out to a stable row is the
 //     bar's decision, not this file's — the facade reports what is there.
+//   - **Input devices are not modelled at all.** Hyprland's Quickshell module
+//     has monitors, workspaces and toplevels natively and nothing for
+//     keyboards, so the layout comes from `hyprctl devices -j` — one subprocess
+//     per layout switch, parsed on the QtQuick-only side of the line in
+//     Services/Compositor/KeyboardPolicy.qml.
 //   - **Occupancy is not live.** `HyprlandWorkspace` tracks creation and
 //     destruction natively, but the window *count* comes from the last IPC
 //     snapshot, which nothing refreshes on its own. Without the event wiring
@@ -133,6 +141,161 @@ Singleton {
         const workspace = Hyprland.focusedWorkspace;
         const ipc = workspace ? workspace.lastIpcObject : null;
         return ipc ? ipc.hasfullscreen === true : false;
+    }
+
+    // --- the focused window (#37) --------------------------------------------
+
+    /// What the bar's window module shows: the focused window's title, its app
+    /// id if it has not set one, and "" on an empty workspace. The rules are in
+    /// ActiveWindowPolicy next door, on the side of the line tests/ can reach.
+    ///
+    /// Read off `Hyprland.activeToplevel` rather than `ToplevelManager`, which
+    /// would answer the same question compositor-agnostically: this is the
+    /// Hyprland facade, everything else here is already Hyprland's, and the
+    /// toplevel it hands back carries the workspace and monitor a later module
+    /// will want. The app id is the one field that is not a property on it —
+    /// Hyprland calls it `class` and only exposes it through the IPC snapshot.
+    readonly property string activeWindow: {
+        const toplevel = Hyprland.activeToplevel;
+        if (!toplevel)
+            return "";
+        const snapshot = toplevel.lastIpcObject;
+        return windows.label(toplevel.title, snapshot ? snapshot.class : "");
+    }
+
+    // One line per focused window, which is a keypress and not a frame — and
+    // the evidence tools/services-harness.sh reads to check the module tracks
+    // focus at all. Retitling is the same event class: a browser that renames
+    // its window on every tab switch logs a line per tab switch, which is the
+    // right cadence for something a person did.
+    onActiveWindowChanged: Logger.log("compositor", root.activeWindow === ""
+        ? "no focused window"
+        : "focused window: " + root.activeWindow.slice(0, 80))
+
+    ActiveWindowPolicy { id: windows }
+
+    // --- the keyboard layout (#37) -------------------------------------------
+    //
+    // The one part of this facade that is not event-driven, because there is
+    // nothing to drive it: Quickshell models no input devices, so the layout is
+    // read with `hyprctl devices -j` at startup and again after each
+    // `activelayout` event. That is one subprocess per layout switch — a
+    // keypress — and none at all on a machine with one layout, since the event
+    // never fires.
+
+    /// The keyboard Hyprland switches layouts on, by name. Empty until the
+    /// first reply lands, or on a machine the shell could not read.
+    property string keyboardDevice: ""
+
+    /// The configured layout codes, in the order Hyprland cycles them.
+    property var keyboardLayouts: []
+
+    /// Which of them is live.
+    property int keyboardActiveIndex: 0
+
+    /// What the bar shows — "DE" — or "" when there is nothing to show.
+    readonly property string keyboardLayout:
+        keys.label(root.keyboardLayouts, root.keyboardActiveIndex)
+
+    /// Whether there is more than one layout to be in. False on the
+    /// overwhelmingly common single-layout machine, which is what takes the
+    /// module off the bar entirely (#9, and this ticket's own criterion).
+    readonly property bool keyboardSwitchable: keys.showing(root.keyboardLayouts)
+
+    onKeyboardLayoutChanged: if (root.keyboardLayout !== "")
+        Logger.log("compositor", "keyboard layout " + root.keyboardLayout
+                   + " (" + root.keyboardLayouts.join(",") + ")")
+
+    /// Move to the next layout.
+    ///
+    /// A subprocess and not a dispatch: `switchxkblayout` is a hyprctl command,
+    /// and `Hyprland.dispatch` answers `Invalid dispatcher` for it (see the
+    /// policy, where the measurement is). A click on a bar module is exactly
+    /// the cadence a subprocess is fine at — one per press.
+    function cycleKeyboardLayout() {
+        if (!root.keyboardSwitchable) {
+            Logger.warn("compositor", "one keyboard layout — nothing to cycle to");
+            return;
+        }
+        if (!root.available) {
+            Logger.warn("compositor", "no Hyprland session — ignoring layout switch");
+            return;
+        }
+        if (switcher.running) {
+            // A held key, or an impatient second click. Dropped rather than
+            // queued: giving a Process a new command while it runs kills the
+            // run in flight (#78), and two switches from one gesture is not
+            // what the user asked for either.
+            Logger.warn("compositor", "a layout switch is already in flight");
+            return;
+        }
+        switcher.command = keys.cycleCommand(root.keyboardDevice);
+        switcher.running = true;
+        // No optimistic update: the `activelayout` event that follows is what
+        // re-reads the devices, so the bar shows what the compositor did rather
+        // than what it was asked to do.
+    }
+
+    Process {
+        id: switcher
+
+        stdout: StdioCollector { id: switcherOut }
+        stderr: StdioCollector { id: switcherErr }
+
+        onExited: (exitCode, exitStatus) => {
+            if (keys.switched(exitCode, switcherOut.text))
+                return;
+            // The reply is the evidence, not the exit code — hyprctl exits 0
+            // when it refuses (#78). A refusal here is silent otherwise: the
+            // layout simply does not change, which reads as a dead module.
+            Logger.warn("compositor", "hyprland refused a layout switch on "
+                        + root.keyboardDevice + ": "
+                        + (String(switcherOut.text ?? "").trim()
+                           || String(switcherErr.text ?? "").trim() || "no reply"));
+        }
+    }
+
+    /// Ask `hyprctl` what the keyboards are doing. Coalesced onto one process
+    /// for the reason the layer rule is: handing a `Process` a new command
+    /// while it is running kills the run in flight, and a layout switch held
+    /// down on the keyboard is exactly how two land at once.
+    function refreshKeyboard() {
+        if (!root.available)
+            return;
+        if (deviceQuery.running) {
+            root.keyboardRefreshPending = true;
+            return;
+        }
+        deviceQuery.running = true;
+    }
+
+    property bool keyboardRefreshPending: false
+
+    KeyboardPolicy { id: keys }
+
+    Process {
+        id: deviceQuery
+
+        command: ["hyprctl", "devices", "-j"]
+        stdout: StdioCollector { id: deviceOut }
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0) {
+                Logger.warn("compositor",
+                            "hyprctl devices failed (exit " + exitCode + ") — "
+                            + "the keyboard layout module has nothing to show");
+            } else {
+                const read = keys.read(deviceOut.text);
+                root.keyboardDevice = read.device;
+                root.keyboardLayouts = read.layouts;
+                root.keyboardActiveIndex = read.active;
+            }
+
+            if (root.keyboardRefreshPending) {
+                root.keyboardRefreshPending = false;
+                root.refreshKeyboard();
+            }
+        }
     }
 
     function focusWorkspace(id: int) {
@@ -253,6 +416,11 @@ Singleton {
             if (root.occupancyEvents.indexOf(event.name) >= 0
                     || root.fullscreenEvents.indexOf(event.name) >= 0)
                 coalesce.restart();
+            // Not coalesced with the workspace refresh above: that one is an
+            // IPC round trip per burst of window events, and this one is a
+            // subprocess that only ever follows a deliberate layout switch.
+            if (keys.layoutEvents.indexOf(event.name) >= 0)
+                root.refreshKeyboard();
         }
     }
 
@@ -272,7 +440,12 @@ Singleton {
             root.available ? "hyprland facade ready" : "no hyprland session — facade inert");
         // The shell can start inside a fullscreen window, in which case no
         // event is coming and the first snapshot is the only one that matters.
-        if (root.available)
+        if (root.available) {
             coalesce.restart();
+            // Same argument for the keyboard, and a stronger one: a machine
+            // whose layouts never change emits no `activelayout` at all, so
+            // this first read is the only one that will ever happen.
+            root.refreshKeyboard();
+        }
     }
 }

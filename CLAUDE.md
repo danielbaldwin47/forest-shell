@@ -36,22 +36,30 @@ compositor never presents after its first commit (upstream bug, diagnosed in
 #85 and filed as hyprwm/aquamarine#348; see the header of
 `tools/nested-session.sh`). Looking at pixels is seam 3's job.
 
-**3. `tools/capture-harness.sh` — the shell's visuals, rendered offscreen and
-grabbed pixel-exact.**
+**3. `tools/capture-harness.sh` — the shell's visuals, rendered client-side
+and grabbed pixel-exact.**
 Everything that is a *picture* but still a client-side one: layout (#80-class
-overflows), colour, opacity compositing. The real surface components render on
-`QT_QPA_PLATFORM=offscreen` — deterministic geometry, scratch config, generated
-wallpaper — and the scene is grabbed with `Item.grabToImage`, so no compositor
-is involved and no compositor bug can starve it. `--contrast` is the #79
-measurement (`tools/measure-contrast.py`), and it is the *stricter* form of it:
-compositor blur only averages the wallpaper locally, so a window that passes
-unblurred passes blurred.
+overflows), colour, opacity compositing — one surface per run
+(`--surface bar|bar-full|lock|settings`). By default the real surface
+components render on `QT_QPA_PLATFORM=offscreen` — deterministic geometry,
+scratch config, generated wallpaper — and the scene is grabbed with
+`Item.grabToImage`, so no compositor is involved and no compositor bug can
+starve it. `--contrast` is the #79 measurement (`tools/measure-contrast.py`),
+and it is the *stricter* form of it: compositor blur only averages the
+wallpaper locally, so a window that passes unblurred passes blurred.
 
-What no seam covers yet, and why: `MultiEffect` renders blank on the offscreen
-scenegraph (measured — Widgets/Icon.qml), and compositor composition (blur
-behind the bar, layer stacking, frame pacing) needs presents the nested
-compositor cannot currently make. Both still take a real session; a ticket
-whose acceptance lives there should say that in the PR, not claim a seam.
+One caveat picks the mode: `MultiEffect` draws nothing on the offscreen
+scenegraph (measured — `Widgets/Icon.qml`), so every Lucide glyph is missing
+from an offscreen capture. `--session` renders the same components on the
+caller's own Wayland session, where they draw; that is the mode for anything
+with an icon in it, and how #73's lock status strip and settings chrome were
+finally judged.
+
+What no seam covers, and why: compositor composition — blur behind the bar,
+layer stacking, frame pacing — needs presents the nested compositor cannot
+currently make and pixels a client-side grab never sees. That still takes a
+real session; a ticket whose acceptance lives there should say that in the PR,
+not claim a seam.
 
 ### Why this is a rule
 

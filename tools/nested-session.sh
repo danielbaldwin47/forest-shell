@@ -64,12 +64,16 @@
 #     which is the half that had no evidence when #75 was diagnosed.
 #
 # What closes the visual gap instead: tools/capture-harness.sh — the shell's
-# real surface components rendered client-side on QT_QPA_PLATFORM=offscreen
-# and grabbed with Item.grabToImage, which does not involve a compositor at
-# all. #79's contrast measurement runs there (tools/measure-contrast.py).
-# Still needing a real session: MultiEffect surfaces (blank on the offscreen
-# scenegraph — Widgets/Icon.qml) and anything about compositor composition
-# (blur behind the bar, layer stacking, frame pacing).
+# real surface components rendered client-side and grabbed with
+# Item.grabToImage, which does not involve a compositor at all. #79's contrast
+# measurement runs there (tools/measure-contrast.py). It has two modes, and the
+# difference between them is MultiEffect: the default renders on
+# QT_QPA_PLATFORM=offscreen, needs no session and draws no Lucide glyph at all;
+# `--session` renders the same components on the caller's own Wayland session,
+# where MultiEffect works, which is how #73's "status strip icons and settings
+# chrome visually judged" was finally answered. Neither mode judges compositor
+# composition — blur behind the bar, layer stacking, frame pacing. That is the
+# compositor's own pixels, and it stays real-session work.
 
 # --- state, all owned by this file ------------------------------------------
 

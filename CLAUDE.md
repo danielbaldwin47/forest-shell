@@ -68,6 +68,32 @@ real compositor (#73) produced eight bugs at once (#74–#81), including a lock
 that could not be unlocked on a live session. Every one of them lived at seam 2,
 which did not exist yet.
 
+## Context discipline
+
+Implementation sessions were peaking at 200–340k tokens against a ~120k
+budget. Measured on the transcripts (2026-08), the two dominant costs were
+accumulated Bash output (test, typecheck and harness runs) and whole-file
+Reads of large files, often repeated across a session. Review subagents were
+*not* a cost — a subagent's report returns a few KB and its own reading never
+enters this context. Two rules follow:
+
+**Delegate exploration; only Read what you will edit.** Answering "how does X
+work / where is Y decided" by Reading files into the main session pays for
+those files again on every call that follows. Send that to a read-only
+subagent (Explore or equivalent) and keep only its conclusions. Reserve
+main-session Read for files about to be edited — and do not re-read a file
+after editing it.
+
+**Never let a noisy command print into the session.** Test suites, harnesses
+and typechecks redirect to a scratch file; grep the decisive lines back:
+
+    log=$(mktemp); tests/run.sh >"$log" 2>&1; grep -E 'FAIL|Totals' "$log"
+
+(`mktemp`, not a fixed `/tmp` name — parallel sessions share `/tmp`.)
+
+Quote the shortest line that proves pass or fail. A full log dumped into
+context is paid for again on every call after it.
+
 ## Session workflow
 
 If you implemented anything during a session, when fully done: push the branch,

@@ -20,9 +20,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
-import Quickshell.Services.UPower
 import qs.Core
 import qs.Widgets
+import qs.Services.Hardware
 import qs.Services.System
 import qs.Surfaces.Background
 
@@ -495,18 +495,18 @@ Item {
         // unlocking, so "is it still on mains" is the one hardware fact worth
         // the space. On AC it is noise.
         //
-        // Read straight off the native UPower singleton rather than through a
-        // service, because there is no battery service yet — #36 builds one,
-        // and this becomes a read of it.
+        // Read through the power service (#36), which is what the note here
+        // used to promise: the bar's battery module and this pill now share one
+        // definition of "low", and they are on screen together often enough
+        // that two would be visible as a disagreement.
         StatusItem {
             id: batteryPill
 
-            readonly property real fraction: UPower.displayDevice.percentage
-            readonly property bool low: policy.batteryLow(fraction)
+            readonly property bool low: Power.low
 
-            visible: UPower.onBattery && UPower.displayDevice.isLaptopBattery
+            visible: !Power.onMains && Power.hasBattery
             icon: batteryPill.low ? "battery-low" : "battery-medium"
-            label: policy.batteryPercent(batteryPill.fraction) + "%"
+            label: Power.label
             tint: batteryPill.low ? Theme.accentEmber : Theme.textMuted
         }
 

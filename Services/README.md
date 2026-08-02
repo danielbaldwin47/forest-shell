@@ -21,7 +21,21 @@ Two rules that hold across all of them:
 - A service that only one surface uses is not a service: it lives with its
   surface (`Surfaces/Drawers/Launcher/services/`), not here.
 
-Three of them exist so far:
+A third rule, added by #36, because two of these services collide by name with
+the upstream module they wrap:
+
+- **A facade that shadows an upstream singleton imports it under an alias.**
+  `Quickshell.Networking` and `Quickshell.Bluetooth` each export a singleton
+  named after the module, and so do we. Inside `Networking.qml` and
+  `Bluetooth.qml`, `Nm.` and `Bz.` mean upstream's; everywhere else in the
+  shell the unqualified name means the facade. Two types with one name is the
+  failure mode Core/Config.qml documents for a singleton called `State` — no
+  error anywhere, every property reading back `undefined`. Where a *bar module*
+  would collide instead, the service takes the different name: the backlight
+  facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
+  already `Brightness`.
+
+Eight of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -49,6 +63,25 @@ Three of them exist so far:
   own IPC target, and the spec ([#30]) requires all of them to converge on one
   `lock()`. A door that lives inside the room it opens would make every one of
   those callers reach through `Surfaces/`.
+
+- `Media/Audio.qml`, `Networking/Networking.qml`, `Networking/Bluetooth.qml`,
+  `Hardware/Power.qml`, `Hardware/Backlight.qml` (#36) — the system service
+  layer behind the bar's status cluster, battery and brightness readout. Four
+  of the five are pure wiring over a native Quickshell client (PipeWire,
+  NetworkManager, BlueZ, UPower — #4 surveyed all four as native, which is why
+  nothing here shells out to `wpctl`, `nmcli` or `bluetoothctl`), and each
+  keeps its decisions in a `*Policy.qml` beside it so `tests/` can reach them.
+  `Backlight` is the exception and the reason the CLI-wrapper rule exists
+  (#12): there is no brightness type anywhere in Quickshell, so it reads
+  `/sys/class/backlight` through a `FileView` and writes through
+  `brightnessctl` — one subprocess, exit status read (#78), coalesced so a held
+  key cannot kill the run in flight.
+
+  All five are named in `Core/ServiceInit.qml`'s deferred list, and they have
+  to be: each native backend only starts when something first touches its
+  singleton, and then takes about a second to answer. A service constructed
+  when the user first opens a panel would spend that second reporting a machine
+  with no radios and no battery.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

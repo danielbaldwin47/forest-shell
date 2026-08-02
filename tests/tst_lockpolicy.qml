@@ -206,25 +206,4 @@ TestCase {
         compare(Qt.formatDateTime(noon, policy.timeFormat(true)), "12:34");
         compare(Qt.formatDateTime(noon, policy.dateFormat), "Saturday, 1 August");
     }
-
-    // --- battery -------------------------------------------------------------
-
-    function test_upower_reports_a_fraction_not_a_percentage() {
-        compare(policy.batteryPercent(0.62), 62);
-        compare(policy.batteryPercent(1), 100);
-        compare(policy.batteryPercent(0), 0);
-    }
-
-    function test_a_battery_out_of_range_does_not_widen_the_pill() {
-        compare(policy.batteryPercent(1.4), 100);
-        compare(policy.batteryPercent(-0.2), 0);
-        compare(policy.batteryPercent(NaN), 0);
-    }
-
-    function test_the_low_threshold() {
-        verify(policy.batteryLow(0.2));
-        verify(policy.batteryLow(0.05));
-        verify(!policy.batteryLow(0.21));
-        verify(!policy.batteryLow(NaN));
-    }
 }

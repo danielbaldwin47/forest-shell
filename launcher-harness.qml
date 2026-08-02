@@ -217,6 +217,70 @@ ShellRoot {
         /// disk, so a mismatch between the two isolates to the file write —
         /// the same split `uses()` makes for frecency.
         function dark(): bool { return Theme.dark; }
+
+        // --- Ask Claude (#41) -------------------------------------------------
+        //
+        // Everything below stops short of the API by default. One real
+        // question costs real money on the user's subscription and needs a
+        // network, so the script asks for it explicitly (`--live`) and the
+        // rest of the checks are about the parts that fail without one: the
+        // preflight, the argv, the silences, and the cancel path.
+
+        /// Whether the preflight found a logged-in, first-party CLI. The
+        /// calculator's `calculatorReady()` question, and it cannot be a unit
+        /// test for the same reason: the answer comes from a spawn.
+        function claudeReady(): bool { return Claude.available; }
+        function claudeProbed(): bool { return Claude.probed; }
+
+        /// The argv the provider would actually build for a question, under
+        /// the *resolved* config rather than a fixture.
+        ///
+        /// tests/tst_claudepolicy.qml already asserts the shape of this from a
+        /// hand-written settings object. What it cannot see is whether
+        /// Core/SettingsSchema.qml resolves to something that still produces
+        /// it — a coercer that quietly dropped `launcher.claude.tools` would
+        /// pass every unit test and ship an unrestricted run.
+        function claudeArgv(question: string): string {
+            return Claude.policy.argv(question, Config.values.launcher.claude,
+                                      "00000000-0000-4000-8000-000000000000",
+                                      false).join(" ");
+        }
+
+        /// Send a question, for real. The script gates this behind `--live`.
+        /// Through the dispatcher rather than through `Claude.ask()`, so the
+        /// routing and the settings lookup are part of what is checked.
+        function askClaude(question: string): bool {
+            Providers.submit("?" + question, harness.providerSettings);
+            return true;
+        }
+
+        function claudeStreaming(): bool { return Claude.streaming; }
+        function claudeAnswer(): string { return Claude.answer; }
+        function claudeStatus(): string { return Claude.status; }
+        function claudeFailure(): string { return Claude.failure; }
+        function claudeSession(): string { return Claude.sessionId; }
+        function claudeModel(): string { return Claude.model; }
+        function claudeTurns(): int { return Claude.turns.count; }
+
+        /// One turn, as `speaker|text`. The pipe rather than a colon because
+        /// an answer is prose and will contain colons.
+        function claudeTurn(index: int): string {
+            if (index < 0 || index >= Claude.turns.count)
+                return "";
+            const turn = Claude.turns.get(index);
+            return String(turn.speaker) + "|" + String(turn.text);
+        }
+
+        /// Stop a turn in flight — the Escape path, minus the keystroke, for
+        /// the reason the header gives about Enter.
+        function claudeCancel(): bool {
+            return Providers.cancel("?", harness.providerSettings);
+        }
+
+        function claudeReset(): bool {
+            Claude.reset();
+            return true;
+        }
     }
 
     readonly property var providerSettings: Config.values.launcher.providers

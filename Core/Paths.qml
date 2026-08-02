@@ -23,6 +23,13 @@ Singleton {
     readonly property string stateDir: Quickshell.stateDir
     readonly property string stateFile: stateDir + "/state.json"
 
+    // Where every `claude -p` turn runs (#41). It is a directory and not a
+    // detail: the CLI scopes session lookup to the working directory, so two
+    // turns run from different places are two conversations. Pinned here,
+    // stable, and deliberately not the checkout — a git repository widens the
+    // lookup across worktrees in ways nothing here can predict.
+    readonly property string claudeDir: stateDir + "/claude"
+
     // QML `source` properties want a URL, not a path. Percent-encoding is not
     // optional: a wallpaper living in a directory with a `#` in its name parses
     // as a URL fragment and the file silently never loads.

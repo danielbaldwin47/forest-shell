@@ -130,9 +130,14 @@ else
     nested_fail "a service constructed in the sync stage: ${sync_line:-<no line>}"
 fi
 
+# The count is written out rather than derived, so that a service which stops
+# being constructed fails this check instead of silently shrinking it. The cost
+# is that it has to be updated by the ticket that adds one — and it was not:
+# #40 took the list from ten to twelve (Apps, Calculator) and left this at ten,
+# so the check has been red on main since it landed. #41 makes it thirteen.
 deferred_line=$(grep -a 'services: deferred stage' "$NESTED_SHELL_LOG" | head -1)
-if [[ "$deferred_line" == *"10 object(s)"* ]]; then
-    nested_pass 'the deferred stage constructs all ten services'
+if [[ "$deferred_line" == *"13 object(s)"* ]]; then
+    nested_pass 'the deferred stage constructs all thirteen services'
 else
     nested_fail "the deferred stage is not what it should be: ${deferred_line:-<no line>}"
 fi

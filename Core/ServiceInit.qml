@@ -86,9 +86,14 @@ Singleton {
         // by "qalc is not installed", which is a worse way to learn it than
         // being told immediately. It spawns one short-lived process and reads
         // nothing else, so it is the cheapest entry on this list.
+        // Claude (#41) is the calculator's argument twice over: it probes
+        // `claude auth status` once, and it has a directory to create before
+        // the first turn can run in it. Constructed on the first `?`, the
+        // panel would take a question, spawn into a working directory that
+        // does not exist yet, and fail in the shape of a missing binary.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
-                            SystemTray, Mpris, Apps, Calculator]);
+                            SystemTray, Mpris, Apps, Calculator, Claude]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

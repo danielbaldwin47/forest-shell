@@ -82,6 +82,40 @@ FocusScope {
     readonly property string hiddenLabel: root.policy.hidden(root.matches.length,
                                                              root.rows.length)
 
+    /// Whether the panel is a conversation rather than a list (#41). Read off
+    /// the routing table and not off a provider id — the surface knowing any
+    /// provider by name is what the dispatcher exists to prevent.
+    readonly property bool conversing: root.policy.converses(root.query,
+                                                             root.providerSettings)
+
+    /// Whether there is a transcript to draw. A question appears in it the
+    /// instant it is sent, so this turns true on the same frame as Enter and
+    /// the empty state does not flash under the first answer.
+    readonly property bool transcribing: root.conversing && Claude.turns.count > 0
+
+    /// What the field says when it is empty. A conversation already underway
+    /// is answering rather than asking, and the prototype's finding is that
+    /// the field should say so (#11 §7, sheet 5).
+    readonly property string placeholder: root.transcribing ? "Reply…"
+                                                            : root.provider.placeholder
+
+    /// The model the chip names. While a turn is in flight it is the one
+    /// actually answering; otherwise it previews what the query as typed would
+    /// use, so `?sonnet` changes the chip as the word is completed rather than
+    /// after the answer comes back.
+    /// How wide prose is allowed to get inside the column. The column stays
+    /// 720 — the field, the rule and the legend are all measured off it — but
+    /// the prototype measured 720 at 14.5px as ~105 characters a line, which
+    /// is past the width prose stays readable at. Named once here because
+    /// three places need it and three literals is how they drift apart.
+    readonly property real proseWidth: 600
+
+    readonly property string modelInUse:
+        Claude.streaming
+        ? Claude.model
+        : Claude.policy.modelFor(Claude.policy.split(root.body).model,
+                                 Config.values.launcher.claude)
+
     /// Everything between the horizon and the bottom of the screen that is not
     /// a row: the gap under the rule, then below the last row the overflow
     /// label and its gap, the rule above the legend, the legend itself, the
@@ -121,6 +155,19 @@ FocusScope {
     // --- what Enter does -----------------------------------------------------
 
     function activate(): void {
+        // A conversational provider has no rows to activate — the query itself
+        // is what Enter sends, and the launcher stays open for the answer.
+        //
+        // The field is cleared back to its prefix rather than emptied: an
+        // empty string routes to the apps provider, so clearing it outright
+        // would drop the user out of the conversation they are in the middle
+        // of on the frame their question was sent.
+        if (root.conversing) {
+            Providers.submit(root.query, root.providerSettings);
+            field.text = root.provider.prefix;
+            return;
+        }
+
         const row = root.rows[root.selected];
         if (!row) {
             Logger.log("launcher", root.policy.launchedNothing(root.query));
@@ -147,10 +194,37 @@ FocusScope {
     }
 
     function move(delta: int): void {
+        // In a conversation there is no selection to move, so the arrows do
+        // the other obvious thing and scroll what has been said.
+        if (root.transcribing) {
+            transcriptView.contentY = Math.max(
+                0, Math.min(transcriptView.contentHeight - transcriptView.height,
+                            transcriptView.contentY + delta * root.policy.rowHeight));
+            return;
+        }
         if (root.rows.length === 0)
             return;
         root.selected = Math.max(0, Math.min(root.rows.length - 1,
                                              root.selected + delta));
+    }
+
+    /// Who is speaking, as the caps micro-label the rest of the shell already
+    /// uses for a band heading. An inline component because the transcript
+    /// needs it in two places — the finished turns and the one still being
+    /// written — and the third copy is where the two stop agreeing about
+    /// tracking.
+    component TurnLabel: Text {
+        required property string speaker
+
+        text: speaker === "you" ? "YOU" : "CLAUDE"
+        // The one colour decision in the transcript: the reader's own turns
+        // recede and Claude's come forward, which is what makes a wall of
+        // prose scannable without a rule between every pair.
+        color: speaker === "you" ? Theme.textSecondary : Theme.accentPrimary
+        font.family: Theme.fontUi
+        font.pointSize: Theme.pt(Theme.capsSize)
+        font.weight: Theme.weightMedium
+        font.letterSpacing: Theme.tracking(Theme.capsSize, Theme.capsTrackingEm)
     }
 
     // --- the god ray ---------------------------------------------------------
@@ -282,7 +356,8 @@ FocusScope {
                 }
 
                 Item {
-                    width: fieldRow.width - x
+                    width: fieldRow.width - x - (modelChip.visible
+                                                 ? modelChip.width + Theme.space3 : 0)
                     height: fieldArea.height
 
                     // The real thing, not the prototype's painted stand-in: it
@@ -319,9 +394,20 @@ FocusScope {
                         text: root.query
                         onTextChanged: root.query = text
 
-                        // Escape is deliberately not handled: it belongs to the
-                        // drawer window's outer FocusScope, so every drawer
-                        // dismisses the same way (DrawerWindow.qml).
+                        // Escape belongs to the drawer window's outer
+                        // FocusScope, so every drawer dismisses the same way
+                        // (DrawerWindow.qml) — and it still does here. The one
+                        // thing taken out of its path is an answer arriving:
+                        // a run that is streaming is the only state in this
+                        // surface where Escape has something nearer to hand to
+                        // mean, and it is the ticket's "hung request must be
+                        // cancellable". With nothing streaming the key is left
+                        // unaccepted and dismisses as before.
+                        Keys.onEscapePressed: event => {
+                            event.accepted = Providers.cancel(root.query,
+                                                              root.providerSettings);
+                        }
+
                         Keys.onUpPressed: root.move(-1)
                         Keys.onDownPressed: root.move(1)
                         Keys.onReturnPressed: root.activate()
@@ -341,12 +427,37 @@ FocusScope {
                         anchors.verticalCenter: parent.verticalCenter
                         x: field.x + 12
                         visible: field.text.length === 0
-                        text: root.provider.placeholder
+                        text: root.placeholder
                         color: Theme.textSecondary
                         font.family: Theme.fontUi
                         font.pointSize: Theme.pt(23)
                         font.weight: Theme.weightRegular
                         font.letterSpacing: -0.2
+                    }
+                }
+
+                // Which model is answering. Mono and warm, at the far end of
+                // the field — the prototype's sheet 5, and it earns its place
+                // because `?sonnet …` changes it per question: a chip that
+                // only ever said the configured default would be decoration.
+                Rectangle {
+                    id: modelChip
+
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.conversing
+                    height: 20
+                    width: modelText.width + Theme.space3 * 2
+                    radius: Theme.radiusSm
+                    color: Qt.alpha(Theme.accentWarm, 0.16)
+
+                    Text {
+                        id: modelText
+
+                        anchors.centerIn: parent
+                        text: root.modelInUse
+                        color: Theme.accentWarm
+                        font.family: Theme.fontMono
+                        font.pointSize: Theme.pt(11.5)
                     }
                 }
             }
@@ -375,15 +486,18 @@ FocusScope {
             // above it — "Calculate lands with #40" was drawn straight through
             // the legend, which is the one arrangement of this surface that no
             // unit test can see and the capture shows at a glance.
-            height: root.rows.length === 0
-                    ? emptyState.height
-                    : rowsColumn.y + rowsColumn.height
-                      + (overflow.visible ? Theme.space2 + overflow.height : 0)
+            height: root.transcribing
+                    ? transcriptView.height
+                    : root.rows.length === 0
+                      ? emptyState.height
+                      : rowsColumn.y + rowsColumn.height
+                        + (overflow.visible ? Theme.space2 + overflow.height : 0)
 
             Text {
                 id: sectionLabel
 
                 visible: root.query.length === 0 && root.rows.length > 0
+                         && !root.transcribing
                 text: "RECENT"
                 color: Theme.textSecondary
                 font.family: Theme.fontUi
@@ -396,6 +510,7 @@ FocusScope {
             Column {
                 id: rowsColumn
 
+                visible: !root.transcribing
                 width: results.width
                 y: sectionLabel.visible ? sectionLabel.height + Theme.space3 : 0
 
@@ -611,10 +726,200 @@ FocusScope {
 
             // Where the list stops, and how much it hid — rather than running
             // off the bottom of the screen behind the legend (#11 §6).
+            // --- the conversation --------------------------------------------
+            //
+            // The transcript replaces the list in the same column, keeping the
+            // field, the rule and the horizon exactly where they were (#11 §7,
+            // sheet 5). What it does *not* keep is the 720px measure: at
+            // 14.5px that is about 105 characters a line, which the prototype
+            // measured as too wide to read prose in. The column stays; the
+            // text inside it is capped.
+
+            Flickable {
+                id: transcriptView
+
+                visible: root.transcribing
+                width: results.width
+                // The same vertical budget the row list would have had, so a
+                // conversation stops where a list stops and the card closes in
+                // the same place either way.
+                height: Math.min(contentHeight, root.maxRows * root.policy.rowHeight)
+                contentWidth: width
+                contentHeight: turnsColumn.height
+                clip: true
+                interactive: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                // Follow the answer as it is written, but only from the
+                // bottom: a user who has scrolled up to re-read something is
+                // not asking to be dragged back down every token.
+                readonly property bool atBottom:
+                    contentY >= contentHeight - height - root.policy.rowHeight
+                onContentHeightChanged: {
+                    if (atBottom)
+                        contentY = Math.max(0, contentHeight - height);
+                }
+
+                Column {
+                    id: turnsColumn
+
+                    width: transcriptView.width
+                    spacing: Theme.space4
+
+                    Repeater {
+                        // A model, appended to — not reassigned. Reassignment
+                        // rebuilds every delegate in the list, which here is
+                        // every bubble in the conversation, and it would
+                        // happen on every token (#75). The turn still being
+                        // written is the item below this one instead.
+                        model: Claude.turns
+
+                        Column {
+                            id: turn
+
+                            required property string speaker
+                            required property string text
+                            required property string note
+
+                            width: turnsColumn.width
+                            spacing: Theme.space2
+
+                            TurnLabel {
+                                speaker: turn.speaker
+                            }
+
+                            Text {
+                                width: Math.min(root.proseWidth, turnsColumn.width)
+                                text: turn.text
+                                color: Theme.textPrimary
+                                wrapMode: Text.Wrap
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(14.5)
+                            }
+
+                            // The denial chip, under the turn it belongs to.
+                            // A tool refused three answers ago is not news
+                            // about this one, which is the whole reason it
+                            // travels with the turn rather than sitting in one
+                            // place at the bottom of the panel.
+                            Row {
+                                visible: turn.note !== ""
+                                spacing: Theme.space2
+
+                                Icon {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    name: "shield-alert"
+                                    size: 13
+                                    color: Theme.accentWarm
+                                }
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: turn.note
+                                    color: Theme.accentWarm
+                                    font.family: Theme.fontUi
+                                    font.pointSize: Theme.pt(11.5)
+                                }
+                            }
+                        }
+                    }
+
+                    // The turn being written. One `Text` bound to a string
+                    // that is appended to, so a token is a re-layout of this
+                    // item and nothing else.
+                    Column {
+                        visible: Claude.streaming || Claude.answer !== ""
+                                 || Claude.failure !== ""
+                        width: turnsColumn.width
+                        spacing: Theme.space2
+
+                        TurnLabel {
+                            speaker: "claude"
+                        }
+
+                        Row {
+                            spacing: 2
+
+                            Text {
+                                id: liveAnswer
+
+                                width: Math.min(root.proseWidth, turnsColumn.width)
+                                    - (caret.visible ? caret.width + 2 : 0)
+                                text: Claude.answer
+                                color: Theme.textPrimary
+                                wrapMode: Text.Wrap
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(14.5)
+                            }
+
+                            // A block, not a text cursor: the prototype
+                            // measured 7×15 as the one that reads as "still
+                            // writing" rather than as "the field is here".
+                            Rectangle {
+                                id: caret
+
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 3
+                                visible: Claude.streaming
+                                width: 7
+                                height: 15
+                                color: Theme.accentPrimary
+
+                                // Rung 3 of the ladder: reduced, the caret
+                                // stops blinking and stays solid. It is still
+                                // doing its job — "an answer is being written"
+                                // is carried by the block being there at all,
+                                // and the blink is the part that moves.
+                                SequentialAnimation on opacity {
+                                    running: caret.visible && Theme.duration(450) > 0
+                                    loops: Animation.Infinite
+                                    NumberAnimation { to: 0.2; duration: Theme.duration(450) }
+                                    NumberAnimation { to: 1.0; duration: Theme.duration(450) }
+                                }
+                            }
+                        }
+
+                        // What it is doing while there is nothing to read yet
+                        // — "using WebSearch…", "retrying 2/10…". A transient
+                        // and not an answer, so it goes under the caret and
+                        // disappears the moment text starts.
+                        Text {
+                            visible: Claude.status !== "" && Claude.answer === ""
+                            text: Claude.status
+                            color: Theme.textSecondary
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(11.5)
+                        }
+
+                        Row {
+                            visible: Claude.failure !== ""
+                            spacing: Theme.space2
+
+                            Icon {
+                                anchors.verticalCenter: parent.verticalCenter
+                                name: "circle-slash"
+                                size: 14
+                                color: Theme.accentEmber
+                            }
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(root.proseWidth - 40, turnsColumn.width)
+                                text: Claude.failure
+                                color: Theme.accentEmber
+                                wrapMode: Text.Wrap
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(12.5)
+                            }
+                        }
+                    }
+                }
+            }
+
             Text {
                 id: overflow
 
-                visible: root.hiddenLabel !== ""
+                visible: root.hiddenLabel !== "" && !root.transcribing
                 y: rowsColumn.y + rowsColumn.height + Theme.space2
                 text: root.hiddenLabel
                 color: Theme.textSecondary
@@ -627,7 +932,7 @@ FocusScope {
             Item {
                 id: emptyState
 
-                visible: root.rows.length === 0
+                visible: root.rows.length === 0 && !root.transcribing
                 width: results.width
                 height: root.policy.rowHeight
 

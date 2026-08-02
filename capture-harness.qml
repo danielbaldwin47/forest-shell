@@ -74,6 +74,23 @@ ShellRoot {
     /// #39's fold criterion is easiest to read on.
     readonly property string launcherQuery: Quickshell.env("CAPTURE_LAUNCHER_QUERY") ?? ""
 
+    /// A posed Ask Claude transcript (#41), as `speaker|text` turns separated
+    /// by `~`. Posed rather than asked, for the reason every other value here
+    /// is: a capture that spent a real API turn would photograph whatever the
+    /// model happened to say that afternoon, at whatever length, which is not
+    /// a layout this file can make a criterion out of.
+    ///
+    /// What it is for is the measurement the prototype made and this ticket
+    /// inherits: 720px is too wide for prose, so the text inside the column is
+    /// capped to 600. That cap, the wrap, the caps turn labels and the denial
+    /// chip are all pictures — seam 3's job — and none of them is reachable
+    /// from tools/launcher-harness.sh, which has no surface in it.
+    ///
+    ///     tools/capture-harness.sh out.png --surface launcher --session \
+    ///         --query '?' --transcript 'you|why is the sky blue~claude|Rayleigh…'
+    readonly property string claudeTranscript:
+        Quickshell.env("CAPTURE_CLAUDE_TRANSCRIPT") ?? ""
+
     /// What the lock is showing, as a comma-separated set — `quiet` on its own,
     /// or any of `summoned`, `caps`, `notify:N`. Every item in the lock's status
     /// strip is gated on something about the machine (a discharging battery, a
@@ -332,6 +349,29 @@ ShellRoot {
                 }
 
                 query: root.launcherQuery
+
+                // Posed straight into the provider's own model, so the
+                // delegate under test is the shipped one rather than a copy
+                // of it living in this file.
+                Component.onCompleted: {
+                    if (root.claudeTranscript === "")
+                        return;
+                    for (const turn of root.claudeTranscript.split("~")) {
+                        const split = turn.indexOf("|");
+                        if (split < 0)
+                            continue;
+                        Claude.turns.append({
+                            speaker: turn.slice(0, split),
+                            text: turn.slice(split + 1),
+                            // A denial is a picture too, and it is the one
+                            // that only appears on a turn that had one — so it
+                            // is posed by asking for it in the text rather
+                            // than by a second variable nothing else uses.
+                            note: turn.indexOf("[denied]") >= 0
+                                  ? Claude.policy.denialNote(["WebSearch"]) : ""
+                        });
+                    }
+                }
             }
 
             BarSurface {

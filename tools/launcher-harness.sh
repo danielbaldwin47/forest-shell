@@ -3,6 +3,7 @@
 #
 #   tools/launcher-harness.sh          # run the checks, print PASS/FAIL, exit 0/1
 #   tools/launcher-harness.sh --keep   # leave the nested session up to poke at
+#   tools/launcher-harness.sh --live   # ...and spend one real Ask Claude turn
 #
 # The launcher splits cleanly across the three seams, and this is the middle
 # one. Which provider a query is in, what matches it, how frecency weights the
@@ -38,8 +39,13 @@
 #  16. `=` Enter copies the result
 #  17. `/` lists actions, and one of them changes the shell
 #  18. ...and the change reaches settings.json on disk
-#  19. nothing is fighting itself (no binding loops)
-#  20. a machine with no qalc says so, immediately and only about the calculator
+#  19. the Ask Claude provider comes up
+#  20. its preflight answers at startup rather than at the first `?`
+#  21. the argv the *resolved* config builds is contained, and cannot say --bare
+#  22. `?` produces a conversation rather than rows
+#  23. a real question streams, resumes and cancels        (--live only)
+#  24. nothing is fighting itself (no binding loops)
+#  25. a machine with no qalc says so, immediately and only about the calculator
 #
 # ## The three #40 providers, and why they are here
 #
@@ -75,9 +81,14 @@ set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
 
+LIVE=0
 for arg in "$@"; do
     case "$arg" in
         --keep) NESTED_KEEP=1 ;;
+        # Spends one real turn on the user's subscription. Off by default for
+        # that reason and not because the check is weak — it is the only one
+        # here that watches an answer actually stream.
+        --live) LIVE=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -401,7 +412,138 @@ else
     nested_fail "settings.json does not agree with the shell: $(grep -ao '"darkMode":[^,]*' "$SETTINGS" 2>/dev/null)"
 fi
 
-# --- 19. nothing is fighting itself --------------------------------------------
+# --- 19. Ask Claude comes up ----------------------------------------------------
+
+if grep -qa 'startup: stage claude provider armed' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the Ask Claude provider came up'
+else
+    nested_fail 'the Ask Claude provider never came up'
+fi
+
+# --- 20. the preflight answered -------------------------------------------------
+#
+# Either answer is a pass. What is being checked is that the question was asked
+# at startup rather than left for the first `?` to discover — the calculator's
+# argument, and the difference between a panel that says "not logged in" the
+# moment you type `?` and one that takes a question and then says it.
+
+if nested_await "$NESTED_SHELL_LOG" 'launcher: (claude ready|Not logged in)' 15; then
+    nested_pass "the preflight answered: $(grep -aoE 'launcher: (claude ready|Not logged in.*)' "$NESTED_SHELL_LOG" | tail -1)"
+else
+    nested_fail 'the preflight never ran — a `?` would discover the auth state itself'
+fi
+
+# --- 21. the argv the *resolved* config produces ---------------------------------
+#
+# tests/tst_claudepolicy.qml asserts this shape against a hand-written settings
+# object. What it cannot see is whether Core/SettingsSchema.qml still resolves
+# to something that produces it: a coercer that quietly dropped
+# `launcher.claude.tools` would pass every unit test and ship a run with no
+# restriction on it at all. This is the same argv, built from the config the
+# shell actually loaded.
+
+ARGV=$(reply claudeArgv 'hello')
+
+argv_has() {
+    if [[ "$ARGV" == *"$1"* ]]; then
+        nested_pass "the argv carries $2"
+    else
+        nested_fail "the argv is missing $2 — got: ${ARGV:0:200}"
+    fi
+}
+
+argv_has '--tools WebSearch,WebFetch,Read,Grep,Glob' 'the restricted tool set'
+argv_has '--allowedTools WebSearch,WebFetch,Read,Grep,Glob' 'the matching grant'
+argv_has '--safe-mode' 'a hermetic run'
+argv_has '--permission-mode dontAsk' 'the deny gate'
+argv_has '--verbose' 'the flag stream-json requires'
+
+# The one that is about money rather than behaviour: `--bare` hard-disables
+# OAuth, so a run carrying it works perfectly and bills an API account instead
+# of the subscription the user is paying for.
+if [[ "$ARGV" != *"--bare"* ]]; then
+    nested_pass 'the argv cannot reach --bare'
+else
+    nested_fail 'the argv carries --bare — this run would not be on the subscription'
+fi
+
+# --- 22. `?` is a conversation, not a list ---------------------------------------
+
+if [[ -z "$(reply rows '?why is the sky blue')" ]]; then
+    nested_pass 'a question produces no rows — the panel is a transcript'
+else
+    nested_fail "a question produced rows: $(reply rows '?why is the sky blue')"
+fi
+
+said=$(reply silence '?')
+if [[ -n "$said" ]]; then
+    nested_pass "an empty question says: $said"
+else
+    nested_fail 'an empty question says nothing at all'
+fi
+
+# --- 23. a real question --------------------------------------------------------
+#
+# Off by default, and that is the honest default rather than a timid one: this
+# check spends real money on the user's own subscription and needs a network.
+# `--live` asks for it.
+#
+# What it cannot check either way is the ticket's last acceptance criterion —
+# that the run is on subscription auth rather than an API key. The nested
+# session inherits the environment it was started from, so an absent
+# `ANTHROPIC_API_KEY` here says nothing about a real session's. That one is a
+# real-session check and the PR says so.
+
+if (( LIVE )); then
+    if [[ "$(reply claudeReady)" != "true" ]]; then
+        nested_fail 'asked for --live but the CLI is not logged in'
+    else
+        reply claudeReset >/dev/null
+        reply askClaude 'Reply with exactly the word: pineapple' >/dev/null
+
+        # The question is in the transcript on the same call, before any
+        # answer: the panel must never look like it dropped what was typed.
+        if [[ "$(reply claudeTurns)" == "1" ]]; then
+            nested_pass 'the question is in the transcript before the answer'
+        else
+            nested_fail "the question did not reach the transcript: $(reply claudeTurns) turn(s)"
+        fi
+
+        if nested_await "$NESTED_SHELL_LOG" 'launcher: session .* (opened|resumed)' 10; then
+            nested_pass "a session was opened: $(reply claudeSession)"
+        else
+            nested_fail 'no session was opened'
+        fi
+
+        if nested_await "$NESTED_SHELL_LOG" 'launcher: answered in [0-9]+ms' 60; then
+            nested_pass "the answer landed: $(reply claudeTurn 1)"
+        else
+            nested_fail "the answer never landed — failure: $(reply claudeFailure)"
+        fi
+
+        # The follow-up resumes rather than opening a second conversation.
+        SID=$(reply claudeSession)
+        reply askClaude 'What word did you just say? One word.' >/dev/null
+        if nested_await "$NESTED_SHELL_LOG" "launcher: session $SID resumed" 10; then
+            nested_pass 'the follow-up resumed the same session'
+        else
+            nested_fail 'the follow-up did not resume the session'
+        fi
+
+        # And it can be stopped mid-answer.
+        if [[ "$(reply claudeCancel)" == "true" ]]; then
+            nested_await "$NESTED_SHELL_LOG" 'launcher: cancelled by the user' 5 \
+                && nested_pass 'a turn in flight can be cancelled' \
+                || nested_fail 'the cancel was accepted but never logged'
+        else
+            nested_pass 'nothing was in flight to cancel'
+        fi
+    fi
+else
+    printf '  ..  skipped the live question (pass --live to spend a real turn)\n'
+fi
+
+# --- 24. nothing is fighting itself --------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"
@@ -409,7 +551,7 @@ else
     nested_pass 'no binding loops in the provider'
 fi
 
-# --- 20. a machine with no qalc -------------------------------------------------
+# --- 25. a machine with no qalc -------------------------------------------------
 #
 # Last, because it restarts the shell and the restart truncates the log every
 # check above reads.

@@ -22,6 +22,8 @@
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
+#   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
+#       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
 #   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
 #
@@ -94,6 +96,7 @@ SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
 LAUNCHER_QUERY=""
+CLAUDE_TRANSCRIPT=""
 DELAY_MS=600
 REDUCED=0
 
@@ -109,6 +112,7 @@ while (( $# )); do
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
+        --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -194,6 +198,7 @@ CAPTURE_ENV=(
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
+    CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.

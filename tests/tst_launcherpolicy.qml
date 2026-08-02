@@ -93,9 +93,10 @@ TestCase {
 
     // --- what has landed -----------------------------------------------------
 
-    function test_four_providers_have_landed() {
-        // Apps with #39; calculator, emoji and actions with #40.
-        for (const query of ["", "=2+2", ":tree", "/lock"]) {
+    function test_five_providers_have_landed() {
+        // Apps with #39; calculator, emoji and actions with #40; Ask Claude
+        // with #41.
+        for (const query of ["", "=2+2", ":tree", "/lock", "?why"]) {
             compare(policy.route(query, testCase.allOn).landed, true);
             compare(policy.unavailable(policy.route(query, testCase.allOn)), "");
         }
@@ -106,10 +107,34 @@ TestCase {
         // and #40 is not the clipboard — #53 is. Not a comment: this string is
         // what a user typing `;` reads, so a wrong owner sends them to the
         // wrong ticket.
+        //
+        // One left, which is why this test still has a subject at all.
         compare(policy.unavailable(policy.route(";", testCase.allOn)),
                 "Clipboard lands with #53");
-        compare(policy.unavailable(policy.route("?hello", testCase.allOn)),
-                "Ask Claude lands with #41");
+    }
+
+    // --- the provider that is not a list -------------------------------------
+
+    function test_only_ask_claude_converses() {
+        verify(policy.converses("?why is the sky blue", testCase.allOn));
+        for (const query of ["", "fire", "=2+2", ":tree", "/lock"])
+            verify(!policy.converses(query, testCase.allOn));
+    }
+
+    function test_a_bare_prefix_already_converses() {
+        // `?` with nothing after it is the panel already being a chat waiting
+        // for a question, not a list that happens to be empty.
+        verify(policy.converses("?", testCase.allOn));
+    }
+
+    function test_ask_claude_switched_off_falls_back_to_a_list() {
+        // Not a transcript nothing can be typed into: with the provider off
+        // the prefix is unclaimed, so `?why` is an app search that finds
+        // nothing and says so.
+        const noClaude = { apps: true, calculator: true, clipboard: true,
+                           emoji: true, actions: true, claude: false };
+        verify(!policy.converses("?why", noClaude));
+        compare(policy.route("?why", noClaude).id, "apps");
     }
 
     // --- routing without a prefix --------------------------------------------
@@ -382,7 +407,6 @@ TestCase {
 
     function test_a_provider_that_has_not_landed_does_not_answer() {
         compare(policy.answers(";", testCase.allOn), false);
-        compare(policy.answers("?hello", testCase.allOn), false);
     }
 
     function test_the_providers_that_landed_with_this_ticket_answer() {
@@ -390,6 +414,7 @@ TestCase {
         compare(policy.answers(":tree", testCase.allOn), true);
         compare(policy.answers("/lock", testCase.allOn), true);
         compare(policy.answers("2+2", testCase.allOn), true);
+        compare(policy.answers("?hello", testCase.allOn), true);
     }
 
     function test_switching_apps_off_actually_switches_apps_off() {

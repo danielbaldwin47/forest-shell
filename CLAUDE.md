@@ -71,18 +71,31 @@ which did not exist yet.
 ## Context discipline
 
 Implementation sessions were peaking at 200–340k tokens against a ~120k
-budget. Measured on the transcripts (2026-08), the two dominant costs were
-accumulated Bash output (test, typecheck and harness runs) and whole-file
-Reads of large files, often repeated across a session. Review subagents were
-*not* a cost — a subagent's report returns a few KB and its own reading never
-enters this context. Two rules follow:
+budget. The budget is about sharpness, not cost: a model deep in a long
+context reasons worse than the same model early in one. Everything printed
+into the session is paid for again on every call that follows, so the rules
+below are all one rule — nothing enters the main session unless the main
+session is about to act on it. Measured on the transcripts (2026-08), the
+dominant costs were accumulated Bash output (test, typecheck and harness
+runs) and whole-file Reads of large files, often repeated; review subagents
+were *not* a cost — a subagent's report returns a few KB and its own reading
+never enters this context.
 
-**Delegate exploration; only Read what you will edit.** Answering "how does X
-work / where is Y decided" by Reading files into the main session pays for
-those files again on every call that follows. Send that to a read-only
-subagent (Explore or equivalent) and keep only its conclusions. Reserve
-main-session Read for files about to be edited — and do not re-read a file
-after editing it.
+**Plan outside the session that will build.** The planning read-through is
+the widest exploration a ticket does. Have a Plan agent (or equivalent)
+produce the plan in its own context and hand back only the plan; the build
+session starts executing, not exploring.
+
+**Delegate exploration; only Read what you will edit.** "How does X work /
+where is Y decided" goes to a read-only subagent (`cavecrew-investigator`
+where available, Explore otherwise), which returns an address or a
+conclusion, not the files. Reserve main-session Read for files about to be
+edited — and do not re-read a file after editing it.
+
+**On a big file, grep first and Read a range.** `Grep -n` for the key or
+section name, then Read with offset/limit around the hit. Never write down or
+reuse line numbers across edits — they drift; the grep is the address. Section
+keys and knob names are unique in the schema files precisely so this works.
 
 **Never let a noisy command print into the session.** Test suites, harnesses
 and typechecks redirect to a scratch file; grep the decisive lines back:
@@ -90,14 +103,19 @@ and typechecks redirect to a scratch file; grep the decisive lines back:
     log=$(mktemp); tests/run.sh >"$log" 2>&1; grep -E 'FAIL|Totals' "$log"
 
 (`mktemp`, not a fixed `/tmp` name — parallel sessions share `/tmp`.)
+Quote the shortest line that proves pass or fail.
 
-Quote the shortest line that proves pass or fail. A full log dumped into
-context is paid for again on every call after it.
+**Prefer Edit over Write on existing files.** A Write resends the whole file
+through context; an Edit sends only the hunk. On a schema-sized file that is
+an order of magnitude.
 
-**On a big file, grep first and Read a range.** `Grep -n` for the key or
-section name, then Read with offset/limit around the hit. Never write down or
-reuse line numbers across edits — they drift; the grep is the address. Section
-keys and knob names are unique in the schema files precisely so this works.
+**Compact at phase boundaries — a keyboard action, so design around it.**
+The agent cannot invoke `/compact` (no tool, hook or SDK call does it;
+auto-compact only fires near the window limit). Interactively: `/compact`
+once the plan is agreed and again when tests go green — the churn behind
+those points is dead weight that still shapes attention. Unattended sessions
+get the same effect structurally: one ticket per session, plan and review in
+subagents, so there is little to compact.
 
 ## Session workflow
 

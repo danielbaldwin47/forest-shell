@@ -226,22 +226,30 @@ Scope {
                 opacity: window.revealed
                          || (Theme.animateTransforms && content.y !== content.parkedY) ? 1 : 0
 
+                // The second clause is about the knob rather than about the
+                // bar: flipping it moves `y` too, and that move is not a
+                // reveal. Without the guard, turning reduced effects *off*
+                // while the bar is hidden would find the content parked at
+                // y: 0 and slide a bar the user cannot see all the way out
+                // across the screen. Hidden in either mode means "not visible",
+                // so `opacity` is what tells the two kinds of move apart.
                 Behavior on y {
                     enabled: Theme.animateTransforms
+                             && (window.revealed || content.opacity > 0)
                     NumberAnimation {
-                        duration: Theme.duration(Theme.motionStandard)
+                        duration: Theme.motionStandard
                         easing.type: Easing.Bezier
                         easing.bezierCurve: Theme.fogEase
                     }
                 }
 
-                // Only reduced: unreduced, this property snaps at the two
-                // moments the content is entirely off the window anyway.
+                // Only reduced, where entrance and exit are one duration — so
+                // no ternary. Unreduced this property snaps, at the two moments
+                // the content is entirely off the window anyway.
                 Behavior on opacity {
                     enabled: !Theme.animateTransforms
                     NumberAnimation {
-                        duration: window.revealed ? Theme.duration(Theme.motionStandard)
-                                                  : Theme.exitDuration(Theme.motionStandard)
+                        duration: Theme.duration(Theme.motionStandard)
                         easing.type: Easing.Bezier
                         easing.bezierCurve: Theme.fogEase
                     }

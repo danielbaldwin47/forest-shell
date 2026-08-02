@@ -33,7 +33,7 @@
 //      the rung is the contract: the next decorative effect binds its `visible`
 //      to `Theme.drawDecoration` rather than re-litigating the ladder.
 //   3. **Every transition is an opacity-only fade at 140 ms.** `duration`,
-//      `exitDuration`, `animatesTransforms`, `animatesFades`.
+//      `exitDuration`, `animatesTransforms`.
 //
 // ## What rung 3 means by "opacity-only"
 //

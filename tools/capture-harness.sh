@@ -24,9 +24,16 @@
 #
 # --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
 # ladder is either the compositor's (blur), a transition, or an effect no
-# shipped surface draws yet, so a still frame of a surface at rest should be
-# *byte-identical* to one taken without it — which is what makes this flag the
-# check that reduced effects is a supported look and not a stripped one.
+# shipped surface draws yet, so a still frame of a surface at rest is
+# *byte-identical* either way, and that is the check reduced effects is a
+# supported look rather than a stripped one — two runs and a `cmp`:
+#
+#   tools/capture-harness.sh a.png --surface lock
+#   tools/capture-harness.sh b.png --surface lock --reduced
+#   cmp a.png b.png
+#
+# (The Appearance tab is the one exception, and only because the switch this
+# knob now has draws its own state.)
 #
 # --lock-state poses the lock: `quiet`, or any comma-separated combination of
 # `summoned` (the field revealed), `caps` (the caps-lock warning) and
@@ -96,7 +103,7 @@ while (( $# )); do
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
-        --help|-h)     sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac

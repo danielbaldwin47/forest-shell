@@ -67,6 +67,26 @@ QtObject {
             seq: { def: 0, coerce: c.integer(0) }
         },
 
+        launcher: {
+            // Frecency (#39). Two integer maps rather than one map of
+            // `{ count, at }` objects, because the coercer runs per leaf:
+            // `mapOf(integer)` drops the one entry a hand-edit corrupted and
+            // keeps the rest, where `object` can only take the whole map or
+            // refuse the whole map. This file is hand-editable (#21), so that
+            // difference is the difference between losing one app's history
+            // and losing all of it.
+            //
+            // Keyed by desktop-entry id. Ids of apps since uninstalled are
+            // left in place: they cost a few bytes, they match nothing, and
+            // reinstalling something should not forget that you use it.
+            uses: { def: ({}), coerce: c.mapOf(c.integer(0)) },
+
+            // Epoch milliseconds of the last launch. Beside the count rather
+            // than derived from it for the reason `notifications.seq` is:
+            // neither number can be recovered from the other.
+            lastUsed: { def: ({}), coerce: c.mapOf(c.integer(0)) }
+        },
+
         weather: {
             cache: { def: ({}), coerce: c.object }   // #50
         }

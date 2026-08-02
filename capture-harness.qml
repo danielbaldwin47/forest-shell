@@ -53,6 +53,7 @@ import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
+import qs.Services.Launcher
 import qs.Services.System
 import Quickshell.Services.UPower
 
@@ -67,6 +68,11 @@ ShellRoot {
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
     readonly property int delayMs: parseInt(Quickshell.env("CAPTURE_DELAY_MS") || "600")
+
+    /// What is typed into the launcher, prefix and all. Empty is the recents
+    /// state, which is a different picture from a filtered one and the one
+    /// #39's fold criterion is easiest to read on.
+    readonly property string launcherQuery: Quickshell.env("CAPTURE_LAUNCHER_QUERY") ?? ""
 
     /// What the lock is showing, as a comma-separated set — `quiet` on its own,
     /// or any of `summoned`, `caps`, `notify:N`. Every item in the lock's status
@@ -118,6 +124,7 @@ ShellRoot {
                     case "lock":     return lockScene;
                     case "bar-full": return barFullScene;
                     case "drawer":   return drawerScene;
+                    case "launcher": return launcherScene;
                     default:         return barScene;
                     }
                 }
@@ -270,6 +277,95 @@ ShellRoot {
         }
     }
 
+    /// The launcher as a clearing (#39): the fog, the card at the 32% horizon,
+    /// and the bar above both. This is the picture #39's layout criterion is
+    /// about — horizon fraction, 720px column, 46px rows, the fold — and the
+    /// one the contrast criterion is measured from.
+    ///
+    /// `--query` is what poses it, and the fold is only legible with one set.
+    /// An empty query is the recents list, which is capped at six rows well
+    /// short of the fold, so the `N more` label never appears and the card
+    /// never reaches its full height. To read the fold, ask for something that
+    /// matches broadly:
+    ///
+    ///     tools/capture-harness.sh out.png --surface launcher --query e
+    ///
+    /// Two things it reports that the script needs. `card=` and `legend=` are
+    /// the two regions `--contrast` samples: the card's fill over the wallpaper
+    /// is what every row's text sits on, and the legend sits at the bottom of
+    /// the same card over a different part of the wallpaper, which on a
+    /// top-lit gradient is not the same measurement. Reported from the scene
+    /// rather than recomputed in bash for the reason `bar=` is — the geometry
+    /// is a property of what was rendered, not of what the script assumed.
+    ///
+    /// Needs `--session` to be worth *looking* at: every row's app icon is an
+    /// `Image` behind a `MultiEffect`, which draws nothing offscreen
+    /// (Widgets/Icon.qml). Offscreen still measures the fills, which is what
+    /// the contrast criterion is — and is the stricter case, since a real
+    /// icon only ever adds contrast to the row it is on.
+    Component {
+        id: launcherScene
+
+        Backdrop {
+            id: launcherBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            Launcher {
+                id: clearing
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                query: root.launcherQuery
+            }
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            // Read once the scene has settled rather than at completion: the
+            // desktop-entry scan streams in, so the card is still growing a row
+            // at a time for the first second of the capture's life and its
+            // height at `Component.onCompleted` is the height of an empty one.
+            function describe(): void {
+                root.sceneDescription =
+                    "query=\"" + root.launcherQuery + "\""
+                    + " rows=" + clearing.rows.length
+                    + " of=" + clearing.matches.length
+                    + " fold=" + clearing.maxRows
+                    + " apps=" + Apps.count
+                    + " card=" + root.region(clearing.cardItem, launcherBackdrop)
+                    + " legend=" + root.region(clearing.legendItem, launcherBackdrop)
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            Component.onCompleted: root.describeScene = launcherBackdrop.describe
+        }
+    }
+
     /// #73: the lock's status strip is one of the two `MultiEffect` surfaces
     /// the ticket says have never rendered anywhere. The real LockSurface and
     /// the real shared LockAuth — what stands in for the session is the state
@@ -344,6 +440,27 @@ ShellRoot {
         }
     }
 
+    /// A scene's own last word, called just before the grab rather than at
+    /// completion. Set by a scene whose description depends on layout that is
+    /// still settling — the launcher's card grows a row at a time as the
+    /// desktop-entry scan streams in, so its height at `Component.onCompleted`
+    /// is the height of an empty card.
+    property var describeScene: null
+
+    /// An item's bounds in the grabbed scene's coordinates, as `x,y,WxH` —
+    /// the spelling tools/measure-contrast.py takes for `--region`.
+    ///
+    /// Logical pixels, because that is what the scene is laid out in; the
+    /// harness script scales them by the factor it derives from the saved file,
+    /// the same way it does for the bar.
+    function region(item: Item, within: Item): string {
+        if (!item || !within)
+            return "0,0,0x0";
+        const at = item.mapToItem(within, 0, 0);
+        return Math.round(at.x) + "," + Math.round(at.y)
+             + "," + Math.round(item.width) + "x" + Math.round(item.height);
+    }
+
     // --- the grab -------------------------------------------------------------
 
     // A timer rather than Component.onCompleted: the wallpaper decode is
@@ -360,6 +477,9 @@ ShellRoot {
                 Qt.quit();
                 return;
             }
+            if (root.describeScene)
+                root.describeScene();
+
             // No target size: the grab renders the item at the scale the scene
             // is actually drawn at — 1:1 offscreen, the output's scale on a
             // session (1280x800 comes back as 1920x1200 at scale 1.5). That is

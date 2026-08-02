@@ -122,6 +122,39 @@ else
     nested_fail 'there is no `session` ipc target'
 fi
 
+# The launcher's door is named by the shell-switch contract (#7) rather than
+# chosen here: lowercase `launcher`, verb `toggle`. A rename is a broken
+# integration in somebody else's repo, so it is asserted literally.
+
+if grep -qa 'surfaces: launcher registered (qs ipc call launcher toggle)' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the launcher registered on the surface bus'
+else
+    nested_fail 'the launcher never registered on the surface bus'
+fi
+
+if nested_ipc show | grep -qa '^target launcher$'; then
+    nested_pass 'the launcher owns the `launcher` ipc target'
+else
+    nested_fail 'there is no `launcher` ipc target'
+fi
+
+if nested_ipc show | sed -n '/^target launcher$/,/^target /p' | grep -qa 'function show('; then
+    nested_fail 'the launcher target advertises show(), which the CLI cannot call'
+else
+    nested_pass 'the launcher target does not advertise an uncallable show()'
+fi
+
+# Super+Space (#39). The shell registers the shortcut over
+# hyprland-global-shortcuts-v1 rather than shelling out per keypress, so the
+# evidence is the compositor's own list — the binding in hyprland.conf is the
+# user's half and is not something this seam can write for them.
+
+if nested_hyprctl globalshortcuts | grep -qa 'forest-shell:launcher'; then
+    nested_pass 'the compositor has the launcher global shortcut'
+else
+    nested_fail 'hyprland was never offered a launcher global shortcut'
+fi
+
 # --- 2. it opens, on a named screen ------------------------------------------
 
 mark=$(log_lines)
@@ -202,17 +235,41 @@ fi
 
 # --- 8. a drawer nobody built leaves the open one alone ----------------------
 #
-# The launcher and the control centre are declared on the bus and unbuilt (#39,
-# #44). Pressing one of those buttons has to be a logged no-op — what must not
-# happen is the open drawer closing because someone reached for a surface that
-# is not there.
+# The control centre is declared on the bus and unbuilt (#44). Pressing that
+# button has to be a logged no-op — what must not happen is the open drawer
+# closing because someone reached for a surface that is not there.
+#
+# This was `launcher` until #39 landed and made it a real drawer, which is the
+# hazard the check has to be written against: the unbuilt name has to be one
+# that is still unbuilt, or the assertion quietly becomes "a toggle for a
+# drawer that exists does nothing", which is the opposite claim and passes for
+# the wrong reason.
 
 ipc open > /dev/null
 mark=$(log_lines)
-nested_ipc call launcher toggle > /dev/null 2>&1
+nested_ipc call controlcenter toggle > /dev/null 2>&1
 expect_quiet_since "$mark" 'drawers: session closed' \
     'a toggle for an unbuilt drawer leaves the open one alone'
 ipc close > /dev/null
+
+# --- 8b. the launcher is a drawer, and swapping does not close the fog -------
+#
+# #39's tenant, checked here rather than in tools/launcher-harness.sh because
+# what is being asserted is the *window's* behaviour: one drawer replacing
+# another is a transition inside one surface, and the evidence that it was not
+# two windows fighting is that no `closed` line appears between them.
+
+ipc open > /dev/null
+mark=$(log_lines)
+nested_ipc call launcher toggle > /dev/null
+expect_since "$mark" 'drawers: session → launcher' \
+    'the launcher swaps with the session menu rather than stacking'
+expect_quiet_since "$mark" 'drawers: session closed' \
+    'the swap does not take the fog down on its way'
+
+mark=$(log_lines)
+nested_ipc call launcher toggle > /dev/null
+expect_since "$mark" 'drawers: launcher closed \(toggle\)' 'the launcher toggles shut'
 
 # --- 9. the fog asked the compositor for its blur ----------------------------
 #

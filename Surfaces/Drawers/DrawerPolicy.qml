@@ -29,13 +29,12 @@ QtObject {
     /// the bar's buttons are already drawn for surfaces that have not landed
     /// (#37), and pressing one of those must not close the drawer that is open.
     ///
-    /// Grows by one line per tenant ticket; `session` is the first (#38).
+    /// Grows by one line per tenant ticket; `session` is the first (#38) and
+    /// `launcher` the second (#39).
     ///
-    /// Writable, and nothing in the shell writes it: `tests/` does, because the
-    /// swap rule below is only reachable in a world with two drawers in it and
-    /// waiting for #39 to land before checking it would leave the one rule this
-    /// topology exists to enforce untested for three tickets.
-    property var tenants: ["session"]
+    /// Writable, and nothing in the shell writes it: `tests/` does, to reach
+    /// the states a two-drawer shell does not have yet.
+    property var tenants: ["session", "launcher"]
 
     /// Whether a drawer exists to be opened at all.
     function known(name: string): bool {

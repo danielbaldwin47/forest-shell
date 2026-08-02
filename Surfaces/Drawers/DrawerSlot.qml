@@ -153,12 +153,29 @@ Item {
         // only the tenant knows where its beak points.
         transformOrigin: Item.Center
 
-        sourceComponent: slot.name === "session" ? sessionMenu : null
+        sourceComponent: slot.name === "session" ? sessionMenu
+                       : slot.name === "launcher" ? launcher
+                       : null
     }
 
     Component {
         id: sessionMenu
         SessionMenu {
+            onCloseRequested: reason => Drawers.close(reason)
+        }
+    }
+
+    // The launcher is the one tenant that is not a panel: it is a clearing, and
+    // its card sits at a fraction of the *screen* height rather than in the
+    // middle of it (#39, #11 §6). So it is handed the whole slot to lay itself
+    // out in — centring an item that is already the full size is a no-op, and
+    // the 1% settle then scales the clearing about the screen's centre, which
+    // is where the card is anchored from anyway.
+    Component {
+        id: launcher
+        Launcher {
+            implicitWidth: slot.width
+            implicitHeight: slot.height
             onCloseRequested: reason => Drawers.close(reason)
         }
     }

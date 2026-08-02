@@ -20,6 +20,7 @@ import qs.Services.Media
 import qs.Services.Networking
 import qs.Services.Hardware
 import qs.Services.System
+import qs.Services.Launcher
 
 Singleton {
     id: root
@@ -70,9 +71,16 @@ Singleton {
         // every icon on a bar configured without it — and worse, would lose
         // them on a bar that has it, since the modules load a beat after the
         // services do.
+        // Apps (#39) is the same lazy-backend argument as the tray, measured
+        // rather than assumed: `DesktopEntries.applications` does not begin its
+        // scan until something observes it, and it then fills in one entry at a
+        // time over some tens of milliseconds. Constructed when the user first
+        // presses Super+Space, the launcher would open onto an empty list and
+        // populate under their hands. Deferred, because 190 desktop files are
+        // not worth a frame.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
-                            SystemTray, Mpris]);
+                            SystemTray, Mpris, Apps]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

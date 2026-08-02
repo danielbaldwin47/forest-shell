@@ -15,12 +15,13 @@ TestCase {
 
     DrawerPolicy { id: policy }
 
-    /// The shell as it will be once the launcher lands (#39). The swap is the
-    /// one rule the shared-window topology exists to enforce, and it is not
-    /// reachable in a world with a single drawer in it.
+    /// A shell with one drawer in it, which is what this was before the
+    /// launcher landed (#39) and what it is again for anyone who builds a
+    /// tenant list by hand. Kept so the single-drawer edges — a toggle that
+    /// closes rather than swaps — stay reachable once more tenants land.
     DrawerPolicy {
-        id: twoDrawers
-        tenants: ["session", "launcher"]
+        id: oneDrawer
+        tenants: ["session"]
     }
 
     // --- which drawer is open ------------------------------------------------
@@ -28,13 +29,24 @@ TestCase {
     function test_a_toggle_opens_what_is_closed_and_closes_what_is_open() {
         compare(policy.next("", "session"), "session");
         compare(policy.next("session", "session"), "");
+        compare(policy.next("", "launcher"), "launcher");
+        compare(policy.next("launcher", "launcher"), "");
+        compare(oneDrawer.next("session", "session"), "");
     }
 
     function test_asking_for_a_second_drawer_swaps_rather_than_stacking() {
         // One window, one focus grab: two drawers open at once is the state
         // this topology exists to make unrepresentable (#12).
-        compare(twoDrawers.next("session", "launcher"), "launcher");
-        compare(twoDrawers.next("launcher", "session"), "session");
+        compare(policy.next("session", "launcher"), "launcher");
+        compare(policy.next("launcher", "session"), "session");
+    }
+
+    function test_the_launcher_is_a_drawer() {
+        // #39 lands in the shared window rather than in a surface of its own,
+        // which is what makes the swap above a transition instead of two
+        // windows racing for the focus grab.
+        compare(policy.known("launcher"), true);
+        compare(oneDrawer.known("launcher"), false);
     }
 
     function test_a_toggle_for_a_drawer_nobody_built_changes_nothing() {

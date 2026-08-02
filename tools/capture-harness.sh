@@ -21,6 +21,8 @@
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
+#   tools/capture-harness.sh out.png --surface launcher --session # the clearing
+#   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
 #   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
 #
 # --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
@@ -91,6 +93,7 @@ SURFACE="bar"
 SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
+LAUNCHER_QUERY=""
 DELAY_MS=600
 REDUCED=0
 
@@ -105,6 +108,7 @@ while (( $# )); do
         --session)     SESSION=1; shift ;;
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
+        --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -114,9 +118,18 @@ while (( $# )); do
 done
 [[ -n "$OUT" ]] || { echo "usage: tools/capture-harness.sh out.png [options]" >&2; exit 2; }
 
+# The launcher is the one surface whose content arrives after the scene does:
+# `DesktopEntries.applications` streams in over roughly a second and a half
+# (measured — tools/launcher-harness.sh), and a capture taken at the usual 600 ms
+# is a picture of an empty card. Only raised when the caller did not say
+# otherwise, so `--delay-ms` still means what it says.
+if [[ "$SURFACE" == launcher && "$DELAY_MS" == 600 ]]; then
+    DELAY_MS=2200
+fi
+
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer)" >&2; exit 2 ;;
+    bar|bar-full|lock|settings|drawer|launcher) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher)" >&2; exit 2 ;;
 esac
 
 # The settings window is 900x660 by its own declaration; capturing it at the
@@ -180,7 +193,7 @@ CAPTURE_ENV=(
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
-    CAPTURE_DELAY_MS="$DELAY_MS"
+    CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.
@@ -260,39 +273,109 @@ else
 fi
 
 if (( CONTRAST )); then
-    if [[ "$SURFACE" != bar ]]; then
-        # `bar-full` has a strip too, and text drawn into it — which is why it
-        # is refused rather than measured: #79 is the contrast of the authored
-        # text colour against the *fill it sits on*, so a region containing the
-        # rendered glyphs would be measuring the text against itself.
-        fail "--contrast measures the fill the bar's text sits on; --surface $SURFACE is not that picture (use bar)"
-    elif [[ -z "$SCALE" ]]; then
-        fail "--contrast needs a verified capture"
-    elif [[ ! "$BAR_H" =~ ^[0-9]+$ ]]; then
-        # Parsed out of the shell's own log line, so a change to that line must
-        # not silently become a contrast failure — which is what an empty region
-        # would look like.
-        fail "--contrast could not read the bar height from: $SAVED"
-    else
-        # Skip the hairline row at the bottom edge of the strip: it is authored
-        # `border-subtle`, not fill, and #79's numbers are about the fill. In
-        # capture pixels, so scaled — the strip is a fixed number of *logical*
-        # rows wherever it is rendered.
-        read -r RX RY RW RH WIN < <(python3 -c '
+    ## Measure one region of the capture, stated in *logical* pixels, against
+    ## the authored text colour that sits on it. The sliding window is a run of
+    ## text, so it is 100 logical px wide whatever the file came back at.
+    measure_region() {
+        local what="$1" x="$2" y="$3" w="$4" h="$5" color="$6"
+        local rx ry rw rh win
+        read -r rx ry rw rh win < <(python3 -c '
 import sys
-s, w, bar = float(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-print(0, round(1 * s), round(w * s), round((bar - 2) * s), round(100 * s))' \
-            "$SCALE" "$W" "$BAR_H")
-        REGION="${RX},${RY},${RW}x${RH}"
-        # The sliding window is a run of text, so it is 100 *logical* px wide
-        # whatever the capture was rendered at.
-        ARGS=(--text-color a9b8b0 --region "$REGION" --window "$WIN")
-        [[ -n "$MIN_RATIO" ]] && ARGS+=(--min-ratio "$MIN_RATIO")
-        if python3 tools/measure-contrast.py "$OUT" "${ARGS[@]}"; then
-            pass "contrast measured over the bar strip"
-        else
-            fail "contrast below --min-ratio over the bar strip"
+s = float(sys.argv[1])
+print(*(round(float(v) * s) for v in sys.argv[2:6]), round(100 * s))' \
+            "$SCALE" "$x" "$y" "$w" "$h")
+
+        if (( rw <= 0 || rh <= 0 )); then
+            fail "--contrast: $what has no area (${w}x${h} logical) — the scene did not report it"
+            return
         fi
+
+        local args=(--text-color "$color" --region "${rx},${ry},${rw}x${rh}" --window "$win")
+        [[ -n "$MIN_RATIO" ]] && args+=(--min-ratio "$MIN_RATIO")
+        printf '\n  %s\n' "$what"
+        if python3 tools/measure-contrast.py "$OUT" "${args[@]}"; then
+            pass "contrast measured over $what"
+        else
+            fail "contrast below --min-ratio over $what"
+        fi
+    }
+
+    if [[ -z "$SCALE" ]]; then
+        fail "--contrast needs a verified capture"
+    elif [[ "$SURFACE" == bar ]]; then
+        if [[ ! "$BAR_H" =~ ^[0-9]+$ ]]; then
+            # Parsed out of the shell's own log line, so a change to that line must
+            # not silently become a contrast failure — which is what an empty region
+            # would look like.
+            fail "--contrast could not read the bar height from: $SAVED"
+        else
+            # Skip the hairline row at the bottom edge of the strip: it is authored
+            # `border-subtle`, not fill, and #79's numbers are about the fill.
+            measure_region "the bar strip" 0 1 "$W" "$(( BAR_H - 2 ))" a9b8b0
+        fi
+    elif [[ "$SURFACE" == launcher ]]; then
+        # #39: "card >= 4.5:1, legend >= 4.5:1", in #79's metric — the worst
+        # 100px window of the composited fill against the text colour that sits
+        # on it. Both regions come out of the saved line rather than being
+        # recomputed here, because the card's height depends on how many rows
+        # the fold left in it.
+        #
+        # Unlike the bar, these regions *contain* rendered text, and that is
+        # deliberate rather than overlooked. The measurement takes the mean
+        # luminance of each column of the region: the shell is dark-first, so
+        # every glyph in there is lighter than the fill behind it and can only
+        # raise that mean, which can only lower the ratio against a light text
+        # colour. Including the glyphs therefore makes the gate stricter than
+        # the fill alone — a card that passes here passes on its fill, and the
+        # reverse is not possible. (Offscreen, where the icons do not draw at
+        # all, it is stricter still by less.)
+        #
+        # `textSecondary` and not `textPrimary`: after #39 moved subtitles,
+        # category labels and the legend off `textMuted`, secondary is the
+        # dimmest role anything on this card is drawn in, so it is the one the
+        # floor has to hold for.
+        CARD=$(sed -n 's/.* card=\([0-9]*\),\([0-9]*\),\([0-9]*\)x\([0-9]*\).*/\1 \2 \3 \4/p' <<< "$SAVED")
+        LEGEND=$(sed -n 's/.* legend=\([0-9]*\),\([0-9]*\),\([0-9]*\)x\([0-9]*\).*/\1 \2 \3 \4/p' <<< "$SAVED")
+
+        if [[ -z "$CARD" || -z "$LEGEND" ]]; then
+            fail "--contrast could not read the card and legend regions from: $SAVED"
+        else
+            # Inset by the card's 1px border, which is authored `border-subtle`
+            # rather than fill — the same argument the bar's hairline gets.
+            read -r cx cy cw ch <<< "$CARD"
+            measure_region "the launcher card" "$(( cx + 1 ))" "$(( cy + 1 ))" \
+                "$(( cw - 2 ))" "$(( ch - 2 ))" a9b8b0
+            # The legend is measured on the *fill beside its text*, not on the
+            # band containing it, and the difference is not cosmetic: the
+            # legend strip is 18px tall carrying 11.5px glyphs, so most of
+            # every column in it is text and the measurement comes back 3.1:1
+            # — the text against itself, which is the same objection this
+            # script has always made about `bar-full`. The band immediately
+            # below it is the card's own bottom padding: the same fill, over
+            # the same part of the wallpaper, with nothing drawn on it. That is
+            # what the legend's text actually sits on.
+            #
+            # It matters that this is the *bottom* of the card. #11's finding
+            # was that the legend failed on bare scrim; the fix put it on the
+            # card, and the card is one flat fill over a wallpaper that is
+            # brightest at the top — so the card region above already measures
+            # the harder end of the same surface.
+            read -r lx ly lw lh <<< "$LEGEND"
+            read -r cx cy cw ch <<< "$CARD"
+            FILL_Y=$(( ly + lh ))
+            FILL_H=$(( cy + ch - 1 - FILL_Y ))
+            if (( FILL_H < 4 )); then
+                fail "--contrast: only ${FILL_H}px of card below the legend — the footer is overflowing its card"
+            else
+                measure_region "the fill under the legend" \
+                    "$(( cx + 1 ))" "$FILL_Y" "$(( cw - 2 ))" "$FILL_H" a9b8b0
+            fi
+        fi
+    else
+        # `bar-full` has a strip too, and text drawn into it — which is why it
+        # is refused rather than measured: there is no authored fill under it
+        # whose composite is the thing #79 is about.
+        fail "--contrast measures a fill some authored text sits on; --surface $SURFACE is not that picture (use bar or launcher)"
     fi
 fi
 

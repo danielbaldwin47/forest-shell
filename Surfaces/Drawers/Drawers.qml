@@ -195,6 +195,10 @@ Singleton {
         function toggle(): void { root.toggle("session"); }
     }
 
+    readonly property QtObject launcherHandle: QtObject {
+        function toggle(): void { root.toggle("launcher"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -207,9 +211,48 @@ Singleton {
         function isOpen(): bool { return root.current === "session"; }
     }
 
+    // The launcher's door, and the one the shell-switch contract names (#7):
+    // `qs ipc call launcher toggle`, lowercase, `toggle` and not `show` — the
+    // name is constrained twice over and Core/SurfaceBusPolicy.qml holds it.
+    IpcHandler {
+        target: "launcher"
+
+        function open(): void { root.open("launcher"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("launcher"); }
+        function isOpen(): bool { return root.current === "launcher"; }
+    }
+
+    // --- Super+Space ---------------------------------------------------------
+    //
+    // The summon (#39), registered from QML rather than shelled out to. In the
+    // user's hyprland.conf that is:
+    //
+    //     bind = SUPER, SPACE, global, forest-shell:launcher
+    //
+    // and it is the one binding in the shell with no `qs ipc call … || fallback`
+    // behind it. That idiom keeps a compositor usable when the shell is not
+    // running, and it cannot be written here: a `global` dispatch has no
+    // subprocess to fail, and the keybind template forbids the `|` the fallback
+    // needs. What it buys instead is the reason to prefer it — no `qs`
+    // subprocess spawn per keypress on the shell's most-pressed key.
+    //
+    // Nothing happens if the user has not written the bind. That is not a
+    // failure worth logging on a timer: the IPC door above answers the same
+    // question, and a shell that complains every start about a keybind it
+    // cannot see is a shell nobody reads the log of.
+    GlobalShortcut {
+        appid: "forest-shell"
+        name: "launcher"
+        description: "Open the launcher"
+
+        onPressed: root.toggle("launcher")
+    }
+
     Component.onCompleted: {
         SurfaceBus.register("session", root.sessionHandle);
-        Logger.stage("drawers armed (ipc target: session)");
+        SurfaceBus.register("launcher", root.launcherHandle);
+        Logger.stage("drawers armed (ipc targets: session, launcher)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

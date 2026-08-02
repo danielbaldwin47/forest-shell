@@ -16,6 +16,9 @@ import QtQuick
 import Quickshell
 import qs.Services.Notifications
 import qs.Services.Compositor
+import qs.Services.Media
+import qs.Services.Networking
+import qs.Services.Hardware
 
 Singleton {
     id: root
@@ -47,7 +50,18 @@ Singleton {
         // pushed whether or not anything on the bar is currently reading
         // workspaces — a bar carrying only a clock would otherwise never
         // construct the facade, and would sit unblurred (#35).
-        report("deferred", [ShellState, Notifications, Compositor]);
+        //
+        // The five system services (#36) are here for the reason the list
+        // exists, and one more: each of the native backends only *starts*
+        // when something first touches its singleton, and each then takes
+        // about a second to answer (measured — UPower, NetworkManager and
+        // BlueZ all populate ~1s after first access). A service constructed
+        // when the user first opens the control centre would spend that
+        // second showing a shell that owns no radios and has no battery. Off
+        // the critical path, because none of it is worth a frame: the
+        // wallpaper does not depend on the volume.
+        report("deferred", [ShellState, Notifications, Compositor,
+                            Audio, Networking, Bluetooth, Power, Backlight]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

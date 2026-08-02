@@ -254,28 +254,4 @@ QtObject {
     function use24Hour(localeTimeFormat: string): bool {
         return !localeTimeFormat || localeTimeFormat.toLowerCase().indexOf("a") < 0;
     }
-
-    // --- battery -------------------------------------------------------------
-
-    // The lid is usually shut between locking and unlocking, so the first thing
-    // worth knowing on waking a locked laptop is whether it is still on mains.
-    // Shown only while discharging — on AC it is noise (#30).
-
-    /// `UPowerDevice.percentage` is a 0–1 fraction (energy / energyCapacity),
-    /// not 0–100. Clamped, because a battery reporting 101% should not widen
-    /// the pill.
-    function batteryPercent(fraction: real): int {
-        if (!isFinite(fraction))
-            return 0;
-        return Math.round(Math.max(0, Math.min(1, fraction)) * 100);
-    }
-
-    // Below this the pill turns ember — the "plug me in before you walk away"
-    // threshold, matched to the point where suspend-on-battery becomes a real
-    // risk to unsaved work.
-    readonly property real batteryLowFraction: 0.20
-
-    function batteryLow(fraction: real): bool {
-        return isFinite(fraction) && fraction <= batteryLowFraction;
-    }
 }

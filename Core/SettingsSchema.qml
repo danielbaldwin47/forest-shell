@@ -221,10 +221,15 @@ QtObject {
             // shell keeps its modules under an older one. Three leaves rather
             // than one leaf holding all three, so reordering one cluster
             // writes back only that cluster.
+            //
+            // The right cluster is the machine's condition (#9): the status
+            // group first, the battery outermost, so the number nearest the
+            // screen edge is the one people glance at without reading the bar.
             modules: {
                 left: { def: ["workspaces"], coerce: c.arrayOf(c.string, "bar.modules.left") },
                 center: { def: ["clock"], coerce: c.arrayOf(c.string, "bar.modules.center") },
-                right: { def: [], coerce: c.arrayOf(c.string, "bar.modules.right") }
+                right: { def: ["status", "battery"],
+                         coerce: c.arrayOf(c.string, "bar.modules.right") }
             },
 
             // The two styling groups, declared knob by knob (`group()` above):

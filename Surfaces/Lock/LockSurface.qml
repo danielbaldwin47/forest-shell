@@ -20,9 +20,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
-import Quickshell.Services.UPower
 import qs.Core
 import qs.Widgets
+import qs.Services.Hardware
 import qs.Services.System
 import qs.Surfaces.Background
 
@@ -495,19 +495,23 @@ Item {
         // unlocking, so "is it still on mains" is the one hardware fact worth
         // the space. On AC it is noise.
         //
-        // Read straight off the native UPower singleton rather than through a
-        // service, because there is no battery service yet — #36 builds one,
-        // and this becomes a read of it.
+        // Read through the power service (#36), which is what the note here
+        // used to promise: the bar's battery module and this pill now share one
+        // definition of "low", and they are on screen together often enough
+        // that two would be visible as a disagreement.
         StatusItem {
             id: batteryPill
 
-            readonly property real fraction: UPower.displayDevice.percentage
-            readonly property bool low: policy.batteryLow(fraction)
-
-            visible: UPower.onBattery && UPower.displayDevice.isLaptopBattery
-            icon: batteryPill.low ? "battery-low" : "battery-medium"
-            label: policy.batteryPercent(batteryPill.fraction) + "%"
-            tint: batteryPill.low ? Theme.accentEmber : Theme.textMuted
+            visible: !Power.onMains && Power.hasBattery
+            // The service's own glyph, not a second opinion about it: a lock
+            // and a bar that drew different batteries for the same charge would
+            // be the disagreement this read was meant to end.
+            icon: Power.icon
+            label: Power.label
+            // Ember here and not on the bar: the lock's status strip sits over
+            // the fog wash rather than over a wallpaper, so the colour that
+            // fails the bar's contrast rule passes on this surface.
+            tint: Power.low ? Theme.accentEmber : Theme.textMuted
         }
 
         // The lamplight role: attention, exactly one element at a time (#8).

@@ -155,7 +155,8 @@ TestCase {
         const modules = store.defaults(settings.spec).bar.modules;
         compare(modules.left, ["workspaces"]);
         compare(modules.center, ["clock"]);
-        compare(modules.right, []);
+        // The machine's condition, outermost-last (#36).
+        compare(modules.right, ["status", "battery"]);
     }
 
     function test_a_reordered_bar_writes_back_only_the_module_key() {

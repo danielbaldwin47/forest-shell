@@ -22,12 +22,22 @@ QtObject {
     /// name → `{ file, label }`. `file` is resolved against `Modules/` by the
     /// bar; `label` is what the settings GUI (#55) will call it.
     ///
-    /// The Standard-14 inventory (#9) lands across three tickets: this one
-    /// brings the two modules that make the bar usable, #36 the status cluster
-    /// and battery, #37 the tray, media, active window and keyboard layout.
+    /// The Standard-14 inventory (#9) lands across three tickets: #35 brought
+    /// the two modules that make the bar usable, this one the status cluster,
+    /// the battery and the optional brightness readout, #37 the tray, media,
+    /// active window and keyboard layout.
+    ///
+    /// `status` is one entry and not four: #9 groups network, bluetooth, volume
+    /// and mic into a single quiet icon cluster, and four entries would let a
+    /// config scatter them across three clusters of the bar.
     readonly property var modules: ({
         workspaces: { file: "Workspaces.qml", label: "Workspaces" },
-        clock: { file: "Clock.qml", label: "Clock" }
+        clock: { file: "Clock.qml", label: "Clock" },
+        status: { file: "Status.qml", label: "Status" },
+        battery: { file: "Battery.qml", label: "Battery" },
+        // Shipped, and in no default list (#9). A module that is off is a
+        // module no cluster names — see the note on enablement above.
+        brightness: { file: "Brightness.qml", label: "Brightness" }
     })
 
     readonly property var clusters: ["left", "center", "right"]

@@ -312,6 +312,65 @@ QtObject {
             : Object.assign({}, entry, { seq: highest + rows.length - index })));
     }
 
+    // --- what history says (#71) ---------------------------------------------
+
+    /// Every app history remembers, as the key a rule is stored under — the
+    /// settings tab's "every app that has ever notified" (#54), which is really
+    /// "every app inside `historyLimit`". An app that falls off the end of
+    /// history loses its row unless it has a rule, and a rule is exactly what
+    /// keeps it listed, so nothing the user has said anything about can vanish.
+    ///
+    /// Sorted and unique because the tab draws one row per app and merges this
+    /// with two other lists: an order that depended on when an app last
+    /// notified would move rows under the pointer while the window is open.
+    ///
+    /// An app with no key is dropped — it cannot be ruled on (see `appKey`), so
+    /// a row for it would be a three-way control that writes nothing.
+    function knownApps(history: var): var {
+        const apps = [];
+        for (const entry of rowsOf(history)) {
+            const key = text(entry.appKey);
+            if (key !== "" && apps.indexOf(key) < 0)
+                apps.push(key);
+        }
+        return apps.sort();
+    }
+
+    /// How many rows arrived at or after `since` — the number the lock screen
+    /// shows, and only ever as a number (#9, #30).
+    ///
+    /// "Since the lock went up" and not "unread", because nothing in the shell
+    /// marks a notification read: the center (#43) dismisses rows, which is a
+    /// different act, and a count of everything in history would put a hundred
+    /// on the strip of a lock nobody had been away from.
+    ///
+    /// Counted over history rather than tallied as notifications arrive so that
+    /// the count is a function of state and not of events — it comes back right
+    /// after a hot reload, and it cannot drift from the list it describes.
+    /// Silent apps are in it: the strip answers "what is waiting", not "what
+    /// interrupted you", and silent asked for no popup, not for no record.
+    ///
+    /// A `since` of zero or less is "the lock is not up", and counts nothing —
+    /// a floor of 0 would put the whole of history on the strip.
+    function countSince(history: var, since: var): int {
+        if (typeof since !== "number" || since <= 0)
+            return 0;
+        let count = 0;
+        for (const entry of rowsOf(history))
+            if (typeof entry.time === "number" && entry.time >= since)
+                count++;
+        return count;
+    }
+
+    /// The rows of a history that are objects at all. Both readers above take
+    /// history as it comes off state.json, which is hand-editable (#21) — one
+    /// wrecked row must cost one row and not the answer.
+    function rowsOf(history: var): var {
+        const list = Array.isArray(history) ? history : [];
+        return list.filter(entry => entry !== null && typeof entry === "object"
+                           && !Array.isArray(entry));
+    }
+
     // --- helpers -------------------------------------------------------------
 
     function text(value: var): string {

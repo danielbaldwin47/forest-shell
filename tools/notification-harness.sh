@@ -18,6 +18,11 @@
 #      and the state file that outlives the first one.
 #   3. History written by a build that predated the row key is migrated rather
 #      than dropped (StateSchema v1 → v2).
+#   4. An app that has notified is a row in the settings rules tab without
+#      being typed (#71) — a live service read through an open window.
+#   5. The lock's count is the notifications that arrived while it was up (#71).
+#      Both halves of that only exist here: a real `WlSessionLock` and a real
+#      daemon posting at it while it is up.
 #
 # NOTHING HERE TOUCHES YOUR SESSION. Two isolations, both load-bearing:
 #
@@ -145,9 +150,26 @@ post() {
 ## Take the shell down and bring a second one up in the same compositor — a new
 ## notification server, whose id counter starts again at 1.
 restart_shell() {
-    kill "$NESTED_SHELL_PID" 2>/dev/null
-    wait "$NESTED_SHELL_PID" 2>/dev/null
+    nested_kill_shell
     nested_shell shell.qml "$READY" 25
+}
+
+## Call the running shell over IPC until it answers with the line that proves
+## it did something, and say what it replied if it never does.
+##
+## Retried rather than called once because this file kills and restarts the
+## shell twice: the socket of a shell that is gone outlives it by a moment, and
+## a call that lands on that one is silently a no-op — a flake that reads
+## exactly like the feature being broken.
+ipc_until() {
+    local pattern="$1" reply
+    shift
+    for _ in 1 2 3 4 5; do
+        reply=$(nested_ipc call "$@")
+        nested_await "$NESTED_SHELL_LOG" "$pattern" 3 && return 0
+    done
+    nested_note "last ipc reply: ${reply:-nothing}"
+    return 1
 }
 
 nested_up || exit 1
@@ -222,9 +244,7 @@ fi
 
 # --- 3. a v1 history file is migrated, not dropped ----------------------------
 
-kill "$NESTED_SHELL_PID" 2>/dev/null
-wait "$NESTED_SHELL_PID" 2>/dev/null
-NESTED_SHELL_PID=""
+nested_kill_shell
 
 file=$(state_file)
 if [[ -z "$file" ]]; then
@@ -244,7 +264,10 @@ else
 EOF
 
     nested_shell shell.qml "$READY" 25 || exit 1
-    if grep -qa 'state: migrated .* v1 to v2' "$NESTED_SHELL_LOG"; then
+    # Awaited rather than grepped once: the shell is ready when the server has
+    # the bus name, and the state file is read lazily a beat after that — so a
+    # single grep here is a race that fails on a loaded machine.
+    if nested_await "$NESTED_SHELL_LOG" 'state: migrated .* v1 to v2' 10; then
         nested_pass "a v1 state file is migrated on load"
     else
         nested_fail "the v1 → v2 state migration did not run"
@@ -275,6 +298,85 @@ EOF
         nested_pass "every migrated row came back with a key of its own"
     else
         nested_fail "migrated rows share a key: ${keys:-none were written}"
+    fi
+fi
+
+# --- 4. history lists apps in the settings tab (#71) --------------------------
+#
+# The rules tab lists every app that has notified without one being typed. The
+# binding is one line, but what it reads is a service that only exists with a
+# daemon behind it, and the tab is only constructed once the window is open —
+# so both ends are here rather than at the pure seam.
+
+if [[ -z "$NESTED_SHELL_PID" ]]; then
+    nested_fail "no shell left running to open settings in"
+else
+    if ipc_until 'notifications tab: [0-9]+ app row' settings showTab notifications; then
+        listed=$(grep -a 'settings: notifications tab:' "$NESTED_SHELL_LOG" \
+                 | sed 's/.*, \([0-9]*\) from history/\1/' | tail -1)
+        # Everything posted above came from `notify-send -a harness`, and no
+        # rule has been written, so every row the tab draws is one history put
+        # there.
+        if [[ "${listed:-0}" -ge 1 ]]; then
+            nested_pass "the app that notified is a row in the tab without being typed"
+        else
+            nested_fail "the tab listed no apps from history"
+            grep -a 'settings: notifications tab:' "$NESTED_SHELL_LOG" | tail -3
+        fi
+
+        # Live, which is the half a tab built from a snapshot would still pass:
+        # a *new* app notifies with the window already open, and the list it is
+        # drawing has to grow by that one row without the window being reopened.
+        notify-send -a lateapp "tab-live" > /dev/null 2>&1
+        if nested_await "$NESTED_SHELL_LOG" \
+                "notifications tab: [0-9]+ app row.*, $(( listed + 1 )) from history" 10; then
+            nested_pass "an app that notifies while the tab is open grows a row under it"
+        else
+            nested_fail "the open tab did not pick up an app that notified under it"
+            grep -a 'settings: notifications tab:' "$NESTED_SHELL_LOG" | tail -3
+        fi
+    else
+        nested_fail "the notifications tab never reported what it is listing"
+    fi
+    nested_ipc call settings close > /dev/null
+fi
+
+# --- 5. the lock counts what arrived while it was up (#71) --------------------
+#
+# `SessionLock.notificationCount` is the seam the lock's status strip renders
+# (#47), and it is written from here — so what it holds is only checkable with
+# a real lock up and a real daemon posting at it, which is this seam.
+#
+# The number has teeth because of everything above it: history is already
+# several notifications deep by now, so a count that meant "everything
+# remembered" would not read 2.
+
+if [[ -z "$NESTED_SHELL_PID" ]]; then
+    nested_fail "no shell left running to lock"
+else
+    if ipc_until 'lock: locking \(ipc\)' lock lock; then
+        # Locked, and nothing has arrived since: the strip renders nothing at
+        # all for a zero (LockPolicy.notificationSummary), so a "lock count 0"
+        # line here would mean the count had already gone wrong.
+        post "locked-a" && post "locked-b"
+        if nested_await "$NESTED_SHELL_LOG" 'notifications: lock count 2' 10; then
+            nested_pass "the lock counts the two notifications that arrived while it was up"
+        else
+            nested_fail "the lock did not count what arrived while it was up"
+            grep -a 'notifications: lock count' "$NESTED_SHELL_LOG" | tail -3
+        fi
+
+        # The count is a window, not a total. Anything logged above 2 is
+        # history leaking into a lock that has only seen two notifications.
+        highest=$(grep -a 'notifications: lock count' "$NESTED_SHELL_LOG" \
+                  | sed 's/.*lock count //' | sort -n | tail -1)
+        if [[ "${highest:-0}" == 2 ]]; then
+            nested_pass "the count is what arrived since the lock, not the whole history"
+        else
+            nested_fail "the lock counted ${highest:-nothing}, not the 2 that arrived under it"
+        fi
+    else
+        nested_fail "the session never locked over IPC"
     fi
 fi
 

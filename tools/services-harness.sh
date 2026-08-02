@@ -204,8 +204,7 @@ fi
 # centre (#44) is what will — so the drive checks run against the harness root,
 # which constructs the same singletons through the same ServiceInit call.
 
-kill "$NESTED_SHELL_PID" 2>/dev/null
-wait "$NESTED_SHELL_PID" 2>/dev/null
+nested_kill_shell
 
 nested_shell services-harness.qml 'harness: services harness ready' || exit 1
 

@@ -419,8 +419,7 @@ fi
 # tool. A shell that lost every binary would fail this check for reasons that
 # have nothing to do with #40.
 
-kill "$NESTED_SHELL_PID" 2>/dev/null
-wait "$NESTED_SHELL_PID" 2>/dev/null
+nested_kill_shell
 
 NOQALC="$SCRATCH/nopath"
 mkdir -p "$NOQALC"

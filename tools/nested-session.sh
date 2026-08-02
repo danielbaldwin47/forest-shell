@@ -251,8 +251,20 @@ nested_shell() {
     # files: `NESTED_ENV=(XDG_CONFIG_HOME=… XDG_STATE_HOME=…)` before this call
     # means a test that toggles a setting toggles a scratch one. It is also the
     # door for QSG_RENDER_TIMING, when frames are what is being counted.
+    # `setsid` so the whole shell — not just the process this script launched —
+    # can be taken down by `nested_kill_shell`. Quickshell forks: the process
+    # started here is not the one that owns the Wayland connection and the IPC
+    # socket, so killing it by pid leaves an instance behind, orphaned and
+    # still answering. Measured (#71): a leaked instance from the previous run
+    # answered `ipc call lock lock` on a recycled wayland-N with the lock state
+    # of a session that no longer existed, which reads exactly like the feature
+    # under test being broken.
+    #
+    # There is no fork here to lose the pid to: this shell is not interactive,
+    # so a background command is not a process-group leader and `setsid` execs
+    # in place. $! is the new group leader.
     nested_env_argv
-    "${NESTED_ENV_ARGV[@]}" "${NESTED_ENV[@]}" \
+    setsid "${NESTED_ENV_ARGV[@]}" "${NESTED_ENV[@]}" \
         "$NESTED_QS" -p "$entry" > "$NESTED_SHELL_LOG" 2>&1 &
     NESTED_SHELL_PID=$!
 
@@ -261,6 +273,19 @@ nested_shell() {
         return 1
     fi
     nested_note "shell up (pid $NESTED_SHELL_PID) — $entry"
+}
+
+## Take the shell under test down — the whole of it, and nothing else.
+##
+## The negative pid is the point: it signals the process group `nested_shell`
+## put it in, which is the only way to reach the forked instance behind it.
+## Scoped to a group this file created, so it can never reach the shell running
+## the session the harness is being run from.
+nested_kill_shell() {
+    [[ -n "$NESTED_SHELL_PID" ]] || return 0
+    kill -- "-$NESTED_SHELL_PID" 2>/dev/null || kill "$NESTED_SHELL_PID" 2>/dev/null
+    wait "$NESTED_SHELL_PID" 2>/dev/null
+    NESTED_SHELL_PID=""
 }
 
 ## Talk to the nested shell.
@@ -285,7 +310,7 @@ nested_down() {
         printf '  kill it with: kill %s %s\n' "$NESTED_SHELL_PID" "$NESTED_HYPR_PID"
         return
     fi
-    [[ -n "$NESTED_SHELL_PID" ]] && kill "$NESTED_SHELL_PID" 2>/dev/null
+    nested_kill_shell
     [[ -n "$NESTED_HYPR_PID"  ]] && kill "$NESTED_HYPR_PID"  2>/dev/null
     wait 2>/dev/null
     # Logs are evidence when something failed and litter when nothing did.

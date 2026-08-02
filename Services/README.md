@@ -55,9 +55,14 @@ Fourteen of them exist so far:
   again) in one file.
 - `System/SessionLock.qml` (#47) — and it tests both rules. It is not named in
   `Core/ServiceInit.qml`, because it listens to nothing and does nothing until
-  someone asks it to lock — the lock surface constructs it, and until the idle
-  ladder (#48) gives it a subscription of its own there is nothing for a
-  force-touch to start. It is a service rather than a file under
+  someone asks it to lock — and until the idle ladder (#48) gives it a
+  subscription of its own there is nothing for a force-touch to start. Since
+  #71 it is in fact constructed at startup anyway, by the notification service:
+  that is what writes its `notificationCount`, and it is on the deferred list.
+  Nothing about the rule changes — a service that must run whether or not
+  anything is looking at it still has to be named there, and this one need not,
+  because whoever constructs it it does nothing until asked. It is a service
+  rather than a file under
   `Surfaces/Lock/` even though the lock surface is its only consumer *today*,
   because "who uses it" is the wrong reading of the second rule — the question
   is who is allowed to **decide**. Locking is reached from the session menu
@@ -135,11 +140,20 @@ Fourteen of them exist so far:
 
   `Actions.qml` is the one file under `Services/` that imports a surface
   (`qs.Surfaces.Settings`). That is sanctioned rather than accidental:
-  `SettingsWindow.qml`'s own header names this caller, `Core/SurfaceBusPolicy.qml`
-  explains why the settings window is deliberately not on the surface bus, and
-  nothing under `Surfaces/Settings/` imports `qs.Services.*`, so there is no
-  cycle. That last clause is the thing to re-check before a second surface
-  import is added here.
+  `SettingsWindow.qml`'s own header names this caller, and
+  `Core/SurfaceBusPolicy.qml` explains why the settings window is deliberately
+  not on the surface bus.
+
+  It no longer implies that nothing under `Surfaces/Settings/` imports
+  `qs.Services.*`: since #71 `Tabs/NotificationsTab.qml` imports
+  `qs.Services.Notifications`, because the list of apps that have notified is
+  the notification service's history and reading it through anything else would
+  be a copy of it. The chain is still acyclic —
+  `Services.Launcher` → `Surfaces.Settings` → `Surfaces.Settings.Tabs` →
+  `Services.Notifications`, and the notification service imports neither
+  surface. That is the thing to re-check before another import is added at
+  either end: the invariant is that the arrows do not close, not that they
+  never leave `Services/`.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

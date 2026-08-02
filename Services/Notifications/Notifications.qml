@@ -31,7 +31,7 @@ pragma Singleton
 // Reading it (#43, the bar indicator and the center):
 //
 //   Notifications.history          // newest first, [{ appKey, summary, … }]
-//   Notifications.apps             // every app that has ever notified
+//   Notifications.knownApps        // every app history remembers (#54, #71)
 //   Notifications.centerOpen = true
 //
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
@@ -42,6 +42,7 @@ import Quickshell.Io
 import Quickshell.Services.Notifications
 import qs.Core
 import qs.Services.Compositor
+import qs.Services.System
 
 Singleton {
     id: root
@@ -83,6 +84,12 @@ Singleton {
     /// Not readonly only because `setHistory()` below writes it — that is the
     /// one writer, and going through it is what keeps the debounce honest.
     property var history: []
+
+    /// Every app history remembers, sorted — the settings window's per-app
+    /// rules tab lists these without the user having to type an app id (#54,
+    /// #71). Derived from history rather than kept as a second list, so an app
+    /// appears the moment it notifies and the two can never disagree.
+    readonly property var knownApps: root.policy.knownApps(root.history)
 
     /// Do-not-disturb. Situational rather than setup, so it is state and not
     /// config (#21) — this is the property the control centre's DND tile and
@@ -326,6 +333,52 @@ Singleton {
     function describe(notification: Notification, appKey: string): string {
         return (appKey || notification.appName || "?") + " — " + notification.summary;
     }
+
+    // --- the lock (#71) ------------------------------------------------------
+    //
+    // The lock shows how many notifications arrived while it was up, as a
+    // number and never as contents (#9, #30). The count is written here rather
+    // than read there because `SessionLock` is deliberately ignorant of
+    // everything but locking — it holds one inbound property and this service
+    // is the one object that knows what to put in it.
+
+    // When the current lock went up, or 0 while the session is unlocked. Kept
+    // on this side of the seam for the same reason: it is the notification
+    // service's window onto history, not a fact about the lock.
+    //
+    // Not persisted. A shell restarted while the session is locked starts the
+    // window again from the restart, which undercounts — and the alternative,
+    // trusting a lock timestamp across a shell that was not running, would
+    // overcount every notification the previous shell already showed.
+    property double lockedAt: 0
+
+    readonly property int lockCount: root.policy.countSince(root.history, root.lockedAt)
+
+    Connections {
+        target: SessionLock
+        function onLockedChanged() {
+            root.lockedAt = SessionLock.locked ? Date.now() : 0;
+        }
+    }
+
+    // Only while the lock is up, which is the only time the number means
+    // anything — and it leaves the property assignable when it is not. That
+    // second half is load-bearing: `capture-harness.qml` poses the strip by
+    // assigning a count to an unlocked session (`--lock-state notify:3`), and
+    // an unconditional binding here would quietly win that assignment and
+    // photograph an empty strip.
+    Binding {
+        target: SessionLock
+        property: "notificationCount"
+        value: root.lockCount
+        when: SessionLock.locked
+    }
+
+    // The count in the log, because the strip that renders it is behind a lock
+    // and a setting: "the count is wrong" and "the readout is off" look the
+    // same from outside, and #81 is what a silent lifecycle costs.
+    onLockCountChanged: if (root.lockedAt > 0)
+        Logger.log("notifications", "lock count " + root.lockCount);
 
     // --- reacting ------------------------------------------------------------
 

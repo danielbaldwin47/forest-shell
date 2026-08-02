@@ -37,8 +37,10 @@
 //
 // What is here needs Quickshell — the desktop-entry model, the icon lookup, the
 // launch. Which provider a query is in, what matches, in what order, and where
-// the list stops are decisions, and they are in LauncherPolicy.qml where
-// `tests/` can reach them.
+// the list stops are decisions, and they are in
+// Services/Launcher/LauncherPolicy.qml where `tests/` can reach them — under
+// Services/ rather than beside this file because Apps.qml needs them too, and
+// a policy under Surfaces/ would have the service importing the surface.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
@@ -64,11 +66,12 @@ FocusScope {
 
     readonly property var provider: root.policy.route(root.query, root.providerSettings)
     readonly property string body: root.policy.bodyOf(root.query, root.providerSettings)
-    readonly property string unavailable: root.policy.unavailable(root.provider)
+    readonly property var emptyAnswer: root.policy.empty(root.query, root.providerSettings,
+                                                        Apps.indexed)
 
     /// Every match, and the slice of it that fits. Both, because the label at
     /// the fold is a count of the difference.
-    readonly property var matches: root.provider.id === "apps" && root.unavailable === ""
+    readonly property var matches: root.policy.answers(root.query, root.providerSettings)
                                    ? Apps.rank(root.body)
                                    : []
     readonly property int maxRows: root.policy.fold(root.height, root.chrome)
@@ -76,12 +79,27 @@ FocusScope {
     readonly property string hiddenLabel: root.policy.hidden(root.matches.length,
                                                              root.rows.length)
 
-    /// Everything below the last row that still has to be on screen: the gap,
-    /// the overflow label, the rule above the legend, the legend, the card's
-    /// own bottom padding, and the margin that keeps the card off the bottom
-    /// edge. Stated here because the surface is what knows how tall its own
-    /// footer is; `fold()` takes it as an argument for that reason.
-    readonly property real chrome: Theme.space2 + 16 + Theme.space3 + Theme.hairline
+    /// Everything between the horizon and the bottom of the screen that is not
+    /// a row: the gap under the rule, then below the last row the overflow
+    /// label and its gap, the rule above the legend, the legend itself, the
+    /// card's own bottom padding, and the margin that keeps the card off the
+    /// bottom edge. Stated here because the surface is what knows how tall its
+    /// own footer is; `fold()` takes it as an argument for that reason.
+    ///
+    /// The `Theme.space4` above the rows is the one that was missing first
+    /// time, and it is the whole gap between "the list stops at the fold" and
+    /// "the list stops 27px past the bottom of a 1366x768 screen at scale 1.5"
+    /// — which is #11 §6's original defect, reintroduced by arithmetic. Any
+    /// edit here wants a capture at a short size, not a re-read.
+    ///
+    /// The `RECENT` band is deliberately *not* counted. It appears only when
+    /// the query is empty, and an empty query is already capped at
+    /// `recentsLimit` — six rows, fewer than the fold on any screen this
+    /// renders on. Charging every screen a row for a band that only shows when
+    /// the fold is not the binding constraint is how the launcher lost a row
+    /// it did not need to.
+    readonly property real chrome: Theme.space4
+                                   + Theme.space2 + 16 + Theme.space3 + Theme.hairline
                                    + 18 + Theme.space5 + Theme.space6
 
     /// The row the keyboard is on. Reset by every change to the query, because
@@ -445,12 +463,23 @@ FocusScope {
                                 // The affordance for an app whose icon the
                                 // theme has nothing for. Rendering nothing
                                 // would leave the title hanging off a gap.
+                                //
+                                // It does *not* warm to amber when selected,
+                                // even though it is a Lucide glyph and #11 §4
+                                // lets those warm. The rule that beats it is
+                                // the one in the same section: on an app row
+                                // the icon stands for an application, "real app
+                                // icons are never tinted amber", and a list
+                                // where the selected row is sometimes amber and
+                                // sometimes not — depending on whether the icon
+                                // theme happened to have that app — is the
+                                // encoding coming apart.
                                 Icon {
                                     anchors.centerIn: parent
                                     visible: appIcon.status !== Image.Ready
                                     name: "box"
                                     size: 19
-                                    color: row.active ? Theme.accentWarm : Theme.textSecondary
+                                    color: row.active ? Theme.textPrimary : Theme.textSecondary
                                 }
                             }
 
@@ -544,25 +573,19 @@ FocusScope {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.space3
 
+                    // One answer, not two cascades: the icon and the line come
+                    // out of the same policy call, so they cannot drift into
+                    // saying different things about the same silence.
                     Icon {
                         anchors.verticalCenter: parent.verticalCenter
-                        name: root.unavailable !== "" ? "hourglass"
-                            : !Apps.indexed ? "loader"
-                            : "circle-slash"
+                        name: root.emptyAnswer.icon
                         size: 17
                         color: Theme.textSecondary
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        // Three different silences, and they are not the same
-                        // news: a provider that has not landed, a scan that has
-                        // not finished, and a query that genuinely matched
-                        // nothing (#81 — the failure with two candidate causes).
-                        text: root.unavailable !== "" ? root.unavailable
-                            : !Apps.indexed ? "Looking for applications…"
-                            : root.query.length > 0 ? "No matches"
-                            : "No applications found"
+                        text: root.emptyAnswer.text
                         color: Theme.textSecondary
                         font.family: Theme.fontUi
                         font.pointSize: Theme.pt(14.5)

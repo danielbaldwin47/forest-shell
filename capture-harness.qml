@@ -282,6 +282,14 @@ ShellRoot {
     /// about — horizon fraction, 720px column, 46px rows, the fold — and the
     /// one the contrast criterion is measured from.
     ///
+    /// `--query` is what poses it, and the fold is only legible with one set.
+    /// An empty query is the recents list, which is capped at six rows well
+    /// short of the fold, so the `N more` label never appears and the card
+    /// never reaches its full height. To read the fold, ask for something that
+    /// matches broadly:
+    ///
+    ///     tools/capture-harness.sh out.png --surface launcher --query e
+    ///
     /// Two things it reports that the script needs. `card=` and `legend=` are
     /// the two regions `--contrast` samples: the card's fill over the wallpaper
     /// is what every row's text sits on, and the legend sits at the bottom of

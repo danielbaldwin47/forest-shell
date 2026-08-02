@@ -8,7 +8,7 @@ pragma Singleton
 //     Apps.launch(entry)            run it, and remember that you did
 //
 // The ranking itself is not here: matching, frecency weighting and where the
-// list stops are decisions, and they live in Surfaces/Drawers/LauncherPolicy.qml
+// list stops are decisions, and they live in LauncherPolicy.qml next door,
 // where `tests/` can reach them. What is here is the part that needs Quickshell
 // — the desktop-entry model, the launch, and the state file.
 //

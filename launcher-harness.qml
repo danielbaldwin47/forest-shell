@@ -95,9 +95,6 @@ ShellRoot {
         /// The count the shell currently believes, straight out of the state
         /// object rather than off disk, so a mismatch between the two isolates
         /// to the file write.
-        /// The count the shell currently believes, straight out of the state
-        /// object rather than off disk, so a mismatch between the two isolates
-        /// to the file write.
         ///
         /// There is deliberately no `flush()` beside it. Core/SpecFile.qml
         /// debounces its write by 250 ms and the script polls the file for

@@ -36,25 +36,27 @@ QtObject {
     /// Every provider, keyed by the prefix that reaches it. Apps is the empty
     /// prefix: it is what a bare query means, so it is not punctuation.
     ///
-    /// `config` is the `launcher.providers` key each one is gated on, `landed`
-    /// is whether the shell can actually answer, and `owner` is the ticket that
-    /// makes it true. `placeholder` is what the empty field says once the
-    /// prefix has resolved — the prototype's finding that a resolved prefix is
-    /// a room you are in rather than punctuation you typed (#11 §7).
+    /// `id` is both the provider's name in the log and its key under
+    /// `launcher.providers` in the config — one field, because a second one
+    /// holding the same six strings is a rename waiting to only half happen.
+    /// `landed` is whether the shell can actually answer, and `owner` is the
+    /// ticket that makes it true. `placeholder` is what the empty field says
+    /// once the prefix has resolved — the prototype's finding that a resolved
+    /// prefix is a room you are in rather than punctuation you typed (#11 §7).
     readonly property var providers: [
-        { prefix: "", id: "apps", config: "apps", name: "Apps", icon: "layout-grid",
+        { prefix: "", id: "apps", name: "Apps", icon: "layout-grid",
           category: "App", placeholder: "Search", landed: true, owner: "#39" },
-        { prefix: "=", id: "calculator", config: "calculator", name: "Calculate",
+        { prefix: "=", id: "calculator", name: "Calculate",
           icon: "calculator", category: "Calculator", placeholder: "12 * 60 * 24",
           landed: false, owner: "#40" },
-        { prefix: ";", id: "clipboard", config: "clipboard", name: "Clipboard",
+        { prefix: ";", id: "clipboard", name: "Clipboard",
           icon: "clipboard-list", category: "Clipboard", placeholder: "Search clipboard",
           landed: false, owner: "#40" },
-        { prefix: ":", id: "emoji", config: "emoji", name: "Emoji", icon: "smile",
+        { prefix: ":", id: "emoji", name: "Emoji", icon: "smile",
           category: "Emoji", placeholder: "Search emoji", landed: false, owner: "#40" },
-        { prefix: "/", id: "actions", config: "actions", name: "Actions", icon: "command",
+        { prefix: "/", id: "actions", name: "Actions", icon: "command",
           category: "Action", placeholder: "Run an action", landed: false, owner: "#40" },
-        { prefix: "?", id: "claude", config: "claude", name: "Ask Claude", icon: "sparkles",
+        { prefix: "?", id: "claude", name: "Ask Claude", icon: "sparkles",
           category: "Claude", placeholder: "Ask anything", landed: false, owner: "#41" }
     ]
 
@@ -66,7 +68,7 @@ QtObject {
     function enabled(provider: var, settings: var): bool {
         if (!provider)
             return false;
-        const value = (settings ?? {})[provider.config];
+        const value = (settings ?? {})[provider.id];
         return value === undefined ? true : value === true;
     }
 
@@ -109,6 +111,21 @@ QtObject {
         const prefix = policy.prefixOf(query, settings);
         return policy.providers.find(entry => entry.prefix === prefix)
             ?? policy.providers[0];
+    }
+
+    /// Whether the provider a query routes to will answer it at all: switched
+    /// on, and landed.
+    ///
+    /// Apps is gated here and not in `prefixOf`, and the difference matters.
+    /// A *prefixed* provider that is off does not claim its punctuation, so the
+    /// query falls through to apps. Apps has no punctuation to stop claiming —
+    /// it is what everything falls through to — so the only place its own
+    /// `launcher.providers.apps` key can be honoured is at the point of asking
+    /// for rows. Without this the key is inert: the settings tab offers a
+    /// switch that turns nothing off.
+    function answers(query: string, settings: var): bool {
+        const provider = policy.route(query, settings);
+        return provider.landed && policy.enabled(provider, settings);
     }
 
     /// What a provider that has not landed says instead of a list. Names the
@@ -313,6 +330,28 @@ QtObject {
         return count === 0 ? "" : count + " more";
     }
 
+    /// What the launcher shows when it has no rows — an icon and a line, as one
+    /// answer rather than two cascades that can disagree.
+    ///
+    /// Four silences, and they are not the same news: a provider that has been
+    /// switched off, one that has not landed, a scan that has not finished, and
+    /// a query that genuinely matched nothing. #81 is the ticket about a
+    /// failure with two candidate causes; showing "No matches" for all four is
+    /// how that happens on a surface.
+    function empty(query: string, settings: var, indexed: bool): var {
+        const provider = policy.route(query, settings);
+
+        if (!policy.enabled(provider, settings))
+            return { icon: "eye-off", text: provider.name + " is switched off" };
+        if (!provider.landed)
+            return { icon: "hourglass", text: policy.unavailable(provider) };
+        if (!indexed)
+            return { icon: "loader", text: "Looking for applications…" };
+        return String(query ?? "").length > 0
+            ? { icon: "circle-slash", text: "No matches" }
+            : { icon: "circle-slash", text: "No applications found" };
+    }
+
     // --- what the log says ---------------------------------------------------
     //
     // The wording is the contract: tools/launcher-harness.sh greps for exactly
@@ -343,7 +382,8 @@ QtObject {
     /// real: the model is live, so an app uninstalled between the keystroke and
     /// the Enter is an id that resolves to nothing.
     function stale(id: string): string {
-        return "no desktop entry for " + id;
+        return id ? "no desktop entry for " + id
+                  : "asked to launch nothing at all";
     }
 
     /// The frecency write, with the count it wrote — the harness reads the

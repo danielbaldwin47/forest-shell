@@ -287,11 +287,12 @@ TestCase {
         verify(policy.column(200, 40) >= 240);
     }
 
-    /// What Launcher.qml leaves below the last row, token for token: the gap
+    /// What Launcher.qml leaves for anything that is not a row, token for
+    /// token: the gap under the rule (space4), then below the last row the gap
     /// (space2), the overflow label, the gap above the legend (space3), the
     /// rule (hairline), the legend row, the card's bottom padding (space5) and
     /// the margin that keeps the card off the bottom edge (space6).
-    readonly property real chrome: 8 + 16 + 12 + 1 + 18 + 20 + 24
+    readonly property real chrome: 16 + 8 + 16 + 12 + 1 + 18 + 20 + 24
 
     function test_the_list_stops_at_the_fold() {
         // #11 §6 measured 8 rows on a 720-tall screen at a 32% horizon, with
@@ -320,6 +321,73 @@ TestCase {
         compare(policy.hidden(3, 8), "");
     }
 
+    function test_the_card_fits_on_a_short_screen() {
+        // The defect this arithmetic had: the fold was computed without the
+        // gap between the horizon and the first row, so on a short output the
+        // card ran past the bottom of the screen and took the legend with it —
+        // #11 §6's original bug, reintroduced by a missing term.
+        //
+        // Reproduced as the geometry the surface lays out: everything from the
+        // horizon down has to fit in what is below the horizon.
+        const heights = [1080, 800, 768, 720, 600, 520, 488, 400];
+        for (const height of heights) {
+            const rows = policy.fold(height, testCase.chrome);
+            const below = height * (1 - policy.horizonFraction);
+            const used = rows * policy.rowHeight + testCase.chrome;
+            verify(used <= below || rows === 3);
+        }
+    }
+
+    // --- which provider answers ----------------------------------------------
+
+    function test_a_landed_provider_that_is_on_answers() {
+        compare(policy.answers("fire", testCase.allOn), true);
+        compare(policy.answers("", testCase.allOn), true);
+    }
+
+    function test_a_provider_that_has_not_landed_does_not_answer() {
+        compare(policy.answers("=2+2", testCase.allOn), false);
+        compare(policy.answers("?hello", testCase.allOn), false);
+    }
+
+    function test_switching_apps_off_actually_switches_apps_off() {
+        // The key the settings tab already offers. Apps has no prefix to stop
+        // claiming, so this is the only place it can be honoured — and without
+        // it the switch turns nothing off at all.
+        const noApps = { apps: false, calculator: true, clipboard: true,
+                         emoji: true, actions: true, claude: true };
+        compare(policy.answers("fire", noApps), false);
+        compare(policy.answers("", noApps), false);
+        // ...and it says so rather than showing an empty list.
+        compare(policy.empty("fire", noApps, true).text, "Apps is switched off");
+    }
+
+    // --- the empty state -----------------------------------------------------
+
+    function test_the_four_silences_are_told_apart() {
+        // #81's lesson on a surface: one picture for four causes is how a bug
+        // gets two candidate explanations.
+        compare(policy.empty("=2+2", testCase.allOn, true).text,
+                "Calculate lands with #40");
+        compare(policy.empty("fire", testCase.allOn, false).text,
+                "Looking for applications…");
+        compare(policy.empty("fire", testCase.allOn, true).text, "No matches");
+        compare(policy.empty("", testCase.allOn, true).text, "No applications found");
+    }
+
+    function test_every_silence_brings_an_icon() {
+        const cases = [
+            policy.empty("=2+2", testCase.allOn, true),
+            policy.empty("fire", testCase.allOn, false),
+            policy.empty("fire", testCase.allOn, true),
+            policy.empty("", testCase.allOn, true)
+        ];
+        for (const answer of cases) {
+            verify(answer.icon.length > 0);
+            verify(answer.text.length > 0);
+        }
+    }
+
     // --- what the log says ---------------------------------------------------
     //
     // tools/launcher-harness.sh greps for exactly these, so the wording is the
@@ -332,6 +400,7 @@ TestCase {
         compare(policy.launched("firefox", "firefox %u"), "firefox → firefox %u");
         compare(policy.launchedNothing("zzz"), "nothing to launch for \"zzz\"");
         compare(policy.stale("firefox"), "no desktop entry for firefox");
+        compare(policy.stale(""), "asked to launch nothing at all");
         compare(policy.remembered("firefox", 3), "remembered firefox (3)");
     }
 }

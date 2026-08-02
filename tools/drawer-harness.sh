@@ -28,10 +28,14 @@
 #   8f. every control-centre toggle is wired: each press logs what it asked for
 #      and the facade answers — working or refusing
 #   8g. the sliders route, without touching the caller's own sound card
+#   8h. the five drill-in detail views (#45) open, close, replace each other,
+#      release the radio they held, and refuse a row that does not exist
 #   9. the compositor took the fog's blur layerrule
 #  10. reducedEffects still opens and closes the drawer — the ladder collapses
 #      the motion, it does not remove the surface
 #  11. nothing is fighting itself (no binding loops)
+#  12. a wallpaper pick survives a restart — the one check that restarts the
+#      shell, and so the last one
 #
 # The shell under test runs against a scratch XDG_CONFIG_HOME and
 # XDG_STATE_HOME: check 10 rewrites `appearance.reducedEffects`, and a harness
@@ -93,6 +97,23 @@ expect_since() {
         sleep 0.1
     done
     nested_fail "$what — nothing matching /$pattern/ since the call"
+    return 1
+}
+
+## A file that has to come to hold something. Polled rather than read once: a
+## config write is debounced (Core/SpecFile.qml, 250 ms) so that a slider being
+## dragged does not rewrite settings.json on every frame, which means "the shell
+## decided to write it" and "it is on disk" are two moments and not one.
+expect_file_contains() {
+    local file="$1" needle="$2" what="$3"
+    for _ in $(seq 1 50); do
+        if grep -qaF "$needle" "$file" 2>/dev/null; then
+            nested_pass "$what"
+            return 0
+        fi
+        sleep 0.1
+    done
+    nested_fail "$what — $file never came to hold it: $(cat "$file" 2>/dev/null)"
     return 1
 }
 
@@ -549,10 +570,16 @@ check_press nightlight 'control-centre: nightlight (on|off)' \
 expect_since "$(( $(log_lines) - 40 ))" 'night-light: ' 'and the command answered'
 press nightlight
 
-# The door that is deliberately a no-op until the wallpaper ticket — and says
-# so, which is the difference between a stub and a dead button.
-check_press wallpaper 'control-centre: wallpaper unchanged — the picker is not built yet' \
-    'the wallpaper tile says it is a stub rather than doing nothing'
+# The one tile that is a door rather than a switch. It said "the picker is not
+# built yet" until #45; now the press opens the picker, and both halves are
+# asserted — the tile logging the press it shares with its eight neighbours, and
+# the navigation opening the panel behind it. Closed again immediately, because
+# every check after this one expects the grid.
+check_press wallpaper 'control-centre: wallpaper pressed' \
+    'the wallpaper tile logs its press like every other tile'
+expect_since "$(( $(log_lines) - 40 ))" 'control-centre: wallpaper panel opened' \
+    'and the press opens the picker behind it'
+nested_ipc call controlcenter back > /dev/null 2>&1
 
 # A name no tile has. Over IPC this is something a person typed into a keybind,
 # and a keybind that does nothing deserves the one line saying why.
@@ -585,6 +612,162 @@ mark=$(log_lines)
 nested_ipc call controlcenter mute brightness > /dev/null 2>&1
 expect_since "$mark" 'control-centre: brightness unchanged — does not mute' \
     'the brightness slider refuses to mute rather than silently ignoring it'
+
+# --- 8h. the control centre's drill-in detail views (#45) --------------------
+#
+# Five panels behind the grid: a Wi-Fi list, a bluetooth device list, an output
+# picker and per-application mixer, a VPN list, and a wallpaper picker. Driven
+# over `drill`/`back` rather than by pressing a chevron, for the reason 8f gives
+# about tiles: a chevron is a `TapHandler` inside a drawer and there is no
+# injection tool here, so the IPC door is what a finger drives and this is what
+# drives it.
+#
+# **Nothing below joins, pairs, switches or disconnects anything.** That is a
+# harder line than 8f draws, and deliberately: a press that flips a radio is
+# undoable by pressing again, but joining a different access point drops the
+# caller's connection and unpairing a device destroys a bond that has to be
+# recreated by hand at the device. So what is asserted here is:
+#
+#   - the navigation — every panel opens, closes, replaces another and refuses
+#     a name nothing has;
+#   - the scanner handoff, which *is* a real radio and is the one thing here
+#     that touches hardware. A scan changes no connection and is released again
+#     by `back`; the check that it is released is the point, since a scanner
+#     left running is a wakeup every few seconds that nothing on screen shows
+#     (#22 §5);
+#   - the refusal path of every row action, which is reachable with names that
+#     exist nowhere and so cannot act on anything real.
+#
+# Joining a protected network, pairing a device, switching the output and
+# connecting a tunnel are the four acceptance criteria no seam in this repo
+# reaches. They are a manual real-session pass and the PR says so.
+
+drill() { nested_ipc call controlcenter drill "$1" > /dev/null 2>&1; }
+cc_back() { nested_ipc call controlcenter back > /dev/null 2>&1; }
+
+nested_ipc call controlcenter toggle > /dev/null
+
+for view in wifi bluetooth audio vpn wallpaper; do
+    mark=$(log_lines)
+    drill "$view"
+    expect_since "$mark" "control-centre: $view panel opened" \
+        "drill $view opens the $view panel"
+
+    reply=$(nested_ipc call controlcenter panel)
+    if grep -qa "$view" <<< "$reply"; then
+        nested_pass "the centre agrees the $view panel is open"
+    else
+        nested_fail "panel said \"$reply\" with the $view panel open"
+    fi
+
+    mark=$(log_lines)
+    cc_back
+    expect_since "$mark" "control-centre: $view panel closed \(ipc\)" \
+        "and back leaves it, saying ipc"
+done
+
+# The two that hold a radio. This is the check the whole scanner design exists
+# for: the hold is counted and released by whatever closes the panel, and a
+# release that never happened is invisible on screen and expensive forever.
+#
+# Neither pattern is asserted as success, for the reason 8f gives: this machine
+# may have no wifi device and may have no bluetooth adapter, and "cannot scan"
+# is the correct answer to a panel opening rather than a failure. Silence is
+# what would be one.
+mark=$(log_lines)
+drill wifi
+expect_since "$mark" 'network: (scanning|no wifi device — cannot scan)' \
+    'opening the Wi-Fi panel asks the radio to scan'
+mark=$(log_lines)
+cc_back
+expect_since "$mark" 'control-centre: wifi panel closed' \
+    'and closing it releases the scan'
+expect_quiet_since "$mark" 'network: scanning$' \
+    'the scanner is not started again on the way out'
+
+mark=$(log_lines)
+drill bluetooth
+expect_since "$mark" \
+    'bluetooth: (scanning for devices|no adapter — cannot scan|radio off — scan deferred)' \
+    'opening the Bluetooth panel asks the adapter to discover'
+mark=$(log_lines)
+cc_back
+expect_since "$mark" 'control-centre: bluetooth panel closed' \
+    'and closing it releases the discovery'
+
+# Depth of exactly one: a second panel replaces the first rather than stacking
+# under it, and pressing the door you are already behind takes you back out.
+mark=$(log_lines)
+drill wifi
+drill bluetooth
+expect_since "$mark" 'control-centre: wifi panel closed \(toggle\)' \
+    'a second panel replaces the first'
+expect_since "$mark" 'control-centre: bluetooth panel opened' \
+    'and the second one opens'
+
+mark=$(log_lines)
+drill bluetooth
+expect_since "$mark" 'control-centre: bluetooth panel closed \(toggle\)' \
+    'pressing the door you are behind takes you back out'
+
+# A panel nobody built. Over IPC this is a name someone typed into a keybind.
+mark=$(log_lines)
+drill nonesuch
+expect_since "$mark" 'control-centre: no nonesuch panel — no such panel' \
+    'a drill-in for a panel that does not exist explains itself'
+
+# The one that would otherwise leak a radio: the drawer being dismissed out from
+# under an open panel. The panel has to close itself, which is what releases the
+# scanner — and the reason ControlCenter.qml has a `Component.onDestruction` at
+# all.
+drill wifi
+mark=$(log_lines)
+nested_ipc call controlcenter toggle > /dev/null
+expect_since "$mark" 'control-centre: wifi panel closed \(drawer\)' \
+    'closing the drawer closes the panel under it'
+
+nested_ipc call controlcenter toggle > /dev/null
+
+# Every row action, on a name that exists nowhere — the refusal path, which is
+# the half of each verb that can be driven without touching real hardware. Each
+# answers from its own facade, which is the evidence the door is wired to the
+# service and not to nothing.
+mark=$(log_lines)
+nested_ipc call controlcenter network nonesuch > /dev/null 2>&1
+expect_since "$mark" 'control-centre: nonesuch unchanged — no such network' \
+    'pressing a Wi-Fi row that does not exist explains itself'
+
+mark=$(log_lines)
+nested_ipc call controlcenter passphrase nonesuch abcdefghij > /dev/null 2>&1
+expect_since "$mark" 'network: wifi nonesuch unchanged — no such network' \
+    'a passphrase for a network that does not exist reaches the network facade'
+
+mark=$(log_lines)
+nested_ipc call controlcenter device 00:00:00:00:00:00 > /dev/null 2>&1
+expect_since "$mark" 'bluetooth: device 00:00:00:00:00:00 unchanged — no such device' \
+    'pressing a bluetooth row that does not exist reaches the bluez facade'
+
+mark=$(log_lines)
+nested_ipc call controlcenter output 999999 > /dev/null 2>&1
+expect_since "$mark" 'audio: stream 999999 unchanged — no such output' \
+    'choosing an output that does not exist reaches the pipewire facade'
+
+mark=$(log_lines)
+nested_ipc call controlcenter stream 999999 40 > /dev/null 2>&1
+expect_since "$mark" 'audio: stream 999999 unchanged — no such stream' \
+    'moving a mixer row that does not exist explains itself'
+
+mark=$(log_lines)
+nested_ipc call controlcenter tunnel nonesuch > /dev/null 2>&1
+expect_since "$mark" 'vpn: no connection called nonesuch' \
+    'connecting a tunnel that does not exist reaches the vpn facade'
+
+mark=$(log_lines)
+nested_ipc call controlcenter wallpaper /nowhere/notes.txt > /dev/null 2>&1
+expect_since "$mark" 'wallpaper: wallpaper unchanged — not an image' \
+    'a wallpaper that is not an image is refused rather than written'
+
+nested_ipc call controlcenter close > /dev/null
 
 # --- 9. the fog asked the compositor for its blur ----------------------------
 #
@@ -638,6 +821,116 @@ if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"
 else
     nested_pass 'no binding loops while the drawer was open'
+fi
+
+# --- 12. the wallpaper pick survives a restart -------------------------------
+#
+# #45's one acceptance criterion that is about *persistence* rather than about a
+# radio, and the only check in this file that restarts the shell — which is why
+# it is last. `nested_shell` truncates the log it writes, so every whole-log
+# grep above (the registrations, the blur layerrule, the binding loops) would be
+# looking at a log that only holds the second shell's output if this ran earlier.
+#
+# The claim being checked is exactly the one the picker makes: pressing a
+# thumbnail writes `wallpaper.path` into settings.json, and settings.json is what
+# Core/Config.qml reads synchronously at stage one — so the wallpaper after a
+# restart is the wallpaper before it because both are that one string. There is
+# no cache and no second store, and this is what says so.
+
+WALLS="$NESTED_WORK/walls"
+mkdir -p "$WALLS"
+
+# Two, so "it picked the one that was pressed" is a distinguishable claim from
+# "it picked whatever was in the folder". Written the way
+# tools/capture-harness.sh writes its own, for the same reason: the picker takes
+# the raster formats a person keeps wallpapers in, and a PPM is not one.
+python3 - "$WALLS" <<'PYEOF'
+import struct
+import sys
+import zlib
+
+
+def chunk(tag, payload):
+    return (struct.pack(">I", len(payload)) + tag + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+
+def write(path, shade):
+    raw = bytearray()
+    for _ in range(8):
+        raw.append(0)
+        raw += bytes((shade, shade, shade)) * 8
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(bytes(raw), 6)))
+        f.write(chunk(b"IEND", b""))
+
+
+write(sys.argv[1] + "/alder.png", 40)
+write(sys.argv[1] + "/birch.png", 200)
+PYEOF
+
+CHOSEN="$WALLS/birch.png"
+
+folder_mark=$(log_lines)
+printf '{ "wallpaper": { "folder": "%s" } }\n' "$WALLS" > "$SETTINGS_FILE"
+expect_since "$folder_mark" 'config: reloaded ' 'the picker folder reaches the running shell'
+
+# The drawer is opened first, and it has to be: the panel is a `Loader` inside
+# the control centre, and the folder is listed by a singleton nothing constructs
+# until something looks at it. Drilling in with the drawer shut sets the
+# navigation state and draws nothing — which is a real thing to be able to do
+# (the state is what the surface binds to), and the wrong thing to check a
+# *picker* with. This check wants the panel that a person would see.
+nested_ipc call controlcenter toggle > /dev/null
+
+nested_ipc call controlcenter drill wallpaper > /dev/null
+
+# Asserted since the *folder* was written, not since the drill: the listing
+# follows `wallpaper.folder`, so it is re-read the moment the config reload
+# lands and not when somebody next looks at it. Measured the hard way — this
+# check was written against the drill's own mark and failed on a run where
+# everything worked, because the line it wanted had already gone past.
+expect_since "$folder_mark" 'wallpaper: 2 wallpaper\(s\) in ' \
+    'the picker found both wallpapers in the folder'
+
+mark=$(log_lines)
+nested_ipc call controlcenter wallpaper "$CHOSEN" > /dev/null
+expect_since "$mark" "wallpaper: wallpaper set to $CHOSEN" \
+    'pressing a thumbnail sets the wallpaper'
+
+# The intent, on disk. Not the same claim as the line above — that one says the
+# shell decided to write it, this one says it landed somewhere a restart will
+# find it, and the two are 250 ms apart on purpose (Core/SpecFile.qml debounces,
+# so a dragged slider does not rewrite the file every frame).
+expect_file_contains "$SETTINGS_FILE" "$CHOSEN" \
+    'the pick was written to settings.json'
+
+# Pressing it again is not a second write: every write is a file rewritten and a
+# reload pushed to every surface bound to it, and the row with the tick on it is
+# the most likely press in the panel.
+mark=$(log_lines)
+nested_ipc call controlcenter wallpaper "$CHOSEN" > /dev/null
+expect_since "$mark" 'wallpaper: wallpaper unchanged — already set' \
+    'pressing the wallpaper already set writes nothing'
+
+# And the restart. A new shell, the same scratch XDG_CONFIG_HOME, and the
+# question is what the background loads with no help from the old process.
+nested_kill_shell
+if nested_shell shell.qml 'drawers armed'; then
+    # Awaited rather than read once. The wallpaper is decoded synchronously
+    # before the first frame (Surfaces/Background/Wallpaper.qml explains why it
+    # has to be), but "the shell announced its drawers" and "the image reported
+    # itself ready" are still two events, and which lands first is not something
+    # this check should be asserting.
+    if nested_await "$NESTED_SHELL_LOG" 'background: wallpaper .*birch\.png' 10; then
+        nested_pass 'the pick survived a restart — the new shell loaded it'
+    else
+        nested_fail 'the restarted shell did not load the chosen wallpaper'
+    fi
+else
+    nested_fail 'the shell did not come back up after the restart'
 fi
 
 printf '\n'

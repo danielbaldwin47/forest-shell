@@ -59,6 +59,11 @@ Singleton {
     // the first frame, so it stays a plain property rather than a lookup.
     readonly property string wallpaper: settings.values.wallpaper?.path ?? ""
 
+    // Its neighbour, and deliberately not the same thing (#45): `wallpaper` is
+    // *the* wallpaper, and this is only where the picker goes looking for more.
+    // A machine whose wallpaper lives outside this folder is a normal machine.
+    readonly property string wallpaperFolder: settings.values.wallpaper?.folder ?? ""
+
     // Held as its own property rather than declared inline on `schema` below:
     // an object declaration assigned straight to a child's required property
     // leaves the whole singleton empty at runtime, with no error printed.

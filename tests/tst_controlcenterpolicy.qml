@@ -213,18 +213,34 @@ TestCase {
     }
 
     function test_the_wallpaper_tile_is_a_door_and_never_lit() {
-        // It opens a drill-in rather than switching something on, so it has no
-        // on-state to show. Stub until the wallpaper ticket.
+        // It opens the picker rather than switching something on, so it has no
+        // on-state to show and no body press that could mean anything else.
         const tile = byId(policy.tiles(fullFacts()), "wallpaper");
         compare(tile.on, false);
         compare(tile.detail, "");
         compare(tile.icon, "wallpaper");
-        compare(tile.drillIn, true);
+        compare(tile.drillIn, "wallpaper");
+        compare(tile.doorOnly, true);
     }
 
-    function test_only_the_wallpaper_tile_is_a_drill_in() {
+    function test_three_tiles_are_a_switch_and_a_door_at_once() {
+        // #45: Wi-Fi, Bluetooth and VPN each have a state to toggle *and* a
+        // list to choose from, so the chevron opens the list and the body still
+        // flips the switch. The map itself is DrillInPolicy's — this is the
+        // check that the grid asks it rather than restating it.
+        const tiles = policy.tiles(fullFacts());
+        compare(byId(tiles, "wifi").drillIn, "wifi");
+        compare(byId(tiles, "bluetooth").drillIn, "bluetooth");
+        compare(byId(tiles, "vpn").drillIn, "vpn");
+        for (const id of ["wifi", "bluetooth", "vpn"])
+            compare(byId(tiles, id).doorOnly, false);
+    }
+
+    function test_the_switches_that_are_only_switches_carry_no_chevron() {
         for (const tile of policy.tiles(fullFacts()))
-            compare(tile.drillIn, tile.id === "wallpaper");
+            if (["dnd", "nightlight", "keepawake", "mode", "powerprofile"]
+                    .indexOf(tile.id) >= 0)
+                compare(tile.drillIn, "");
     }
 
     // --- the sliders ---------------------------------------------------------

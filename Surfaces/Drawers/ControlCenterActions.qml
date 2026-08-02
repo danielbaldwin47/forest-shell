@@ -5,6 +5,8 @@ pragma Singleton
 //
 //     ControlCenterActions.press("wifi")
 //     qs ipc call controlcenter press nightlight
+//     qs ipc call controlcenter drill wifi        # the detail views (#45)
+//     qs ipc call controlcenter back
 //
 // ## Why this is not inside ControlCenter.qml
 //
@@ -42,11 +44,13 @@ import qs.Services.Media
 import qs.Services.Hardware
 import qs.Services.Networking
 import qs.Services.Notifications
+import qs.Surfaces.Background
 
 Singleton {
     id: root
 
     readonly property ControlCenterPolicy policy: ControlCenterPolicy {}
+    readonly property DrillInPolicy drillPolicy: DrillInPolicy {}
 
     /// What each toggle is currently showing, so the line logged below can say
     /// what the press is *asking for* rather than just that it happened.
@@ -103,7 +107,7 @@ Singleton {
             return;
         case "wallpaper":
             Logger.log("control-centre", root.policy.pressed(id));
-            root.drillIn("wallpaper");
+            root.drill("wallpaper");
             return;
         }
         Logger.warn("control-centre", root.policy.refused(id, "no such control"));
@@ -115,12 +119,176 @@ Singleton {
         Logger.log("control-centre", root.policy.toggled(id, !root.stateOf(id)));
     }
 
-    /// The one tile that is a door. Stubbed until the wallpaper ticket builds
-    /// the panel behind it — and logged rather than silent, because a press
-    /// that does nothing and says nothing is #81 exactly.
-    function drillIn(name: string): void {
-        Logger.log("control-centre",
-                   root.policy.refused(name, "the picker is not built yet"));
+    // --- the drill-ins (#45) -------------------------------------------------
+    //
+    // Which detail view is open, and the two verbs that move between them. State
+    // and not a surface property, for the same reason the routing table above is
+    // here: a panel is a `TapHandler` inside a drawer and nothing can click it,
+    // so `qs ipc call controlcenter drill wifi` is both a feature and the only
+    // seam-2 evidence that any of this is wired at all.
+    //
+    // One value and not a flag per panel, which is what makes two detail views
+    // open at once unrepresentable — the same shape Drawers.qml uses one level
+    // up.
+
+    /// The open panel's name, or `""` for the root. Written by `drill()` and
+    /// `back()` and by nothing else: those two are where the log line and the
+    /// scanner handoff live, and a state change that did not go through them is
+    /// one the harness cannot see (#81) and a radio nobody turned off.
+    property string panel: ""
+
+    /// Which way the last transition went, so the surface knows which way to
+    /// slide. Forward is into a panel; back is out of one.
+    property bool forward: true
+
+    /// The network whose passphrase prompt is open, or `""`. Here rather than
+    /// inside the row's delegate on purpose: the wifi list republishes when a
+    /// network appears or drops (#75), and a prompt living in a delegate would
+    /// lose what the user had typed the moment a neighbouring access point came
+    /// or went.
+    property string prompt: ""
+
+    /// Open a detail view, or close the one whose door was pressed again.
+    function drill(name: string): void {
+        const next = root.drillPolicy.next(root.panel, name);
+        if (next === root.panel) {
+            Logger.warn("control-centre",
+                        root.drillPolicy.refused(name, "no such panel"));
+            return;
+        }
+        root.forward = next !== "";
+        root.setPanel(next, "toggle");
+    }
+
+    /// Leave whatever is open. `reason` travels into the log because a panel the
+    /// user backed out of and one the closing drawer took down look identical
+    /// afterwards, and the harness has to tell them apart.
+    function back(reason: string): void {
+        if (root.panel === "")
+            return;
+        root.forward = false;
+        root.setPanel(root.drillPolicy.back(), reason);
+    }
+
+    /// The one place `panel` is written — so the scanner a panel holds is
+    /// always released by whatever closes it, including the drawer closing
+    /// under it. A radio left discovering because a code path forgot is exactly
+    /// the class of bug the idle budget (#22 §5) is written against, and it is
+    /// invisible: nothing on screen looks different.
+    function setPanel(next: string, reason: string): void {
+        if (next === root.panel)
+            return;
+
+        if (root.drillPolicy.scans(root.panel))
+            root.releaseScan(root.panel);
+        if (root.panel !== "")
+            Logger.log("control-centre", root.drillPolicy.closed(root.panel, reason));
+
+        root.panel = next;
+        root.prompt = "";
+        Networking.clearFailure();
+
+        if (next !== "") {
+            Logger.log("control-centre", root.drillPolicy.opened(next));
+            if (root.drillPolicy.scans(next))
+                root.holdScan(next);
+        }
+    }
+
+    function holdScan(name: string): void {
+        if (name === "wifi")
+            Networking.beginScan();
+        else if (name === "bluetooth")
+            Bluetooth.beginDiscovery();
+    }
+
+    function releaseScan(name: string): void {
+        if (name === "wifi")
+            Networking.endScan();
+        else if (name === "bluetooth")
+            Bluetooth.endDiscovery();
+    }
+
+    // --- what a row inside a panel does --------------------------------------
+    //
+    // Each is one call into the facade that owns the thing, and the checks are
+    // all over there (#78) along with the log line for each (#81). Two places
+    // deciding whether a device can be connected is how they come to disagree.
+
+    /// Press a Wi-Fi row. Everything except a network that needs a passphrase
+    /// happens immediately; that one raises the prompt instead, which is a
+    /// surface state and so is the one branch that stays here.
+    function network(ssid: string): void {
+        const row = Networking.rowFor(ssid);
+        if (row === null) {
+            Logger.warn("control-centre",
+                        root.policy.refused(ssid, "no such network"));
+            return;
+        }
+        switch (Networking.wifi.action(row)) {
+        // Cancelling a join in flight and disconnecting a joined network are
+        // the same call to NetworkManager — it is the same association being
+        // taken down, at two different points in its life.
+        case "cancel":
+        case "disconnect":  root.prompt = ""; Networking.leave(ssid); return;
+        case "connect":     root.prompt = ""; Networking.join(ssid, ""); return;
+        case "prompt":      root.askPassphrase(ssid); return;
+        // A network this shell cannot join. The facade owns the words, so it is
+        // called anyway and refuses out loud rather than being second-guessed.
+        case "unsupported": Networking.join(ssid, ""); return;
+        }
+    }
+
+    function askPassphrase(ssid: string): void {
+        Networking.clearFailure();
+        root.prompt = ssid;
+        Logger.log("control-centre", "passphrase asked for " + ssid);
+    }
+
+    /// Submit one. Empty is a cancel rather than an attempt — a prompt closed
+    /// with nothing in it is a user who changed their mind, not one asking to
+    /// join an open network by that name.
+    function passphrase(ssid: string, secret: string): void {
+        if (String(secret ?? "") === "") {
+            root.prompt = "";
+            Logger.log("control-centre", "passphrase cancelled for " + ssid);
+            return;
+        }
+        root.prompt = "";
+        Networking.join(ssid, secret);
+    }
+
+    function forgetNetwork(ssid: string): void {
+        root.prompt = "";
+        Networking.forget(ssid);
+    }
+
+    function device(address: string): void {
+        Bluetooth.pressDevice(address);
+    }
+
+    function forgetDevice(address: string): void {
+        Bluetooth.forgetDevice(address);
+    }
+
+    function output(id: string): void {
+        Audio.setDefaultSink(id);
+    }
+
+    function stream(id: string, percent: int): void {
+        Audio.setStreamVolume(id, root.policy.fraction(percent));
+    }
+
+    function muteStream(id: string): void {
+        Audio.toggleStreamMute(id);
+    }
+
+    function tunnel(name: string): void {
+        Vpn.pressTunnel(name);
+    }
+
+    function wallpaper(path: string): void {
+        Wallpapers.choose(path);
     }
 
     /// Move a slider, in whole percent. Run continuously through a drag rather

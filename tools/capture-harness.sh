@@ -98,6 +98,8 @@ LOCK_STATE="quiet"
 SETTINGS_TAB=""
 LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
+DRILL=""
+WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
 LIGHT=0
@@ -116,6 +118,8 @@ while (( $# )); do
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
+        --drill)       DRILL="$2"; shift 2 ;;
+        --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -132,6 +136,18 @@ done
 # otherwise, so `--delay-ms` still means what it says.
 if [[ "$SURFACE" == launcher && "$DELAY_MS" == 600 ]]; then
     DELAY_MS=2200
+fi
+
+# `--drill` only means anything on the panel that has drill-ins in it, and a
+# silently ignored flag is a capture of the wrong thing that looks right.
+if [[ -n "$DRILL" ]]; then
+    [[ "$SURFACE" == controlcenter ]] || {
+        echo "--drill only applies to --surface controlcenter" >&2; exit 2; }
+    case "$DRILL" in
+        wifi|bluetooth|audio|vpn|wallpaper) ;;
+        *) echo "unknown drill-in: $DRILL (wifi, bluetooth, audio, vpn, wallpaper)" \
+               >&2; exit 2 ;;
+    esac
 fi
 
 case "$SURFACE" in
@@ -162,28 +178,56 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # A deterministic wallpaper unless one is supplied: bright sky into dark
 # ground, brightest exactly in the strip the bar sits over — the #79 failure
-# shape, not a friendly average. PPM because Qt reads it and three lines of
-# python write it.
+# shape, not a friendly average.
+#
+# PNG and not the PPM this wrote until #45, which was the cheaper thing to
+# generate and is not a wallpaper as far as the shell is concerned:
+# Surfaces/Background/WallpaperPolicy.qml accepts the raster formats a person
+# actually keeps wallpapers in, so `--drill wallpaper` against a folder of PPMs
+# captured an empty picker that looked like a broken one. Written the way
+# tools/make-noise.py writes assets/noise.png — struct and zlib, because the
+# alternative is a Pillow dependency for fifteen lines of packing.
 if [[ -z "$WALLPAPER" ]]; then
-    WALLPAPER="$SCRATCH/wallpaper.ppm"
+    WALLPAPER="$SCRATCH/wallpaper.png"
     python3 - "$WALLPAPER" "$W" "$H" <<'EOF'
+import struct
 import sys
+import zlib
+
 path, w, h = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-rows = []
+
+raw = bytearray()
 for y in range(h):
     t = y / (h - 1)
     r, g, b = int(216 - 150 * t), int(232 - 160 * t), int(240 - 150 * t)
-    rows.append(bytes((r, g, b)) * w)
+    raw.append(0)                      # filter type: none
+    raw += bytes((r, g, b)) * w
+
+
+def chunk(tag, payload):
+    return (struct.pack(">I", len(payload)) + tag + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+
 with open(path, "wb") as f:
-    f.write(f"P6\n{w} {h}\n255\n".encode())
-    f.writelines(rows)
+    f.write(b"\x89PNG\r\n\x1a\n")
+    f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)))
+    f.write(chunk(b"IDAT", zlib.compress(bytes(raw), 6)))
+    f.write(chunk(b"IEND", b""))
 EOF
 fi
 [[ -f "$WALLPAPER" ]] || { echo "no such wallpaper: $WALLPAPER" >&2; exit 2; }
 
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-printf '{ "wallpaper": { "path": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s } }\n' \
-    "$WALLPAPER" "$( ((REDUCED)) && echo true || echo false )" \
+# The wallpaper picker's folder (#45). Defaults to the one the deterministic
+# wallpaper above was written into, so `--drill wallpaper` has exactly one
+# thumbnail to draw and the picture is the same on every machine — the folder
+# is a scratch directory, so this cannot pick up whatever the caller happens to
+# keep in ~/Pictures.
+: "${WALLPAPER_FOLDER:=$(dirname "$WALLPAPER")}"
+printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s } }\n' \
+    "$WALLPAPER" "$WALLPAPER_FOLDER" \
+    "$( ((REDUCED)) && echo true || echo false )" \
     "$( ((LIGHT)) && echo false || echo true )" \
     > "$SCRATCH/config/forest-shell/settings.json"
 
@@ -203,7 +247,7 @@ CAPTURE_ENV=(
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
-    CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT"
+    CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.

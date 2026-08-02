@@ -124,4 +124,55 @@ TestCase {
         compare(policy.complaint("work", false, 4, ""),
                 "vpn work down refused — exit 4");
     }
+
+    // --- the drill-in's list (#45) -------------------------------------------
+
+    function names(rows) {
+        return rows.map(row => row.name);
+    }
+
+    function test_the_tunnel_that_is_up_sits_first() {
+        compare(names(policy.rows([
+            { name: "work", up: false },
+            { name: "home", up: true }
+        ])), ["home", "work"]);
+    }
+
+    function test_the_rest_are_alphabetical_rather_than_in_networkmanagers_order() {
+        // NetworkManager lists by last-modified, so its order reshuffles itself
+        // every time the user brings a tunnel up — which is exactly the moment
+        // they are looking at the list.
+        compare(names(policy.rows([
+            { name: "zurich", up: false },
+            { name: "Amsterdam", up: false },
+            { name: "berlin", up: false }
+        ])), ["Amsterdam", "berlin", "zurich"]);
+    }
+
+    function test_a_nameless_row_is_not_a_row() {
+        compare(policy.rows([{ name: "" }, { name: "  " }, { name: "work" }]).length, 1);
+    }
+
+    function test_pressing_a_second_tunnel_brings_it_up_rather_than_taking_the_first_down() {
+        // The tile acts on the machine's state; a row acts on itself.
+        const rows = policy.rows([{ name: "home", up: true }, { name: "work", up: false }]);
+        compare(policy.rowAction(rows[0]), "down");
+        compare(policy.rowAction(rows[1]), "up");
+    }
+
+    function test_a_row_says_whether_it_is_up() {
+        compare(policy.rowDetail({ up: true }), "Connected");
+        compare(policy.rowDetail({ up: false }), "Not connected");
+        compare(policy.rowIcon({ up: true }), "shield");
+        compare(policy.rowIcon({ up: false }), "shield-off");
+    }
+
+    function test_the_signature_is_the_whole_row() {
+        // The one list of the five with no live measurement on it, so nothing
+        // has to be left out to keep #75 at bay.
+        const before = policy.rows([{ name: "work", up: false }]);
+        const after = policy.rows([{ name: "work", up: true }]);
+        verify(policy.signature(before) !== policy.signature(after));
+        compare(policy.signature(before), policy.signature(policy.rows([{ name: "work" }])));
+    }
 }

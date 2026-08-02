@@ -10,6 +10,10 @@ pragma Singleton
 //     Audio.setVolume(0.4)
 //     Audio.stepVolume(1)   // one notch up, snapped to the step grid
 //     Audio.toggleMute()
+//     Audio.sinks           // the drill-in's output picker (#45)
+//     Audio.streams         // the per-application mixer
+//     Audio.setDefaultSink(id)
+//     Audio.setStreamVolume(id, 0.4)
 //
 // Native throughout — `Quickshell.Services.Pipewire` is a real PipeWire client
 // (#4 §2.5), so nothing here shells out to `wpctl` or `pactl` and nothing polls.
@@ -125,6 +129,152 @@ Singleton {
         root.setSourceMuted(!root.sourceMuted);
     }
 
+    // --- the drill-in's two lists (#45) --------------------------------------
+    //
+    // The output picker and the per-application mixer. Both are the same shape
+    // as the wifi and bluetooth lists and for the same reasons — see
+    // Services/Networking/Networking.qml for the long version of the #75
+    // argument — with one extra trap that is specific to PipeWire and that the
+    // header of this file already names once: **a node's properties are empty
+    // until something tracks it.** The tracker at the bottom of this file used
+    // to hold two nodes; it now holds every sink and every stream on screen,
+    // because a mixer row for an untracked node draws a slider at zero for an
+    // application that is audibly playing.
+
+    /// Every output this machine has. `isSink` and not a stream: an application
+    /// playing into a sink is not a device to switch to.
+    readonly property var sinkNodes: {
+        const out = [];
+        const nodes = Pipewire.nodes ? Pipewire.nodes.values : [];
+        for (const node of nodes)
+            if (node.isSink && !node.isStream && node.audio)
+                out.push(node);
+        return out;
+    }
+
+    /// Every application currently playing. An output stream — `isStream` with
+    /// `isSink` false is a *recording* stream, which belongs to a microphone
+    /// mixer this panel does not have.
+    readonly property var streamNodes: {
+        const out = [];
+        const nodes = Pipewire.nodes ? Pipewire.nodes.values : [];
+        for (const node of nodes)
+            if (node.isStream && node.isSink && node.audio)
+                out.push(node);
+        return out;
+    }
+
+    readonly property var sinkCandidates: {
+        const rows = [];
+        for (const node of root.sinkNodes)
+            rows.push({
+                id: String(node.id),
+                description: node.description,
+                nickname: node.nickname,
+                name: node.name,
+                isDefault: root.sink !== null && node.id === root.sink.id,
+                live: node
+            });
+        return rows;
+    }
+
+    readonly property var streamCandidates: {
+        const rows = [];
+        for (const node of root.streamNodes)
+            rows.push({
+                id: String(node.id),
+                description: node.description,
+                name: node.name,
+                properties: node.properties,
+                live: node
+            });
+        return rows;
+    }
+
+    /// What the two `Repeater`s are given, republished only when the policy's
+    /// signature moves (#75). The volumes are not in either signature and must
+    /// not be: a mixer row is a *slider*, and rebuilding its delegate mid-drag
+    /// is the one rebuild the user can feel.
+    property var sinks: []
+    property string sinkSignature: ""
+
+    onSinkCandidatesChanged: {
+        const rows = root.policy.sinks(root.sinkCandidates);
+        const signature = root.policy.sinkSignature(rows);
+        if (signature === root.sinkSignature)
+            return;
+        root.sinkSignature = signature;
+        root.sinks = rows;
+    }
+
+    property var streams: []
+    property string streamSignature: ""
+
+    onStreamCandidatesChanged: {
+        const rows = root.policy.streams(root.streamCandidates);
+        const signature = root.policy.streamSignature(rows);
+        if (signature === root.streamSignature)
+            return;
+        root.streamSignature = signature;
+        root.streams = rows;
+    }
+
+    /// Switch the machine's output.
+    ///
+    /// `preferredDefaultAudioSink` and not `defaultAudioSink`: the latter is
+    /// what PipeWire currently resolves to and is read-only, and the former is
+    /// the *preference* — which is what makes this survive the device going
+    /// away and coming back, and what makes it agree with what `wpctl
+    /// set-default` would have done.
+    function setDefaultSink(id: string): void {
+        for (const node of root.sinkNodes) {
+            if (String(node.id) !== id)
+                continue;
+            Pipewire.preferredDefaultAudioSink = node;
+            Logger.log("audio", root.policy.switched(root.policy.deviceName({
+                description: node.description, nickname: node.nickname,
+                name: node.name })));
+            return;
+        }
+        Logger.warn("audio", root.policy.streamRefused(id, "no such output"));
+    }
+
+    function streamNodeFor(id: string): var {
+        for (const node of root.streamNodes)
+            if (String(node.id) === id)
+                return node;
+        return null;
+    }
+
+    /// One application's own level, 0-1. The mixer's whole point: turning a
+    /// notification down without turning the music down with it.
+    function setStreamVolume(id: string, volume: real): void {
+        const node = root.streamNodeFor(id);
+        if (node === null || !node.audio) {
+            Logger.warn("audio", root.policy.streamRefused(id, "no such stream"));
+            return;
+        }
+        node.audio.volume = root.policy.clamp(volume);
+    }
+
+    function setStreamMuted(id: string, muted: bool): void {
+        const node = root.streamNodeFor(id);
+        if (node === null || !node.audio) {
+            Logger.warn("audio", root.policy.streamRefused(id, "no such stream"));
+            return;
+        }
+        node.audio.muted = muted;
+    }
+
+    function toggleStreamMute(id: string): void {
+        const node = root.streamNodeFor(id);
+        if (node === null || !node.audio) {
+            Logger.warn("audio", root.policy.streamRefused(id, "no such stream"));
+            return;
+        }
+        root.setStreamMuted(id, !node.audio.muted);
+    }
+
     // --- what a harness reads ------------------------------------------------
     //
     // A line per state change, which for audio is a keypress and never a frame
@@ -143,11 +293,21 @@ Singleton {
     onMutedChanged: Logger.log("audio", root.muted ? "muted" : "unmuted")
     onSourceMutedChanged: Logger.log("audio", root.sourceMuted ? "mic muted" : "mic live")
 
-    // Tracking is what populates `audio` on both nodes — see the header. The
+    // Tracking is what populates `audio` on every node — see the header. The
     // list is a binding, so a headphone plug that moves the default sink moves
     // the tracker with it.
+    //
+    // It holds the two defaults *and* every sink and stream the drill-in can
+    // draw (#45), which is the same trap one scale up: an untracked node reports
+    // `volume` 0 and `muted` false forever, so a mixer built on the two defaults
+    // alone would draw every application at silence while they played. The cost
+    // is bounded by what PipeWire has — a handful of sinks and one node per
+    // playing application — and it is paid whether or not the panel is open,
+    // because a tracker armed on demand would populate a frame after the list
+    // it is for was already on screen.
     PwObjectTracker {
-        objects: [root.sink, root.source]
+        objects: [root.sink, root.source].concat(root.sinkNodes)
+                                         .concat(root.streamNodes)
     }
 
     Component.onCompleted: Logger.log("audio",

@@ -38,6 +38,15 @@ Item {
     /// The glyph was pressed on a slider that can mute.
     signal muteToggled
 
+    /// The chevron was pressed (#45). The sound panel hangs off the volume and
+    /// microphone sliders rather than off a tile of its own, because "which
+    /// speakers is this slider moving" is a question asked while looking at the
+    /// slider. Which sliders have one is DrillInPolicy's.
+    signal drillRequested
+
+    readonly property bool hasDoor:
+        slider.policy.drill.panelForSlider(slider.model.id) !== ""
+
     /// Whether the pointer owns the value right now. See the header.
     property bool dragging: false
     property int dragPercent: 0
@@ -167,6 +176,32 @@ Item {
             color: Theme.textMuted
             font.family: Theme.fontUi
             font.pointSize: Theme.pt(10.5)
+        }
+
+        // The door to the sound panel. Outside the track's `MouseArea` on
+        // purpose — a chevron over the right end of a slider would be a press
+        // that sets the volume to 100% about as often as it opens anything.
+        Item {
+            Layout.alignment: Qt.AlignVCenter
+            implicitWidth: 20
+            implicitHeight: 24
+            visible: slider.hasDoor
+
+            HoverHandler {
+                id: doorHover
+                cursorShape: Qt.PointingHandCursor
+            }
+
+            TapHandler {
+                onTapped: slider.drillRequested()
+            }
+
+            Icon {
+                anchors.centerIn: parent
+                name: "chevron-right"
+                size: 12
+                color: doorHover.hovered ? Theme.accentPrimary : Theme.textMuted
+            }
         }
     }
 }

@@ -66,6 +66,10 @@ ShellRoot {
     readonly property string surfaceName: Quickshell.env("CAPTURE_SURFACE") || "bar"
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
+
+    /// Which control-centre detail view to open before the grab (#45), or "" for
+    /// the grid. `wifi`, `bluetooth`, `audio`, `vpn`, `wallpaper`.
+    readonly property string drillPanel: Quickshell.env("CAPTURE_DRILL") ?? ""
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
     readonly property int delayMs: parseInt(Quickshell.env("CAPTURE_DELAY_MS") || "600")
@@ -597,13 +601,36 @@ ShellRoot {
                     + " rows=" + centre.tileRows.length
                     + " sliders=" + centre.sliderRows.length
                     + " mode=" + (Theme.dark ? "dark" : "light")
+                    + " drill=" + (ControlCenterActions.panel || "none")
                     + " panel=" + root.region(centre.panelItem, controlBackdrop)
                     + " strip=" + root.region(centre.stripItem, controlBackdrop)
                     + " tile=" + root.region(centre.litTileItem, controlBackdrop)
                     + " bar=" + Config.values.bar.height;
             }
 
-            Component.onCompleted: root.describeScene = controlBackdrop.describe
+            // The drill-ins (#45), when one is asked for. Driven through the
+            // same door the IPC handler and the tiles use, so what is captured
+            // is the panel a press produces and not a component posed by name.
+            //
+            // The four list panels are captured against *real* services and so
+            // against whatever this machine has — unlike the grid above, whose
+            // facts are assigned. That is deliberate and it is the honest
+            // limit of this seam for them: a network list is a picture of a
+            // radio, and there is no way to pose one from here. What the
+            // capture is worth is the #80 check — that a row with a long name
+            // in it does not starve the column beside it — and an empty list
+            // still answers the layout half of that through the chrome. The
+            // wallpaper picker is the one that poses fully, because its
+            // contents are files and `--wallpaper-folder` can point at any.
+            Component.onCompleted: {
+                root.describeScene = controlBackdrop.describe;
+                if (root.drillPanel !== "")
+                    ControlCenterActions.drill(root.drillPanel);
+            }
+
+            // Left at the root again, so a harness run cannot leave a scanner
+            // running on the machine that ran it.
+            Component.onDestruction: ControlCenterActions.back("capture")
 
             BarSurface {
                 anchors {

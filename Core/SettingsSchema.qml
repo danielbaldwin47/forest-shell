@@ -440,7 +440,19 @@ QtObject {
         },
 
         wallpaper: {
-            path: { def: "", coerce: c.path }
+            path: { def: "", coerce: c.path },
+
+            // Where the control centre's picker looks for candidates (#45), and
+            // nothing else reads it — the wallpaper itself is `path` above and
+            // may live anywhere. `~/` and not an absolute path because
+            // settings.json travels between machines and a home directory does
+            // not; Surfaces/Background/Wallpapers.qml expands it.
+            //
+            // A folder that does not exist is not an error: the picker says
+            // where it looked and shows nothing, which is the correct answer on
+            // a machine that keeps its wallpapers somewhere else.
+            folder: { def: "~/Pictures/Wallpapers", coerce: c.path,
+                      label: "Where the wallpaper picker looks" }
             // Fill mode and any transition land with the wallpaper work.
         },
 

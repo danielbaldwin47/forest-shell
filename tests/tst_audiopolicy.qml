@@ -67,4 +67,144 @@ TestCase {
         compare(policy.sourceIcon(false), "mic");
     }
 
+    // --- the drill-in's two lists (#45) --------------------------------------
+    //
+    // The output picker and the per-application mixer. Switching a real device
+    // and hearing it move needs a real sound card and is a manual pass; every
+    // decision made before PipeWire is touched is here.
+
+    function sink(id, extra) {
+        const node = { id: id, description: "", nickname: "", name: "",
+                       isDefault: false };
+        for (const key in extra ?? ({}))
+            node[key] = extra[key];
+        return node;
+    }
+
+    function stream(id, appName, extra) {
+        const node = { id: id, description: "", name: "",
+                       properties: { "application.name": appName } };
+        for (const key in extra ?? ({}))
+            node[key] = extra[key];
+        return node;
+    }
+
+    function names(rows) {
+        return rows.map(row => row.name);
+    }
+
+    function test_the_current_output_is_pinned_to_the_top() {
+        // It is the answer to the question the picker was opened with — "what
+        // am I playing through" — and a checked row six rows down answers it
+        // slowly.
+        const rows = policy.sinks([
+            sink("1", { description: "Analogue" }),
+            sink("2", { description: "HDMI" }),
+            sink("3", { description: "USB headset", isDefault: true })
+        ]);
+        compare(names(rows), ["USB headset", "Analogue", "HDMI"]);
+    }
+
+    function test_the_rest_of_the_outputs_are_alphabetical_regardless_of_case() {
+        const rows = policy.sinks([
+            sink("1", { description: "hdmi" }),
+            sink("2", { description: "Analogue" })
+        ]);
+        compare(names(rows), ["Analogue", "hdmi"]);
+    }
+
+    function test_an_output_is_named_by_the_words_a_person_would_recognise() {
+        // `description` is the human one, `nickname` is shorter when it exists,
+        // and the machine name is the last resort rather than the first.
+        compare(policy.deviceName({ description: "Built-in Audio", nickname: "Speakers",
+                                    name: "alsa_output.pci-0000_00_1f.3" }),
+                "Built-in Audio");
+        compare(policy.deviceName({ nickname: "Speakers",
+                                    name: "alsa_output.pci-0000_00_1f.3" }),
+                "Speakers");
+        compare(policy.deviceName({ name: "alsa_output.pci-0000_00_1f.3" }),
+                "alsa_output.pci-0000_00_1f.3");
+        compare(policy.deviceName({}), "Unknown device");
+        compare(policy.deviceName(null), "Unknown device");
+    }
+
+    function test_a_node_pipewire_has_not_filled_in_yet_is_not_a_row() {
+        compare(policy.sinks([sink(""), sink("4")]).length, 1);
+        compare(policy.streams([stream("", "x"), stream("4", "y")]).length, 1);
+    }
+
+    function test_the_mixer_is_alphabetical_by_application() {
+        const rows = policy.streams([
+            stream("3", "mpv"), stream("1", "Firefox"), stream("2", "Discord")
+        ]);
+        compare(names(rows), ["Discord", "Firefox", "mpv"]);
+    }
+
+    function test_two_streams_from_one_application_are_two_rows() {
+        // Firefox playing two tabs is two streams to PipeWire and two volumes
+        // to set. Merging them gives a slider that moves one of the two.
+        const rows = policy.streams([
+            stream("9", "Firefox", { properties: { "application.name": "Firefox",
+                                                   "media.name": "Tab two" } }),
+            stream("4", "Firefox", { properties: { "application.name": "Firefox",
+                                                   "media.name": "Tab one" } })
+        ]);
+        compare(rows.length, 2);
+        // PipeWire's own order within an application, which is the order they
+        // started in and the only thing left that tells them apart.
+        compare(rows.map(row => row.id), ["4", "9"]);
+    }
+
+    function test_a_stream_is_named_by_its_application_first() {
+        compare(policy.streamName(stream("1", "Firefox")), "Firefox");
+        compare(policy.streamName({ id: "1", description: "playback" }), "playback");
+        compare(policy.streamName({ id: "1" }), "Unknown application");
+    }
+
+    function test_the_subtitle_is_what_is_playing_when_it_says_anything_new() {
+        // "Firefox · Firefox" is a row that spent a line saying nothing.
+        compare(policy.streamSubtitle({ properties: { "application.name": "mpv",
+                                                      "media.name": "track.flac" } }),
+                "track.flac");
+        compare(policy.streamSubtitle({ properties: { "application.name": "Firefox",
+                                                      "media.name": "firefox" } }),
+                "");
+        compare(policy.streamSubtitle({ properties: {} }), "");
+    }
+
+    function test_a_stream_falls_back_to_the_shells_own_glyph() {
+        compare(policy.streamIcon({ properties: { "application.icon_name": "firefox" } }),
+                "firefox");
+        compare(policy.streamIcon({ properties: {} }), "volume-2");
+    }
+
+    // --- #75: the signatures -------------------------------------------------
+
+    function test_a_moving_volume_does_not_change_either_signature() {
+        // The sharpest case in the shell: a volume moves *while the user is
+        // dragging the row it would rebuild*, and a rebuilt delegate is a
+        // slider that loses the drag moving it.
+        const quiet = policy.sinks([sink("1", { description: "Analogue", volume: 0.2 })]);
+        const loud = policy.sinks([sink("1", { description: "Analogue", volume: 0.9 })]);
+        compare(policy.sinkSignature(quiet), policy.sinkSignature(loud));
+
+        const before = policy.streams([stream("1", "mpv", { volume: 0.2 })]);
+        const after = policy.streams([stream("1", "mpv", { volume: 0.9 })]);
+        compare(policy.streamSignature(before), policy.streamSignature(after));
+    }
+
+    function test_the_default_output_moving_does_change_the_signature() {
+        // It reorders the list and moves the tick, which is structural.
+        const before = policy.sinks([sink("1", { description: "A" }),
+                                     sink("2", { description: "B", isDefault: true })]);
+        const after = policy.sinks([sink("1", { description: "A", isDefault: true }),
+                                    sink("2", { description: "B" })]);
+        verify(policy.sinkSignature(before) !== policy.sinkSignature(after));
+    }
+
+    function test_an_application_starting_playback_changes_the_signature() {
+        const before = policy.streams([stream("1", "mpv")]);
+        const after = policy.streams([stream("1", "mpv"), stream("2", "Firefox")]);
+        verify(policy.streamSignature(before) !== policy.streamSignature(after));
+    }
 }

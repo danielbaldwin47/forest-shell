@@ -283,6 +283,43 @@ Singleton {
             ControlCenterActions.nudge(control, direction);
         }
         function mute(control: string): void { ControlCenterActions.mute(control); }
+
+        // The drill-ins (#45), on this handler for the same reason the rest are:
+        // two `IpcHandler`s on one target is one of them quietly not answering.
+        //
+        // Every row inside every detail view is reachable from here, and it has
+        // to be — a row is a `TapHandler` inside a drawer, so without these
+        // doors "Wi-Fi: scan, join, disconnect" and "Bluetooth: pair, connect,
+        // disconnect" would be claims with no seam under them at all. What they
+        // drive is exactly what a finger drives: one routing table, called from
+        // both sides (Surfaces/Drawers/ControlCenterActions.qml).
+        //
+        //     qs ipc call controlcenter drill wifi
+        //     qs ipc call controlcenter network PUMPKINCURRY
+        //     qs ipc call controlcenter passphrase PUMPKINCURRY hunter2hunter2
+        //     qs ipc call controlcenter back
+        function drill(panel: string): void { ControlCenterActions.drill(panel); }
+        function back(): void { ControlCenterActions.back("ipc"); }
+        function panel(): string { return ControlCenterActions.panel; }
+
+        function network(ssid: string): void { ControlCenterActions.network(ssid); }
+        function passphrase(ssid: string, secret: string): void {
+            ControlCenterActions.passphrase(ssid, secret);
+        }
+        function forgetNetwork(ssid: string): void {
+            ControlCenterActions.forgetNetwork(ssid);
+        }
+        function device(address: string): void { ControlCenterActions.device(address); }
+        function forgetDevice(address: string): void {
+            ControlCenterActions.forgetDevice(address);
+        }
+        function output(id: string): void { ControlCenterActions.output(id); }
+        function stream(id: string, percent: int): void {
+            ControlCenterActions.stream(id, percent);
+        }
+        function muteStream(id: string): void { ControlCenterActions.muteStream(id); }
+        function tunnel(name: string): void { ControlCenterActions.tunnel(name); }
+        function wallpaper(path: string): void { ControlCenterActions.wallpaper(path); }
     }
 
     // --- Super+Space ---------------------------------------------------------

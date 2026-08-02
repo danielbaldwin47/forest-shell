@@ -103,6 +103,56 @@ QtObject {
         return (tunnels ?? []).length > 0;
     }
 
+    // --- the drill-in's list (#45) -------------------------------------------
+    //
+    // The tile answers "am I tunnelled" and acts on whichever tunnel that means.
+    // The list is the other half: *which* one, by name, out of however many the
+    // machine has.
+
+    /// Every tunnel as a row, in the order it is drawn: whatever is up first,
+    /// then the rest alphabetically. Alphabetical and not NetworkManager's own
+    /// order, which is by last-modified and so reshuffles itself every time the
+    /// user brings one up.
+    function rows(tunnels: var): var {
+        const out = [];
+        for (const tunnel of tunnels ?? []) {
+            const name = String(tunnel?.name ?? "").trim();
+            if (name === "")
+                continue;
+            out.push({ name: name, up: tunnel?.up === true });
+        }
+        return out.sort((a, b) => {
+            if (a.up !== b.up)
+                return a.up ? -1 : 1;
+            const left = a.name.toLowerCase();
+            const right = b.name.toLowerCase();
+            return left < right ? -1 : left > right ? 1 : 0;
+        });
+    }
+
+    /// What the facade compares before it republishes (#75). Everything a row
+    /// draws is in it, because a tunnel list has no live measurement on it —
+    /// this is the one of the five whose signature is the whole row.
+    function signature(rows: var): string {
+        return (rows ?? []).map(row => row.name + (row.up ? "^" : "-")).join("");
+    }
+
+    /// What one press on a row asks for. Named per row rather than derived from
+    /// the machine's state the way `target`/`wanted` are for the tile: pressing
+    /// a *second* tunnel while a first is up means bring this one up, not take
+    /// that one down.
+    function rowAction(row: var): string {
+        return row?.up === true ? "down" : "up";
+    }
+
+    function rowDetail(row: var): string {
+        return row?.up === true ? "Connected" : "Not connected";
+    }
+
+    function rowIcon(row: var): string {
+        return row?.up === true ? "shield" : "shield-off";
+    }
+
     /// Whether a finished `nmcli` did what it was asked. The exit status is the
     /// whole answer — nmcli exits non-zero and explains itself, unlike hyprctl
     /// (#78).

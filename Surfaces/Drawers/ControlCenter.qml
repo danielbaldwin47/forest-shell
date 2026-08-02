@@ -31,12 +31,42 @@
 // (ControlCenterPolicy.qml states the rule). So this panel is a different size
 // on a laptop and on a tower, and both are correct.
 //
+// ## The detail views (#45)
+//
+// Four of the nine tiles and two of the three sliders have a *door* in them —
+// Wi-Fi, Bluetooth and VPN are a switch and a list at once, the wallpaper tile
+// is only a door, and the sound panel hangs off the volume slider. Behind each
+// is one of Surfaces/Drawers/DrillIn/*.qml, and they slide in over the root view
+// inside this same card rather than opening a window.
+//
+// Which is open is not held here: it is
+// Surfaces/Drawers/ControlCenterActions.qml's `panel`, for the same reason the
+// routing table is there. A drawer's contents cannot be clicked by anything this
+// repo may assume, so the IPC door is both a feature and the only seam-2
+// evidence that the navigation works at all.
+//
+// What *is* here is the transition, and one thing that has to happen with it:
+// the two radio panels hold a scanner while they are open, so a drawer closing
+// under an open panel has to close the panel too. `Component.onDestruction`
+// below is that — without it, dismissing the drawer with the Wi-Fi list up
+// leaves the radio scanning with nothing looking at it, which is a wakeup every
+// few seconds that nothing on screen would show.
+//
 // ## Motion
 //
-// The drawer's own — DrawerSlot.qml runs the 320 ms entrance, the 240 ms exit
-// and #27's cross-drawer overlap, and the transform origin is set to this
-// panel's corner so the entrance grows out of the bar button. Nothing here
-// animates on open; the tiles and the sliders animate only in place.
+// Two scales of it. The drawer's own is DrawerSlot.qml — the 320 ms entrance,
+// the 240 ms exit and #27's cross-drawer overlap, with the transform origin at
+// this panel's corner so it grows out of the bar button. Nothing here animates
+// on open.
+//
+// The drill-in is the *in-place* step (`motionFast`, 140 ms): the card is
+// already on screen and only its contents change, which is the same rung
+// ControlTile.qml fades its fill on. Forward slides leftward and back reverses
+// it, so the way out is always the way you came in (DrillInPolicy.qml).
+//
+// The animations are explicit and not `Behavior`s, for the reason DrawerSlot.qml
+// documents at length: a `Behavior` does not run during component creation, and
+// the incoming view is a freshly loaded delegate every time.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
@@ -48,6 +78,7 @@ import qs.Services.Hardware
 import qs.Services.Networking
 import qs.Services.Notifications
 import qs.Surfaces.Settings
+import qs.Surfaces.Drawers.DrillIn
 
 FocusScope {
     id: root
@@ -58,6 +89,12 @@ FocusScope {
     signal closeRequested(string reason)
 
     readonly property ControlCenterPolicy policy: ControlCenterPolicy {}
+    readonly property DrillInPolicy drillPolicy: DrillInPolicy {}
+
+    /// Which detail view is open, or `""`. Read from the singleton rather than
+    /// held, so the panel and `qs ipc call controlcenter drill wifi` cannot
+    /// disagree about what is on screen.
+    readonly property string drillPanel: ControlCenterActions.panel
 
     /// A component dimension, not a token (#8): wide enough for three tiles
     /// with a network name on each, narrow enough to leave the desktop visible
@@ -166,20 +203,47 @@ FocusScope {
         // `anchors.fill` here is a height cycle Qt breaks by zeroing the
         // layout, and the panel then draws as its header alone with everything
         // stacked at x=0.
-        height: Math.min(column.implicitHeight + panel.padding * 2, root.maxPanelHeight)
+        //
+        // Which layout it is sized from moves with the drill-in: a detail view
+        // is a different height from the grid, and a card that stayed the grid's
+        // height would draw a network list into the space nine tiles took.
+        height: Math.min(root.contentHeight + panel.padding * 2, root.maxPanelHeight)
+
+        // The card resizing is itself an in-place change of a visible surface,
+        // so it moves on the same rung the slide does. A `Behavior` and not an
+        // explicit animation, unlike everything inside the stack: this property
+        // is never assigned during creation — it is a binding that already holds
+        // the grid's height by the time any drill-in exists.
+        Behavior on height {
+            NumberAnimation {
+                duration: Theme.duration(Theme.motionFast)
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+        }
 
         color: Theme.surface
         radius: Theme.radiusLg
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
-        ColumnLayout {
-            id: column
+        // Both views live in here, and only during a transition are both drawn.
+        // Clipped, so the one on its way out disappears at the card's padding
+        // rather than over the edge of it.
+        Item {
+            id: stack
 
             x: panel.padding
             y: panel.padding
             width: panel.width - panel.padding * 2
             height: panel.height - panel.padding * 2
+            clip: true
+
+        ColumnLayout {
+            id: column
+
+            width: stack.width
+            height: stack.height
             spacing: Theme.space3
 
             // --- the sliders --------------------------------------------------
@@ -201,6 +265,8 @@ FocusScope {
 
                         onMoved: percent => ControlCenterActions.slide(modelData.id, percent)
                         onMuteToggled: ControlCenterActions.mute(modelData.id)
+                        onDrillRequested: ControlCenterActions.drill(
+                            root.drillPolicy.panelForSlider(modelData.id))
                     }
                 }
             }
@@ -234,6 +300,15 @@ FocusScope {
                                 model: modelData
 
                                 onActivated: ControlCenterActions.press(modelData.id)
+                                // The chevron, on the three tiles that are a
+                                // switch and a door at once. The wallpaper tile
+                                // raises this from its whole body instead, and
+                                // `press` routes that one — one path, so a tile
+                                // that is only a door still logs the press its
+                                // eight neighbours do.
+                                onDrillRequested: modelData.doorOnly
+                                    ? ControlCenterActions.press(modelData.id)
+                                    : ControlCenterActions.drill(modelData.drillIn)
 
                                 // For tools/capture-harness.sh only; see
                                 // `litTileItem` above.
@@ -378,7 +453,142 @@ FocusScope {
                 }
             }
         }
+
+            // The detail view, when there is one. A `Loader` and not five
+            // always-present panels: a Wi-Fi list nobody has opened is a
+            // `Repeater` over a live model and a scanner's worth of bindings,
+            // and four of those behind a grid would be the idle cost of a panel
+            // that is closed.
+            Loader {
+                id: drill
+
+                width: stack.width
+                height: stack.height
+                // Kept alive until the slide out has finished — dropped in the
+                // transition's own `ScriptAction`, not on `root.drillPanel`, or
+                // the view being animated away would vanish on the first frame
+                // of its exit.
+                active: false
+                opacity: 0
+
+                sourceComponent: root.drillPanel === "wifi" ? wifiPanel
+                               : root.drillPanel === "bluetooth" ? bluetoothPanel
+                               : root.drillPanel === "audio" ? audioPanel
+                               : root.drillPanel === "vpn" ? vpnPanel
+                               : root.drillPanel === "wallpaper" ? wallpaperPanel
+                               : null
+            }
+        }
     }
+
+    Component { id: wifiPanel; WifiPanel {} }
+    Component { id: bluetoothPanel; BluetoothPanel {} }
+    Component { id: audioPanel; AudioPanel {} }
+    Component { id: vpnPanel; VpnPanel {} }
+    Component { id: wallpaperPanel; WallpaperPanel {} }
+
+    // --- the slide -----------------------------------------------------------
+    //
+    // One animation for both directions, because they are the same movement:
+    // whichever view is arriving comes from the side DrillInPolicy names and
+    // whichever is leaving goes to the other, and back is forward with the sign
+    // flipped.
+
+    /// Where the card's height comes from — the open detail view, or the grid.
+    readonly property int contentHeight: root.drillPanel !== "" && drill.item
+                                       ? drill.item.implicitHeight
+                                       : column.implicitHeight
+
+    function runTransition(): void {
+        const drilled = root.drillPanel !== "";
+        const forward = ControlCenterActions.forward;
+
+        const incoming = drilled ? drill : column;
+        const outgoing = drilled ? column : drill;
+
+        // The incoming view is placed before it is animated rather than being
+        // left where it was: a panel loaded this frame has x 0, and starting its
+        // slide from there is a fade with no slide in it.
+        incoming.x = root.drillPolicy.offset(forward, true) * stack.width;
+        incoming.opacity = 0;
+        incoming.visible = true;
+        outgoing.visible = true;
+
+        slideIn.target = incoming;
+        fadeIn.target = incoming;
+        slideOut.target = outgoing;
+        fadeOut.target = outgoing;
+        slideOut.to = root.drillPolicy.offset(forward, false) * stack.width;
+
+        transition.restart();
+    }
+
+    SequentialAnimation {
+        id: transition
+
+        ParallelAnimation {
+            NumberAnimation {
+                id: slideIn
+                property: "x"
+                to: 0
+                duration: Theme.duration(Theme.motionFast)
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+
+            NumberAnimation {
+                id: fadeIn
+                property: "opacity"
+                to: 1
+                duration: Theme.duration(Theme.motionFast)
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+
+            NumberAnimation {
+                id: slideOut
+                property: "x"
+                duration: Theme.duration(Theme.motionFast)
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+
+            NumberAnimation {
+                id: fadeOut
+                property: "opacity"
+                to: 0
+                duration: Theme.duration(Theme.motionFast)
+                easing.type: Easing.Bezier
+                easing.bezierCurve: Theme.fogEase
+            }
+        }
+
+        ScriptAction {
+            script: {
+                // The view that left stops existing as far as input is
+                // concerned. An `opacity: 0` item still takes presses, which
+                // for a grid of nine toggles sitting behind a network list is
+                // the worst kind of invisible bug.
+                const drilled = root.drillPanel !== "";
+                column.visible = !drilled;
+                drill.visible = drilled;
+                if (!drilled)
+                    drill.active = false;
+            }
+        }
+    }
+
+    onDrillPanelChanged: {
+        if (root.drillPanel !== "")
+            drill.active = true;
+        root.runTransition();
+    }
+
+    // A drawer dismissed with a detail view open has to close the view too:
+    // two of the five hold a radio scanning while they are open, and a scanner
+    // nobody released is a wakeup every few seconds that nothing on screen
+    // would show (#22 §5).
+    Component.onDestruction: ControlCenterActions.back("drawer")
 
     // A small round icon button, three of them in the media card and two in the
     // power line. Local rather than in Widgets/: it is this panel's strip

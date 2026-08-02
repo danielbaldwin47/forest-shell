@@ -27,6 +27,12 @@ import QtQuick
 QtObject {
     id: policy
 
+    /// Which tiles have a door in them, and which panel each opens (#45). Held
+    /// here rather than restated: the drill-ins own that map, and a tile that
+    /// advertised a chevron for a panel the navigation does not know about is
+    /// the two halves disagreeing in the one way the user can see.
+    readonly property DrillInPolicy drill: DrillInPolicy {}
+
     /// The grid, in the order it is drawn. Nine on a full laptop, which is the
     /// 3×3 the ticket asks for; fewer on a machine missing the hardware.
     readonly property var tileOrder: [
@@ -48,7 +54,7 @@ QtObject {
     // --- the grid ------------------------------------------------------------
 
     /// Every tile this machine has, in `tileOrder`, each already resolved to
-    /// what it draws: `{ id, on, icon, label, detail, drillIn }`.
+    /// what it draws: `{ id, on, icon, label, detail, drillIn, doorOnly }`.
     ///
     /// `on` is what fills the tile teal, and it means *engaged*, not
     /// *available* — see `modeTile` for the one place that distinction has a
@@ -99,10 +105,17 @@ QtObject {
     /// One tile, as the grid draws it. Named `makeTile` and not `row`, which is
     /// what it was: `rows()` twenty lines up chunks tiles into *grid rows*, and
     /// two meanings of "row" one screen apart is one of them being read wrong.
+    ///
+    /// `drillIn` is the panel this tile's chevron opens, or `""` — a name and
+    /// not the boolean it was until #45, because three tiles are now a switch
+    /// *and* a door and the surface has to know which door. `doorOnly` is the
+    /// one tile where the whole card is the door and there is no switch under
+    /// it.
     function makeTile(id: string, on: bool, icon: string, label: string,
                       detail: string): var {
         return { id: id, on: on === true, icon: icon, label: label,
-                 detail: detail, drillIn: false };
+                 detail: detail, drillIn: policy.drill.panelFor(id),
+                 doorOnly: policy.drill.doorOnly(id) };
     }
 
     function wifiTile(wifi: var): var {
@@ -203,13 +216,11 @@ QtObject {
     }
 
     /// The one tile that is a door rather than a switch: it opens the wallpaper
-    /// drill-in, so it has no on-state to show. Stub until that ticket lands —
-    /// `drillIn` is what tells the surface to open a panel instead of calling a
-    /// service.
+    /// picker (#45), so it has no on-state to show and no body press that could
+    /// mean anything else. Both facts come off DrillInPolicy through
+    /// `makeTile`, which is why nothing is overridden here any more.
     function wallpaperTile(): var {
-        const tile = policy.makeTile("wallpaper", false, "wallpaper", "Wallpaper", "");
-        tile.drillIn = true;
-        return tile;
+        return policy.makeTile("wallpaper", false, "wallpaper", "Wallpaper", "");
     }
 
     function stateWord(on: bool): string {

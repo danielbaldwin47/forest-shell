@@ -6,6 +6,8 @@ pragma Singleton
 //     Vpn.on          // is one up
 //     Vpn.name        // which
 //     Vpn.toggle()    // one press of the control-centre tile
+//     Vpn.rows        // the drill-in's list (#45), one row per profile
+//     Vpn.pressTunnel(name)
 //
 // The one part of the network facade that shells out. `Quickshell.Networking`
 // is a real NetworkManager client — the reason Services/Networking/Networking
@@ -40,14 +42,39 @@ Singleton {
     readonly property string name: root.policy.active(root.tunnels)
     readonly property bool on: root.name !== ""
 
-    /// One press: down whatever is up, or up the first one configured. Which
-    /// tunnel out of several is the wallpaper-style drill-in this ticket
-    /// stubs — the tile answers "am I tunnelled", which is the question a
-    /// control centre is opened for.
+    /// One press of the tile: down whatever is up, or up the first one
+    /// configured. Which tunnel out of several is the drill-in's question
+    /// (`pressTunnel` below) — the tile answers "am I tunnelled", which is what
+    /// a control centre is opened for.
     function toggle(): void {
         const target = root.policy.target(root.tunnels);
         if (target === "") {
             Logger.warn("vpn", "no connection configured");
+            return;
+        }
+        root.setTunnel(target, root.policy.wanted(root.tunnels));
+    }
+
+    // --- the drill-in's list (#45) -------------------------------------------
+    //
+    // The tile answers "am I tunnelled" and acts on whichever tunnel that means.
+    // These are the other half: *which* one, by name.
+
+    /// Every tunnel as a row, ordered for drawing. Republished on every refresh
+    /// rather than filtered through a signature the way the three live lists
+    /// are: there is no polling here at all (see the header), so this array is
+    /// rebuilt a handful of times a session and never on its own.
+    readonly property var rows: root.policy.rows(root.tunnels)
+
+    /// Bring one tunnel up or down by name. Unlike `toggle`, which acts on the
+    /// machine's state, this acts on the row: pressing a second tunnel while a
+    /// first is up means bring this one up, not take that one down —
+    /// NetworkManager will hold several at once and it is not this shell's
+    /// business to decide it should not.
+    function setTunnel(name: string, up: bool): void {
+        const target = String(name ?? "").trim();
+        if (target === "") {
+            Logger.warn("vpn", "no connection named");
             return;
         }
         if (apply.running) {
@@ -58,12 +85,22 @@ Singleton {
             return;
         }
 
-        const up = root.policy.wanted(root.tunnels);
         apply.target = target;
         apply.up = up;
         apply.command = up ? root.policy.upCommand(target)
                            : root.policy.downCommand(target);
         apply.running = true;
+    }
+
+    /// One press on a row, routed by what the row is now — the same table the
+    /// panel uses, so the IPC door does what a finger does.
+    function pressTunnel(name: string): void {
+        for (const row of root.rows)
+            if (row.name === name) {
+                root.setTunnel(name, root.policy.rowAction(row) === "up");
+                return;
+            }
+        Logger.warn("vpn", "no connection called " + name);
     }
 
     function refresh(): void {

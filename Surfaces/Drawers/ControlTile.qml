@@ -43,6 +43,18 @@ Rectangle {
     /// what it switches.
     signal activated
 
+    /// The chevron was pressed, or the whole tile was on a tile that is only a
+    /// door (#45). The panel routes it to the drill-in — the tile knows nothing
+    /// about what is behind it either.
+    signal drillRequested
+
+    /// Whether this tile has a detail view behind it, and whether the door is
+    /// the whole card. Both off the model, which got them from DrillInPolicy —
+    /// a tile that decided for itself which panel it opens would be a second
+    /// copy of the map the navigation already holds.
+    readonly property bool hasDoor: (tile.model.drillIn ?? "") !== ""
+    readonly property bool doorOnly: tile.model.doorOnly === true
+
     readonly property bool lit: tile.model.on === true
 
     // Tall enough for the glyph, a two-line label and the detail — a fixed
@@ -72,7 +84,12 @@ Rectangle {
     }
 
     TapHandler {
-        onTapped: tile.activated()
+        // A tile that is only a door has no switch for a body press to mean, so
+        // the whole card opens the panel. The other three doors keep the switch
+        // on the body and put the door in the corner — pressing Wi-Fi to turn
+        // Wi-Fi off is the press people already know, and moving it behind a
+        // chevron to make room for a list would be the list costing the toggle.
+        onTapped: tile.doorOnly ? tile.drillRequested() : tile.activated()
     }
 
     ColumnLayout {
@@ -130,15 +147,53 @@ Rectangle {
 
     // The door tiles say so, in the corner rather than in the row: the text
     // column is the thing this layout exists to protect, and a chevron beside
-    // it would be the #80 shape again in miniature. One glyph, and only on the
-    // tile that opens something rather than switching it.
+    // it would be the #80 shape again in miniature.
+    //
+    // On a tile that is *also* a switch it is a second hit target inside the
+    // first, which is why it is an `Item` with its own handlers rather than a
+    // bare glyph: the body's `TapHandler` would otherwise take the press and the
+    // chevron would be decoration. 24px of target around a 12px glyph, because
+    // the corner of a 113px tile is a place people miss.
+    Item {
+        id: door
+
+        anchors {
+            top: parent.top
+            right: parent.right
+            margins: Theme.space1
+        }
+        implicitWidth: 24
+        implicitHeight: 24
+        visible: tile.hasDoor && !tile.doorOnly
+
+        HoverHandler {
+            id: doorHover
+            cursorShape: Qt.PointingHandCursor
+        }
+
+        TapHandler {
+            onTapped: tile.drillRequested()
+        }
+
+        Icon {
+            anchors.centerIn: parent
+            name: "chevron-right"
+            size: 12
+            color: doorHover.hovered ? Theme.accentPrimary
+                 : tile.lit ? Theme.textPrimary
+                            : Theme.textMuted
+        }
+    }
+
+    // The door-only tile keeps the plain glyph: there is nothing to aim at,
+    // because the whole card is the target.
     Icon {
         anchors {
             top: parent.top
             right: parent.right
             margins: Theme.space2
         }
-        visible: tile.model.drillIn === true
+        visible: tile.doorOnly
         name: "chevron-right"
         size: 12
         color: Theme.textMuted

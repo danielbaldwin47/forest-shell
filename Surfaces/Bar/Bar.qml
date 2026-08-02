@@ -140,6 +140,16 @@ Scope {
             // *below* this window so the bar stays clickable over it.
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
+            // ...and being *below* the fog is only half of staying clickable:
+            // while a drawer holds its focus grab, a click outside the grabbed
+            // windows is consumed dismissing it. #27 wants the opposite here —
+            // "clicking another bar icon triggers the cross-drawer transition
+            // directly" — so the bar's windows join the grab (#38, and the
+            // header of Core/FocusGrabWindows.qml). Announced rather than
+            // reached for, because these are created and destroyed by hotplug.
+            Component.onCompleted: FocusGrabWindows.keep(window)
+            Component.onDestruction: FocusGrabWindows.release(window)
+
             // Input is masked to what is actually there: the whole bar while
             // it is showing, and a one-pixel reveal strip along the screen edge
             // while it is hidden. Without the mask a hidden auto-hide bar would

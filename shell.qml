@@ -23,6 +23,7 @@ import qs.Surfaces.Settings
 import qs.Surfaces.Lock
 import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
+import qs.Surfaces.Drawers
 
 ShellRoot {
     id: shell
@@ -52,6 +53,15 @@ ShellRoot {
         component: Popups {}
     }
 
+    // The shared drawer window (#38) — one per screen, mapped only while a
+    // drawer is open, so an idle shell has no surface here at all. Deferred for
+    // the same reason the popups are: per-screen layer surfaces are created
+    // after the first frame rather than on the way to it.
+    LazyLoader {
+        id: drawerWindows
+        component: DrawerWindow {}
+    }
+
     Connections {
         target: Startup
         function onDeferredStage() {
@@ -59,9 +69,10 @@ ShellRoot {
             // Naming the singleton is what constructs it, and constructing it
             // is what registers `qs ipc call settings …`. The window itself is
             // not built until something opens it (#54).
-            ServiceInit.initSurfaces([SettingsWindow]);
+            ServiceInit.initSurfaces([SettingsWindow, Drawers]);
             lock.active = true;
             notificationPopups.active = true;
+            drawerWindows.active = true;
         }
     }
 

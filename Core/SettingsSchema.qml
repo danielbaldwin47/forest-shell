@@ -418,6 +418,30 @@ QtObject {
         },
 
         system: {
+            // The session drawer's four system actions (#38), next to the lock
+            // below because they are the same menu: lock, log out, suspend,
+            // restart, shut down.
+            //
+            // Strings rather than a toggle each, because what ends a session
+            // differs by init system and by machine and the shell has no
+            // business guessing — these are the systemd and Hyprland answers,
+            // and a machine that wants `loginctl terminate-session` says so
+            // here. Locking is deliberately not among them: it is a surface
+            // this shell owns (#47), reached in-process, and
+            // Surfaces/Drawers/SessionPolicy.qml says why.
+            //
+            // A key blanked here is "not on this machine": the row stays on the
+            // menu and refuses with a line naming the key, which is a better
+            // answer than a button that quietly is not there.
+            session: {
+                commands: {
+                    logout: { def: "hyprctl dispatch exit", coerce: c.string },
+                    suspend: { def: "systemctl suspend", coerce: c.string },
+                    reboot: { def: "systemctl reboot", coerce: c.string },
+                    shutdown: { def: "systemctl poweroff", coerce: c.string }
+                }
+            },
+
             // Schedule, not a live toggle: the intent is "warm my screen at
             // night", which is setup and belongs in config (#21, #33).
             nightLight: {

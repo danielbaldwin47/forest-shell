@@ -36,7 +36,7 @@
 //
 // Environment, all set by tools/capture-harness.sh:
 //   CAPTURE_OUT          where to save the PNG (required)
-//   CAPTURE_SURFACE      bar | bar-full | lock | settings   (default bar)
+//   CAPTURE_SURFACE      bar | bar-full | lock | settings | drawer  (default bar)
 //   CAPTURE_W/CAPTURE_H  scene size in logical px (default 1280x800)
 //   CAPTURE_BAR_OPACITY  override for the bar fill opacity, e.g. "0.65"
 //                        (defaults to the configured bar.surface.opacity)
@@ -52,6 +52,7 @@ import qs.Surfaces.Background
 import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
+import qs.Surfaces.Drawers
 import qs.Services.System
 import Quickshell.Services.UPower
 
@@ -116,6 +117,7 @@ ShellRoot {
                     switch (root.surfaceName) {
                     case "lock":     return lockScene;
                     case "bar-full": return barFullScene;
+                    case "drawer":   return drawerScene;
                     default:         return barScene;
                     }
                 }
@@ -203,6 +205,68 @@ ShellRoot {
                 + " modules=" + JSON.stringify(Config.values.bar.modules.left)
                 + "/" + JSON.stringify(Config.values.bar.modules.center)
                 + "/" + JSON.stringify(Config.values.bar.modules.right)
+        }
+    }
+
+    /// #38: the fog scrim with a drawer in it, over the wallpaper, with the bar
+    /// on top of it.
+    ///
+    /// The layout is the compositor's, reproduced: the real window reserves
+    /// nothing and respects what does (`ExclusionMode.Normal`, zero zone), so
+    /// Hyprland lays the fog out *below* the bar's exclusive strip rather than
+    /// under it — measured at 32px on a 32px bar in tools/drawer-harness.sh.
+    /// The top margin here is that, and it is what makes this picture answer
+    /// "the bar renders above the fog": the strip at the top of the frame is
+    /// the bar's own pixels, not fog over them.
+    ///
+    /// The fog is `shown` from the first frame rather than animated into: a
+    /// still frame of a surface at rest is what this seam takes, and the
+    /// transitions are #27's, checked as durations in `tests/`.
+    ///
+    /// Needs `--session` to be worth looking at — the session menu is five rows
+    /// of Lucide glyphs, and `MultiEffect` draws nothing offscreen
+    /// (Widgets/Icon.qml). Offscreen still measures the wash, which is the
+    /// number in the acceptance criteria.
+    Component {
+        id: drawerScene
+
+        Backdrop {
+            id: drawerBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            SessionMenu {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: Config.values.bar.height / 2
+            }
+
+            // Last, so it is over the fog — the stacking the compositor gives
+            // the real windows.
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            Component.onCompleted: root.sceneDescription =
+                "scrim=" + Theme.fogWashOpacity
+                + " wash=" + Theme.fogWash
+                + " bar=" + Config.values.bar.height
         }
     }
 

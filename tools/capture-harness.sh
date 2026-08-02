@@ -20,6 +20,7 @@
 #   tools/capture-harness.sh out.png --surface bar-full --session   # with modules
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
+#   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
 #
 # --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
@@ -46,7 +47,10 @@
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module
 # clusters, `lock` is the lock surface (`--lock-state summoned` reveals the
-# field), `settings` is the settings window at the tab `--tab` names.
+# field), `settings` is the settings window at the tab `--tab` names, and
+# `drawer` is #38's fog scrim with the session menu in it, laid out below the
+# bar the way the compositor lays it out — the picture that answers "scrim at
+# 0.10, bar above the fog". Its icons need `--session`.
 #
 # --contrast runs tools/measure-contrast.py over the strip the bar occupies
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
@@ -111,8 +115,8 @@ done
 [[ -n "$OUT" ]] || { echo "usage: tools/capture-harness.sh out.png [options]" >&2; exit 2; }
 
 case "$SURFACE" in
-    bar|bar-full|lock|settings) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings)" >&2; exit 2 ;;
+    bar|bar-full|lock|settings|drawer) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer)" >&2; exit 2 ;;
 esac
 
 # The settings window is 900x660 by its own declaration; capturing it at the

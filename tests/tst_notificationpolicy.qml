@@ -537,4 +537,65 @@ TestCase {
             seen[row.key] = true;
         }
     }
+
+    // --- what history says (#71) ---------------------------------------------
+
+    function rows(specs) {
+        return specs.map(spec => policy.record(spec));
+    }
+
+    function test_the_apps_history_has_seen_are_listed_once_each_and_sorted() {
+        // The settings tab's list of "every app that has ever notified" (#54).
+        // Sorted, so a row does not move because an app notified again; unique,
+        // because the tab draws one row per app and not one per notification.
+        const history = rows([
+            { time: 3000, appKey: "telegram" },
+            { time: 2000, appKey: "firefox" },
+            { time: 1000, appKey: "telegram" }
+        ]);
+        compare(policy.knownApps(history), ["firefox", "telegram"]);
+    }
+
+    function test_an_app_with_no_key_is_not_listed() {
+        // A client that supplies neither a desktop entry nor an app name cannot
+        // be ruled on (see `appKey`), so a row for it would be a row whose
+        // three-way control writes nothing.
+        const history = rows([{ time: 1000, appKey: "" }, { time: 2000, appKey: "firefox" }]);
+        compare(policy.knownApps(history), ["firefox"]);
+    }
+
+    function test_a_wrecked_history_yields_no_apps() {
+        compare(policy.knownApps(undefined), []);
+        compare(policy.knownApps("nonsense"), []);
+        compare(policy.knownApps([null, 7, {}]), []);
+    }
+
+    function test_the_lock_counts_what_arrived_since_it_went_up() {
+        // The lock's count is over history rather than over a tally of its own,
+        // so it is right after a hot reload and right for a notification that
+        // arrived in the same millisecond the lock did.
+        const history = rows([
+            { time: 5000, appKey: "telegram" },
+            { time: 4000, appKey: "firefox" },
+            { time: 1000, appKey: "firefox" }
+        ]);
+        compare(policy.countSince(history, 4000), 2);
+        compare(policy.countSince(history, 1000), 3);
+        compare(policy.countSince(history, 6000), 0);
+    }
+
+    function test_an_unlocked_session_counts_nothing() {
+        // Zero is "the lock is not up", which is not the same question as "how
+        // much has ever arrived" — a 0 floor there would show the whole history
+        // on the strip the moment the lock came up.
+        const history = rows([{ time: 5000, appKey: "telegram" }]);
+        compare(policy.countSince(history, 0), 0);
+        compare(policy.countSince(history, -1), 0);
+        compare(policy.countSince(history, undefined), 0);
+    }
+
+    function test_counting_survives_a_wrecked_history() {
+        compare(policy.countSince(undefined, 1000), 0);
+        compare(policy.countSince([null, { time: "soon" }, { time: 2000 }], 1000), 1);
+    }
 }

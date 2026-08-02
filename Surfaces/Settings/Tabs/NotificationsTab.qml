@@ -6,11 +6,11 @@
 // notification card — a rule is a standing decision about an app, not something
 // you set while dismissing a toast.
 //
-// #43 lists every app that has *ever* notified. That list comes from the
-// notification service's history, which does not exist yet (#42), so until it
-// does the tab shows the apps that already have a rule and lets one be named
-// outright. `knownApps` below is the single seam that turns into a live list —
-// one binding, no other change here.
+// #43 lists every app that has *ever* notified. That list is the notification
+// service's history, read through `knownApps` below (#71) — live, so an app
+// that notifies while this tab is open grows a row under it. An app can still
+// be named outright, which is how a rule is set for something that has not
+// notified yet, or has fallen off the end of `historyLimit`.
 //
 // Do-not-disturb is deliberately absent: it is situational rather than setup, so
 // it lives in the state file and belongs to the control centre, not to a config
@@ -20,6 +20,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Core
 import qs.Widgets
+import qs.Services.Notifications
 import qs.Surfaces.Settings.Controls
 
 TabPage {
@@ -34,9 +35,9 @@ TabPage {
 
     SectionNote {
         visible: page.apps.length === 0
-        note: "No rules yet. Every app is normal until told otherwise — name one below to "
-              + "change that. Once the notification service lands, every app that has ever "
-              + "notified will be listed here without being named."
+        note: "No rules yet, and nothing has notified. Every app is normal until told "
+              + "otherwise — apps appear here as they notify, or name one below to rule on "
+              + "it before it does."
     }
 
     Repeater {
@@ -143,20 +144,38 @@ TabPage {
     /// writing it would put noise in a file meant to be read.
     property var named: []
 
-    /// Apps the notification service has seen. Empty until #42 lands; this is
-    /// the seam that becomes `Notifications.knownApps`.
-    readonly property var knownApps: []
+    /// Apps the notification service has seen (#71). One binding: every rule
+    /// about what "seen" means is in NotificationPolicy, on the far side of the
+    /// service, where a test can reach it.
+    readonly property var knownApps: Notifications.knownApps
 
     /// Everything to show a row for, in one sorted list so the order does not
     /// jump as rules are set and cleared.
     readonly property var apps: {
+        // Every source is folded the way a notification's own key is
+        // (NotificationPolicy.appKey), and folded here rather than at each
+        // source because only one of the three arrives folded already.
+        // `notifications.apps` is hand-editable and `ruleFor` matches it
+        // case-insensitively, so a `"Firefox": "silent"` in the file and a
+        // `firefox` row in history are one app — two rows for it would be two
+        // three-way controls fighting over one setting.
         const rules = Object.keys(Config.values.notifications.apps);
-        const all = rules.concat(page.knownApps).concat(page.named);
-        return all.filter((app, i) => all.indexOf(app) === i).sort();
+        const all = rules.concat(page.knownApps).concat(page.named)
+                         .map(app => Notifications.policy.appKey(app, ""));
+        return all.filter((app, i) => app !== "" && all.indexOf(app) === i).sort();
     }
 
+    // The tab's answer to "why is that app not listed" (#71). An app that has
+    // never notified, one that has fallen off the end of `historyLimit`, and a
+    // history that never reached this binding all look the same on screen —
+    // like an app that is simply absent.
+    onAppsChanged: Logger.log("settings", "notifications tab: " + page.apps.length
+                              + " app row(s), " + page.knownApps.length + " from history")
+
     function nameApp(text: string): void {
-        const app = text.trim();
+        // Through the same fold the list above uses, so that what is typed is
+        // compared against the rows on screen as the same kind of thing.
+        const app = Notifications.policy.appKey(text, "");
         if (app === "" || page.apps.indexOf(app) >= 0) {
             appField.text = "";
             return;

@@ -43,9 +43,11 @@ Singleton {
     property bool secure: false
 
     /// How many notifications are waiting, shown on the lock as a count and
-    /// never as contents (#9). A seam: the notification service (#42) owns the
-    /// number and writes it here. Until then it is zero and the lock shows
-    /// nothing, which is the correct rendering of "nothing is waiting".
+    /// never as contents (#9). A seam: the notification service owns the number
+    /// and writes it here (#71) — it counts what arrived since the lock went
+    /// up, and binds it only while `locked` is true, so an unlocked session
+    /// leaves this property assignable for a posed capture. Zero is the lock
+    /// showing nothing, which is the correct rendering of "nothing is waiting".
     property int notificationCount: 0
 
     /// Raise the lock. Returns whether this call is what locked the session —

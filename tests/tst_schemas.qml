@@ -176,10 +176,22 @@ TestCase {
     function test_empty_sections_are_sections_and_not_leaves() {
         // Several sections are deliberately empty until their ticket lands;
         // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["controlCenter", "dashboard"]) {
+        for (const section of ["dashboard"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
             compare(store.leafPathsUnder(settings.spec, section).length, 0);
         }
+    }
+
+    function test_the_osd_keys_live_under_the_control_centre() {
+        // #46's geometry and timeout. Here rather than in a tenth section
+        // because #21 fixes the section list at nine and the tabs at ten
+        // (tests/tst_settingstabs.qml), and because the OSD reports exactly the
+        // three channels the control centre puts sliders on — Core/
+        // SettingsSchema.qml argues it where the keys are.
+        compare(store.leafPathsUnder(settings.spec, "controlCenter").sort(),
+                ["controlCenter.osd.margin",
+                 "controlCenter.osd.position",
+                 "controlCenter.osd.timeout"]);
     }
 
     function test_the_night_light_keys_live_under_weather_time() {

@@ -96,6 +96,13 @@ QtObject {
         "WebSearch", "WebFetch", "Read", "Grep", "Glob"
     ]
 
+    /// Where the OSD pill sits (#46). One edge with the pill centred against
+    /// it, or the middle of the screen — layer-shell centres a surface on
+    /// whichever axis it is not anchored to, so this list is the anchor table.
+    /// Surfaces/Osd/OsdPolicy.qml holds the same five and turns them into
+    /// flags.
+    readonly property var osdPositions: ["top", "bottom", "left", "right", "center"]
+
     /// Per-app notification handling (#9, #43): silent means history only.
     readonly property var notificationRules: ["normal", "silent", "blocked"]
 
@@ -359,6 +366,40 @@ QtObject {
 
         controlCenter: {
             // Sliders, toggle grid and drill-ins land with #44 and #45.
+
+            // The OSD (#46) — the pill that pops on a volume, mic or
+            // brightness change.
+            //
+            // **Here, and not in a tenth section**, which is the one thing
+            // about this ticket the resolutions do not settle: #21 fixes the
+            // section list at nine and `tests/tst_settingstabs.qml` holds the
+            // tabs to ten, so an `osd` section would be a tab #9 never listed.
+            // The OSD reports exactly the three channels the control centre
+            // puts sliders on — volume out, mic, brightness (#9) — so it sits
+            // under the section that owns those controls, and reads as "what
+            // the control centre does when it is not open".
+            //
+            // JSON-only for now, which #9 permits in as many words ("long-tail
+            // options may stay JSON-only until they earn a control"): the
+            // Control Center tab is #55's, and these three rows land with it.
+            osd: {
+                // How long it stays up, in ms. Bounded either side rather than
+                // at zero: a 0 here would be a surface that maps and unmaps in
+                // one frame. Surfaces/Osd/OsdPolicy.qml clamps an IPC-supplied
+                // value to the same pair, and tst_osdpolicy.qml pins the two
+                // together.
+                timeout: { def: 2000, coerce: c.integer(300, 10000) },
+
+                // Which edge it sits against, centred on the other axis;
+                // `center` is the middle of the screen. Bottom by default
+                // because the bar is at the top and the notification stack owns
+                // the top-right corner (#42).
+                position: { def: "bottom", coerce: c.oneOf(schema.osdPositions) },
+
+                // Its gap from that edge, in px. Applied to the anchored edge
+                // only, and ignored by `center`.
+                margin: { def: 64, coerce: c.integer(0, 400) }
+            }
         },
 
         dashboard: {

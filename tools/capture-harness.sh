@@ -23,6 +23,8 @@
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
 #   tools/capture-harness.sh out.png --surface center --session   # the notification centre
+#   tools/capture-harness.sh out.png --surface osd --session      # the OSD pill
+#   tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
@@ -99,6 +101,7 @@ SETTINGS_TAB=""
 LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
 DRILL=""
+OSD_STATE="volume:45"
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -119,10 +122,11 @@ while (( $# )); do
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --drill)       DRILL="$2"; shift 2 ;;
+        --osd)         OSD_STATE="$2"; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
-        --help|-h)     sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,75p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -150,9 +154,21 @@ if [[ -n "$DRILL" ]]; then
     esac
 fi
 
+# `--osd` only means anything on the pill, and it names a channel the policy
+# knows: a silently ignored flag is a capture of the wrong thing that looks
+# right, and an unknown channel draws a pill with no glyph in it.
+if [[ "$OSD_STATE" != "volume:45" ]]; then
+    [[ "$SURFACE" == osd ]] || {
+        echo "--osd only applies to --surface osd" >&2; exit 2; }
+fi
+case "${OSD_STATE%%:*}" in
+    volume|mic|brightness) ;;
+    *) echo "unknown OSD channel: ${OSD_STATE%%:*} (volume, mic, brightness)" >&2; exit 2 ;;
+esac
+
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter)" \
+    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|osd) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, osd)" \
            >&2; exit 2 ;;
 esac
 
@@ -248,6 +264,7 @@ CAPTURE_ENV=(
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
     CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
+    CAPTURE_OSD="$OSD_STATE"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.

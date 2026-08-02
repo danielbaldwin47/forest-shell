@@ -44,6 +44,8 @@
 //                        or any of `summoned`, `caps`, `notify:N`
 //   CAPTURE_SETTINGS_TAB which settings tab to open (default: the state file's)
 //   CAPTURE_DELAY_MS     settle time before the grab (default 600)
+//   CAPTURE_OSD          the OSD pill's state as `channel[:percent[:muted]]`,
+//                        e.g. `volume:45` or `mic:60:muted` (default volume:45)
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
@@ -53,6 +55,7 @@ import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
+import qs.Surfaces.Osd
 import qs.Services.Launcher
 import qs.Services.Notifications
 import qs.Services.System
@@ -70,6 +73,12 @@ ShellRoot {
     /// Which control-centre detail view to open before the grab (#45), or "" for
     /// the grid. `wifi`, `bluetooth`, `audio`, `vpn`, `wallpaper`.
     readonly property string drillPanel: Quickshell.env("CAPTURE_DRILL") ?? ""
+    /// What the OSD pill is reporting (#46), as `channel[:percent[:muted]]`.
+    /// Posed rather than read off the machine, for the same reason every other
+    /// fact here is: a capture driven by the real services is a picture of
+    /// whatever this laptop's volume happened to be.
+    readonly property var osdState: (Quickshell.env("CAPTURE_OSD") || "volume:45").split(":")
+
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
     readonly property int delayMs: parseInt(Quickshell.env("CAPTURE_DELAY_MS") || "600")
@@ -149,6 +158,7 @@ ShellRoot {
                     case "launcher": return launcherScene;
                     case "center":   return centerScene;
                     case "controlcenter": return controlCenterScene;
+                    case "osd":      return osdScene;
                     default:         return barScene;
                     }
                 }
@@ -643,6 +653,80 @@ ShellRoot {
                 fillOpacity: Config.values.bar.surface.opacity
                 hairlineAtBottom: true
             }
+        }
+    }
+
+    /// The OSD pill (#46), over the wallpaper it floats on, at the position the
+    /// settings put it.
+    ///
+    ///     tools/capture-harness.sh out.png --surface osd --session
+    ///     tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
+    ///
+    /// `--session`, because the pill is a glyph, a track and a reading, and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph
+    /// (Widgets/Icon.qml) — an offscreen capture is the same picture with the
+    /// speaker missing. Offscreen still measures the fills and the layout,
+    /// which is what an overflow is: the readout is a fixed column beside a
+    /// track that takes the rest, and "Muted" is the longest thing that column
+    /// ever holds.
+    ///
+    /// The real OsdContent, posed by assignment. What is *not* here is the
+    /// window: `Surfaces/Osd/OsdWindow.qml` is a layer surface, and where a
+    /// compositor puts it is seam 2's business (tools/osd-harness.sh) — so the
+    /// pill is placed here the way the anchor table says it would be, from the
+    /// same policy the window reads.
+    Component {
+        id: osdScene
+
+        Backdrop {
+            id: osdBackdrop
+
+            readonly property string channel: root.osdState[0]
+            readonly property int percent: root.osdState.length > 1
+                ? parseInt(root.osdState[1]) : 45
+            readonly property bool muted: root.osdState.length > 2
+                && root.osdState[2] === "muted"
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            OsdContent {
+                id: pill
+
+                readonly property var anchorFlags: Osd.policy.anchorsFor(Osd.position)
+                readonly property var marginValues:
+                    Osd.policy.marginsFor(Osd.position, Osd.margin)
+
+                // The layer-shell rule, drawn: an anchored edge is that edge
+                // plus its margin, and an unanchored axis is centred.
+                x: anchorFlags.left ? marginValues.left
+                 : anchorFlags.right ? parent.width - width - marginValues.right
+                 : (parent.width - width) / 2
+                y: anchorFlags.top ? marginValues.top
+                 : anchorFlags.bottom ? parent.height - height - marginValues.bottom
+                 : (parent.height - height) / 2
+
+                width: implicitWidth
+                height: implicitHeight
+
+                policy: Osd.policy
+                channel: osdBackdrop.channel
+                percent: osdBackdrop.percent
+                muted: osdBackdrop.muted
+            }
+
+            Component.onCompleted: root.sceneDescription =
+                "osd=" + osdBackdrop.channel + ":" + osdBackdrop.percent
+                + (osdBackdrop.muted ? ":muted" : "") + " at=" + Osd.position
         }
     }
 

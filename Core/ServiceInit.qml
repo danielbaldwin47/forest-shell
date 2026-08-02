@@ -106,10 +106,23 @@ Singleton {
         // KeepAwake is deliberately not here: it holds no client and spawns
         // nothing, and the control centre is the only thing that reads it. Its
         // window is created by the toggle, which is the one moment it matters.
+        //
+        // The idle ladder and the logind bridge (#48) are the sharpest case on
+        // this list. Nothing reads either of them: the ladder is four
+        // `IdleMonitor`s that only ever *fire*, and the bridge is a helper
+        // process and a delay inhibitor that only ever *hear*. Without a name
+        // here neither would be constructed at all, and the failure would be
+        // silent in the worst possible way — a machine that never locks, and a
+        // suspend that never waits for the lock it did not take.
+        //
+        // Deferred rather than sync, because the first stage is minutes away and
+        // the wallpaper is not: the only cost of arriving a frame late is a
+        // ladder that starts counting a frame late.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
-                            PowerProfiles, NightLight, Vpn]);
+                            PowerProfiles, NightLight, Vpn,
+                            LogindBridge, Idle]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

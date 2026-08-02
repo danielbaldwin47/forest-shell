@@ -205,6 +205,54 @@ TestCase {
                  "weatherTime.nightLight.temperature"]);
     }
 
+    function test_the_idle_ladder_lives_under_system() {
+        // #48's four rungs, under the section that already owns the lock and the
+        // session commands — the ladder's last rung *runs* one of those commands,
+        // and a timeout three sections away from what it triggers is a key
+        // nobody finds. Settings › System is the tab (#55).
+        const leaves = store.leafPathsUnder(settings.spec, "system")
+            .filter(path => path.startsWith("system.idle."));
+
+        compare(leaves.sort(), [
+            "system.idle.dim.ac", "system.idle.dim.battery",
+            "system.idle.dim.enabled", "system.idle.dim.level",
+            "system.idle.dpms.ac", "system.idle.dpms.battery",
+            "system.idle.dpms.enabled", "system.idle.dpms.lockedSeconds",
+            "system.idle.dpms.offCommand", "system.idle.dpms.onCommand",
+            "system.idle.lock.ac", "system.idle.lock.battery",
+            "system.idle.lock.enabled",
+            "system.idle.suspend.ac", "system.idle.suspend.battery",
+            "system.idle.suspend.enabled"
+        ]);
+    }
+
+    function test_the_ladder_has_no_key_for_what_it_may_not_offer() {
+        // Two rules from #30 that are deliberately not settings: inhibitors are
+        // respected on every rung, and the audio gate is on suspend alone. A key
+        // for either would be a key that makes a film stop halfway, or one that
+        // suspends the machine under the music it is playing.
+        compare(store.leafAt(settings.spec, "system.idle.respectInhibitors"), null);
+        compare(store.leafAt(settings.spec, "system.idle.suspend.audioGate"), null);
+        // And there is no second suspend command: the ladder's last rung runs
+        // the session menu's, so the two cannot disagree.
+        compare(store.leafAt(settings.spec, "system.idle.suspend.command"), null);
+        verify(store.leafAt(settings.spec, "system.session.commands.suspend") !== null);
+    }
+
+    function test_a_hand_edited_ladder_cannot_be_armed_at_zero_seconds() {
+        // The worst thing this file can express: a rung that fires the moment
+        // the shell starts. The coercer floors at 0, and 0 is read as "off on
+        // this power source" by Services/System/IdlePolicy.qml rather than as
+        // "immediately".
+        const raw = { system: { idle: { lock: { battery: -3, ac: "soon" } } } };
+        const idle = store.resolve(settings.spec, raw).values.system.idle;
+        compare(idle.lock.battery, 0);
+        // An unreadable value falls back to its default rather than to zero,
+        // which is the ordinary coercion rule and is safe here for the same
+        // reason.
+        compare(idle.lock.ac, 10);
+    }
+
     // --- the keys the settings window is built on (#54) ----------------------
 
     function test_the_four_built_tabs_have_keys_to_edit() {

@@ -275,6 +275,42 @@ Singleton {
         root.setStreamMuted(id, !node.audio.muted);
     }
 
+    // --- is anything playing (#48) -------------------------------------------
+    //
+    // The idle ladder's suspend gate, and the only reader of the link tracker
+    // below. A *link* and not a stream: a paused player keeps its node — which
+    // is what keeps its mixer row — and PipeWire moves the link between `Paused`
+    // and `Active` as it corks and uncorks. Services/Media/AudioPolicy.qml
+    // argues the difference where the decision is.
+    //
+    // Costs nothing while nothing is playing: `linkGroups` is a list PipeWire
+    // pushes changes to, so an idle machine has an empty list and no wakeups
+    // (#22 §5).
+
+    readonly property var linkStates: {
+        const states = [];
+        for (const group of sinkLinks.linkGroups ?? [])
+            states.push(group.state);
+        return states;
+    }
+
+    readonly property bool playing: root.policy.playing(root.linkStates, PwLinkState.Active)
+
+    PwNodeLinkTracker {
+        id: sinkLinks
+        node: root.sink
+    }
+
+    /// The trap in this file's header, one object type further out: **a link
+    /// group's state is empty until something tracks it.** Measured — an
+    /// untracked group reports `state` as -1, which is not even `Error`, while
+    /// a tracked one playing audio reports `Active`. Without this line the
+    /// suspend gate reads "nothing is playing" through headphones with music in
+    /// them, which is the one wrong answer it exists to prevent.
+    PwObjectTracker {
+        objects: sinkLinks.linkGroups
+    }
+
     // --- what a harness reads ------------------------------------------------
     //
     // A line per state change, which for audio is a keypress and never a frame
@@ -292,6 +328,9 @@ Singleton {
     onPercentChanged: Logger.log("audio", "volume " + root.percent + "%")
     onMutedChanged: Logger.log("audio", root.muted ? "muted" : "unmuted")
     onSourceMutedChanged: Logger.log("audio", root.sourceMuted ? "mic muted" : "mic live")
+    // The suspend gate's input, logged because "the machine did not sleep" has
+    // two causes and only one of them is this one (#48, #81).
+    onPlayingChanged: Logger.log("audio", root.policy.playingLine(root.playing))
 
     // Tracking is what populates `audio` on every node — see the header. The
     // list is a binding, so a headphone plug that moves the default sink moves

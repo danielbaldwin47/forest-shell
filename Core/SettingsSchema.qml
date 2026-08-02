@@ -549,6 +549,88 @@ QtObject {
                 // means do not even probe.
                 fingerprint: { def: true, coerce: c.boolean },
                 fingerprintPamConfig: { def: "fprintd", coerce: c.string }
+            },
+
+            // The idle ladder (#48). Four stages, each with its own toggle and
+            // its own pair of timeouts in **minutes** — #30's table, which was
+            // measured against this machine rather than picked: the T480 ran no
+            // idle daemon at all before this, and its effective behaviour was
+            // DPMS-off at 5.5 minutes and nothing else.
+            //
+            //   stage      battery    ac
+            //   dim        2.5 min    5 min
+            //   lock       5 min      10 min
+            //   dpms       6 min      12 min
+            //   suspend    15 min     off
+            //
+            // Minutes and not seconds because that is the unit the decision was
+            // made in and the unit the GUI will offer; the ladder converts once
+            // (Services/System/IdlePolicy.qml).
+            //
+            // **Zero means "not on this power source"**, which is what makes AC
+            // suspend off while battery suspend is on without a second toggle to
+            // keep in agreement with the first. `enabled` is the other kind of
+            // off — the one the user flips — and it turns the stage off on both
+            // sources at once.
+            //
+            // What is deliberately not here: `respectInhibitors`. #30 puts it on
+            // all four stages, and a key that could turn it off would be a key
+            // that makes a film stop halfway. It is a constant in the policy.
+            // Nor is the audio gate: it is on suspend only, and which stage a
+            // rule applies to is not a setting.
+            //
+            // JSON-only for now, which #9 permits for the long tail: the System
+            // tab is #55's, and these rows land with it.
+            idle: {
+                // Screen down to `level`, restored on the first activity. The
+                // backlight facade does it (#36), so this is one number rather
+                // than a command — unlike the two below, dimming is not
+                // compositor business.
+                dim: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 2.5, coerce: c.number(0, 600) },
+                    ac: { def: 5, coerce: c.number(0, 600) },
+                    level: { def: 10, coerce: c.integer(1, 100) }
+                },
+
+                lock: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 5, coerce: c.number(0, 600) },
+                    ac: { def: 10, coerce: c.number(0, 600) }
+                },
+
+                dpms: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 6, coerce: c.number(0, 600) },
+                    ac: { def: 12, coerce: c.number(0, 600) },
+
+                    // While locked the screen is showing a clock nobody is
+                    // reading, so #30 tightens this stage and only this stage.
+                    // Seconds, because a number under a minute written as a
+                    // fraction of one is a number nobody can check.
+                    lockedSeconds: { def: 30, coerce: c.integer(5, 600) },
+
+                    // Strings for the reason `system.session.commands` are: what
+                    // blanks a screen differs by compositor and the shell has no
+                    // business guessing. These are Hyprland's, since that is the
+                    // compositor this shell targets (#12). Blanking either one
+                    // turns the stage into a logged refusal rather than a silent
+                    // no-op (#78).
+                    offCommand: { def: "hyprctl dispatch dpms off", coerce: c.string },
+                    onCommand: { def: "hyprctl dispatch dpms on", coerce: c.string }
+                },
+
+                // What suspends is `system.session.commands.suspend`, one
+                // section up: the session menu's Suspend and the ladder's last
+                // rung are the same act on the same machine, and two keys for it
+                // would be two keys to keep in agreement.
+                suspend: {
+                    enabled: { def: true, coerce: c.boolean },
+                    battery: { def: 15, coerce: c.number(0, 600) },
+                    // Off on mains: a plugged-in machine that suspends itself is
+                    // one that drops your ssh sessions while you read (#30).
+                    ac: { def: 0, coerce: c.number(0, 600) }
+                }
             }
         }
     })

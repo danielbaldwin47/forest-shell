@@ -190,7 +190,38 @@ QtObject {
                                 + " " + row.subtitle).join("");
     }
 
+    // --- is anything actually playing (#48) ----------------------------------
+
+    /// Whether audio is coming out of this machine right now, from the states of
+    /// the default sink's link groups.
+    ///
+    /// The idle ladder's suspend stage is gated on this and nothing else is
+    /// (#30): a machine playing music through headphones must not sleep under
+    /// the person listening to it, while the same machine dimming, locking and
+    /// blanking is exactly right.
+    ///
+    /// **A link, not a stream.** A paused player keeps its node — the mixer row
+    /// stays, which is the point of the mixer — and PipeWire moves the *link* to
+    /// `Paused` when it corks and back to `Active` when it does not. That is the
+    /// distinction #30 asks for by name ("any active un-corked audio output
+    /// stream"), and it is the only one of the two that a spotify left paused
+    /// overnight answers correctly.
+    ///
+    /// `active` is `PwLinkState.Active` passed in by the facade: this file
+    /// imports nothing but QtQuick, so it cannot name the enum it is comparing
+    /// against.
+    function playing(states: var, active: var): bool {
+        for (const state of states ?? [])
+            if (state === active)
+                return true;
+        return false;
+    }
+
     // --- what the log says ---------------------------------------------------
+
+    function playingLine(on: bool): string {
+        return on ? "audio playing" : "audio idle";
+    }
 
     function switched(name: string): string {
         return "output → " + name;

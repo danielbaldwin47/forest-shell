@@ -33,6 +33,7 @@ pragma Singleton
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 import qs.Core
 
@@ -88,6 +89,29 @@ Singleton {
 
         onInhibitingChanged: if (Startup.deferredRan && !holder.inhibiting && root.on)
             Logger.warn("keep-awake", "compositor did not take the inhibitor")
+    }
+
+    // Scripting, keybinds, and tools/idle-harness.sh (#48):
+    //
+    //   qs ipc call keepawake toggle
+    //   bind = SUPER SHIFT, C, exec, qs ipc call keepawake toggle
+    //
+    // The tile in the control centre was the only way in until the idle ladder
+    // landed, and the ladder is the thing this now suppresses — "does Keep Awake
+    // freeze the ladder" is a question a harness has to be able to ask without a
+    // pointer (#48). `set` and not `on`, which would shadow the property above
+    // in the reading even though QML would allow it.
+    IpcHandler {
+        target: "keepawake"
+
+        function toggle(): bool {
+            root.toggle();
+            return root.on;
+        }
+
+        function set(value: bool): void { root.set(value); }
+        function isOn(): bool { return root.on; }
+        function isHeld(): bool { return root.held; }
     }
 
     Component.onCompleted: Logger.log("keep-awake",

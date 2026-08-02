@@ -207,4 +207,49 @@ TestCase {
         const after = policy.streams([stream("1", "mpv"), stream("2", "Firefox")]);
         verify(policy.streamSignature(before) !== policy.streamSignature(after));
     }
+
+    // --- the idle ladder's suspend gate (#48) --------------------------------
+    //
+    // `PwLinkState.Enum` in Quickshell 0.3.0 runs Error, Unlinked, Init,
+    // Negotiating, Allocating, Paused, Active — from -1, which is why the two
+    // numbers below are 3 and 4 rather than 5 and 6. Measured rather than read
+    // off the header: the values are not in the type information, and an
+    // *untracked* link group reports -1, which is not any of them (see the
+    // tracker at the bottom of Services/Media/Audio.qml).
+    //
+    // The facade passes `PwLinkState.Active` in, so the policy never names a
+    // number — this file imports nothing but QtQuick, and these stand in for the
+    // enum exactly as it behaves at runtime.
+
+    readonly property int untracked: -1
+    readonly property int paused: 3
+    readonly property int active: 4
+
+    function test_a_live_link_is_audio_playing() {
+        verify(policy.playing([active], active));
+        verify(policy.playing([paused, active], active));
+    }
+
+    function test_a_corked_player_is_not_playing() {
+        // The case the gate exists for: a music player left paused overnight
+        // keeps its node and its mixer row, and must not hold the machine awake
+        // until the battery is flat.
+        verify(!policy.playing([paused], active));
+        verify(!policy.playing([paused, paused], active));
+    }
+
+    function test_a_machine_with_nothing_linked_is_not_playing() {
+        for (const states of [[], null, undefined])
+            verify(!policy.playing(states, active));
+    }
+
+    function test_a_link_that_never_negotiated_is_not_playing() {
+        // Everything before `Paused` is a link on its way up or a link that
+        // failed. Neither is audio coming out of the machine — and neither is
+        // the -1 an untracked group reports, which is the value that made this
+        // gate read "silent" through headphones with music in them until the
+        // facade tracked its link groups.
+        for (let state = untracked; state < paused; state++)
+            verify(!policy.playing([state], active), "state " + state + " read as playing");
+    }
 }

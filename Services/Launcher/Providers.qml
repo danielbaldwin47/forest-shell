@@ -69,6 +69,11 @@ Singleton {
         case "calculator": return Calculator.rowsFor(body);
         case "emoji":      return root.emoji.rows(body);
         case "actions":    return Actions.rows(body);
+        // Ask Claude has no rows by construction: the panel becomes a
+        // transcript and the surface reads `LauncherPolicy.converses()` to
+        // know it. Listed anyway rather than falling through, so that the
+        // switch stays a complete account of the six providers.
+        case "claude":     return [];
         }
         return [];
     }
@@ -105,9 +110,44 @@ Singleton {
         case "calculator": note = Calculator.silence(body); break;
         case "emoji":      note = root.emoji.silence(body); break;
         case "actions":    note = Actions.silence(body); break;
+        case "claude":     note = Claude.silence(body); break;
         }
 
         return root.policy.empty(query, settings, indexed, note);
+    }
+
+    // --- Enter, when there is no row -----------------------------------------
+
+    /// Enter on a conversational provider, where the query itself is the thing
+    /// being sent rather than a row under it (#41).
+    ///
+    /// Returns whether the launcher should close, like `activate()` — and it
+    /// is the first caller to answer `false` on purpose. That was reserved
+    /// from the day the dispatcher was written for "a calculator you keep
+    /// typing into"; a chat is the same shape, and the panel staying open with
+    /// the answer streaming into it is the whole feature.
+    /// `settings` is `launcher.providers` — the on/off map every other entry
+    /// point here takes — and it is *not* what the run is configured by. The
+    /// model, effort, tool allowlist and permission mode are `launcher.claude`,
+    /// read here rather than passed in, so that the surface keeps handing the
+    /// dispatcher the one settings object it already has.
+    function submit(query: string, settings: var): bool {
+        if (root.policy.route(query, settings).id === "claude")
+            Claude.ask(root.policy.bodyOf(query, settings),
+                       Config.values.launcher.claude);
+        return false;
+    }
+
+    /// Stop whatever is streaming. Escape on a conversational provider means
+    /// "stop this answer" while one is arriving and "close the launcher" when
+    /// none is, so the surface asks whether there was anything to stop.
+    function cancel(query: string, settings: var): bool {
+        if (root.policy.route(query, settings).id !== "claude")
+            return false;
+        if (!Claude.streaming)
+            return false;
+        Claude.cancel();
+        return true;
     }
 
     // --- Enter ---------------------------------------------------------------

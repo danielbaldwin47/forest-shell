@@ -60,8 +60,14 @@ QtObject {
           category: "Emoji", placeholder: "Search emoji", landed: true, owner: "#40" },
         { prefix: "/", id: "actions", name: "Actions", icon: "command",
           category: "Action", placeholder: "Run an action", landed: true, owner: "#40" },
+        // The one provider that is not a list. `conversational` is what the
+        // surface reads to know the panel becomes a transcript rather than
+        // rows — a field on the table and not a check against the id, because
+        // the surface knowing any provider by name is the coupling the
+        // dispatcher exists to remove (Providers.qml).
         { prefix: "?", id: "claude", name: "Ask Claude", icon: "sparkles",
-          category: "Claude", placeholder: "Ask anything", landed: false, owner: "#41" }
+          category: "Claude", placeholder: "Ask anything", landed: true,
+          owner: "#41", conversational: true }
     ]
 
     /// Whether a provider is switched on, given `launcher.providers` from the
@@ -155,6 +161,18 @@ QtObject {
     function answers(query: string, settings: var): bool {
         const provider = policy.route(query, settings);
         return provider.landed && policy.enabled(provider, settings);
+    }
+
+    /// Whether the query's provider answers with a conversation rather than a
+    /// list of rows — the panel becomes a transcript, Enter submits the whole
+    /// query instead of activating a row, and the launcher stays open (#41).
+    ///
+    /// Gated on `answers()` so that a provider switched off falls back to the
+    /// list and its silence, rather than showing an empty transcript nothing
+    /// can be typed into.
+    function converses(query: string, settings: var): bool {
+        return policy.answers(query, settings)
+            && policy.route(query, settings).conversational === true;
     }
 
     /// What a provider that has not landed says instead of a list. Names the

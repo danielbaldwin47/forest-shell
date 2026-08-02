@@ -10,6 +10,7 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Media/` | MPRIS players, volume, sinks |
 | `Hardware/` | Battery, brightness, sensors, input devices |
 | `Networking/` | Wi-Fi, Bluetooth, VPN |
+| `Launcher/` | The launcher's providers and the dispatcher that routes to them |
 | `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47) |
 | `Theming/` | The three palette modes behind `Core/Theme.qml` |
 | `Claude/` | The Claude CLI subprocess and its session state |
@@ -36,7 +37,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Ten of them exist so far:
+Fourteen of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -106,6 +107,39 @@ Ten of them exist so far:
   `switchxkblayout` is a hyprctl *command*, not a dispatcher, and sending it
   through `Hyprland.dispatch` answers `Invalid dispatcher` and changes
   nothing.
+
+- `Launcher/` (#39, #40) — one directory per the second rule's *inverse*. The
+  launcher surface is the only thing that draws these, but it is not the only
+  thing allowed to decide: `Providers.qml` is the dispatcher, and what a query
+  routes to, what it matches and what Enter means are questions a keybind and a
+  script have to be able to reach as well.
+
+  `Apps.qml` (#39) is the desktop-entry model, the launch and the frecency
+  write. `Calculator.qml`, `Actions.qml` and the pure `EmojiPolicy.qml` (#40)
+  are the other three; the emoji provider has no singleton because it is a
+  compiled-in table and a search over it, which needs no Quickshell at all.
+
+  Only `Calculator` is in `Core/ServiceInit.qml`'s deferred list beside `Apps`,
+  and for a smaller reason than the native backends have: it probes once for
+  `qalc`, and a probe that only ran when the user first typed `=` would show
+  "Working…" and then "not installed" instead of saying so immediately.
+
+  It is also where the CLI-wrapper rule (#12) is exercised a second time, more
+  sharply than `Backlight` exercises it. Measured against Quickshell 0.3.0, a
+  `Process` whose binary does not exist emits **no `exited` signal at all** —
+  only `running` going false — so there is no exit code to read and the absence
+  of `started` is the only signal that the tool is missing. Keying the message
+  off empty output instead would be the #78 shape exactly, and
+  `tools/launcher-harness.sh` check 20 restarts the shell against a PATH with
+  everything on it but `qalc` to prove it does not.
+
+  `Actions.qml` is the one file under `Services/` that imports a surface
+  (`qs.Surfaces.Settings`). That is sanctioned rather than accidental:
+  `SettingsWindow.qml`'s own header names this caller, `Core/SurfaceBusPolicy.qml`
+  explains why the settings window is deliberately not on the surface bus, and
+  nothing under `Surfaces/Settings/` imports `qs.Services.*`, so there is no
+  cycle. That last clause is the thing to re-check before a second surface
+  import is added here.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

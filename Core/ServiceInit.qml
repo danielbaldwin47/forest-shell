@@ -78,9 +78,17 @@ Singleton {
         // presses Super+Space, the launcher would open onto an empty list and
         // populate under their hands. Deferred, because 190 desktop files are
         // not worth a frame.
+        // Calculator (#40) is here for a narrower reason than the rest: it
+        // probes for `qalc` once, and the answer is what the launcher shows
+        // instead of a result on a machine without it. Constructed on the
+        // first `=`, the probe would still be in flight while the user typed
+        // the sum — so the first thing they saw would be "Working…" followed
+        // by "qalc is not installed", which is a worse way to learn it than
+        // being told immediately. It spawns one short-lived process and reads
+        // nothing else, so it is the cheapest entry on this list.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
-                            SystemTray, Mpris, Apps]);
+                            SystemTray, Mpris, Apps, Calculator]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

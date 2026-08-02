@@ -31,7 +31,30 @@
 #   9. ...and reaches state.json on disk
 #  10. a second launch increments rather than replacing
 #  11. frecency reorders the recents list
-#  12. nothing is fighting itself (no binding loops)
+#  12. `=` evaluates through qalc, and the answer reaches a row
+#  13. a leading digit reaches the calculator with no prefix typed
+#  14. a sum qalc refuses says so, rather than showing nothing
+#  15. `:` searches the emoji table, and Enter copies the glyph
+#  16. `=` Enter copies the result
+#  17. `/` lists actions, and one of them changes the shell
+#  18. ...and the change reaches settings.json on disk
+#  19. nothing is fighting itself (no binding loops)
+#  20. a machine with no qalc says so, immediately and only about the calculator
+#
+# ## The three #40 providers, and why they are here
+#
+# Checks 12-18 are the ones the unit tests cannot make. The calculator spawns a
+# process, the emoji and calculator rows write the Wayland clipboard, and the
+# actions rows reach four other singletons and one file on disk — none of which
+# exists on the `tests/` side of the line.
+#
+# Check 20 is the sharpest of them and the reason the provider is built the way
+# it is. Measured against Quickshell 0.3.0, a `Process` whose binary is missing
+# emits *no* `exited` signal — only `running` going false — so there is no exit
+# code to key a "not installed" message off, and keying it off empty output
+# instead is the #78 shape the ticket's maintenance pass named in advance. The
+# check restarts the shell with a PATH that has everything on it except `qalc`,
+# which is the only way to ask the question honestly.
 #
 # The shell under test runs against a scratch XDG_CONFIG_HOME and
 # XDG_STATE_HOME: this harness writes frecency counts, and one that wrote them
@@ -69,6 +92,25 @@ reply() { ipc "$@" 2>/dev/null | tr -d '\r' | tail -1; }
 ## The ranked ids as lines, from the comma-separated reply.
 rows() { reply rank "$1" | tr ',' '\n' | grep -c . ; }
 row() { reply rank "$1" | tr ',' '\n' | sed -n "$2p"; }
+
+## The dispatcher's rows for a whole query, prefix and all (#40).
+prow() { reply rows "$1" | tr ',' '\n' | sed -n "$2p"; }
+
+## Poll until a query has rows, or give up.
+##
+## The calculator is the one provider that answers asynchronously — it has to
+## start a process, wait for it to exit, and read what it printed — so a single
+## call returning nothing is the correct *first* answer rather than a failure.
+## Everything else here is synchronous and settles on the first ask; this loop
+## costs them one iteration.
+settle() {
+    local query="$1" tries="${2:-40}"
+    while (( tries-- > 0 )); do
+        [[ -n "$(reply rows "$query")" ]] && return 0
+        sleep 0.1
+    done
+    return 1
+}
 
 nested_up || exit 1
 
@@ -247,12 +289,174 @@ else
     fi
 fi
 
-# --- 12. nothing is fighting itself --------------------------------------------
+# --- 12. the calculator evaluates ----------------------------------------------
+#
+# The whole of what the unit tests cannot reach: a real `qalc` on this machine,
+# spawned by a real `Process`, printing something the policy then reads.
+
+if ! grep -qa 'startup: stage calculator provider armed' "$NESTED_SHELL_LOG"; then
+    nested_fail 'the calculator provider never came up'
+elif [[ "$(reply calculatorReady)" != "true" ]]; then
+    nested_note 'no qalc on this machine — checks 12-14 and 16 skipped'
+    NO_QALC=1
+else
+    nested_pass 'the calculator provider found qalc'
+fi
+
+if [[ -z "${NO_QALC:-}" ]]; then
+    if settle '=12 * 60 * 24' && [[ "$(reply title '=12 * 60 * 24' 0)" == "17280" ]]; then
+        nested_pass 'a sum typed behind = comes back evaluated'
+    else
+        nested_fail "= 12 * 60 * 24 came back as \"$(reply title '=12 * 60 * 24' 0)\""
+    fi
+
+    # --- 13. a leading digit needs no prefix -----------------------------------
+    #
+    # The implicit route (LauncherPolicy.impliedId). Nothing about it is visible
+    # to the apps provider, so a regression here looks like a launcher that has
+    # simply stopped finding anything for `2+2`.
+
+    if settle '2+2' && [[ "$(prow '2+2' 1)" == calculator:* ]]; then
+        nested_pass 'a bare sum routes to the calculator with no prefix typed'
+    else
+        nested_fail "2+2 routed to \"$(prow '2+2' 1)\" rather than the calculator"
+    fi
+
+    # --- 14. a refused sum says so ----------------------------------------------
+    #
+    # Measured: `qalc -t "frobnicate(2)"` exits 1 and *still prints* `0 B·t·m⁴`.
+    # Output cannot be the test, which is why the policy reads the exit code —
+    # and why "no rows" must not be the whole of what the user is told.
+
+    reply rows '=frobnicate(2)' > /dev/null
+    sleep 0.5
+    said=$(reply silence '=frobnicate(2)')
+    if [[ "$said" == *"not a sum"* ]]; then
+        nested_pass 'a sum qalc refuses is reported as a refusal'
+    else
+        nested_fail "a refused sum said \"$said\""
+    fi
+fi
+
+# --- 15. the emoji provider copies ---------------------------------------------
+
+if [[ "$(reply title ':rocket' 0)" == "rocket" ]]; then
+    nested_pass 'the emoji table is searchable'
+else
+    nested_fail "\":rocket\" found \"$(reply title ':rocket' 0)\""
+fi
+
+if [[ "$(reply activate ':rocket' 0)" == "true" && "$(reply clipboard)" == "🚀" ]]; then
+    nested_pass 'Enter on an emoji row puts the glyph on the clipboard'
+else
+    nested_fail "the clipboard holds \"$(reply clipboard)\" after copying 🚀"
+fi
+
+# --- 16. ...and so does the calculator ------------------------------------------
+
+if [[ -z "${NO_QALC:-}" ]]; then
+    if settle '=2+2' && [[ "$(reply activate '=2+2' 0)" == "true" \
+                        && "$(reply clipboard)" == "4" ]]; then
+        nested_pass 'Enter on a result puts the number on the clipboard'
+    else
+        nested_fail "the clipboard holds \"$(reply clipboard)\" after copying a result"
+    fi
+fi
+
+# --- 17. the actions provider runs something ------------------------------------
+#
+# The dark/light row. It is a *caller* — Core/Theme.qml owns the mode and #44's
+# tile and #58's switch call the same function — so what is checked here is that
+# the call lands, not that the launcher has its own idea of the mode.
+
+before=$(reply dark)
+if [[ "$(reply runAction theme.toggle)" == "true" && "$(reply dark)" != "$before" ]]; then
+    nested_pass "the dark mode action flipped the shell from $before"
+else
+    nested_fail "the dark mode action left the shell at $before"
+fi
+
+# The lock action is the one the harness refuses to run, for the reason it
+# refuses to launch applications — see the header of launcher-harness.qml.
+if [[ "$(reply runAction session.lock)" == "false" ]]; then
+    nested_pass 'the harness refuses to run the lock action'
+else
+    nested_fail 'the harness ran the lock action — the nested session is now locked'
+fi
+
+# --- 18. ...and it reaches the file ---------------------------------------------
+#
+# Through Core/SpecFile.qml's 250 ms debounce, which is the half of a config
+# write that no unit test sees.
+
+SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+tries=30
+while (( tries-- > 0 )); do
+    grep -qa "\"darkMode\": $(reply dark)" "$SETTINGS" 2>/dev/null && break
+    sleep 0.1
+done
+if grep -qa "\"darkMode\": $(reply dark)" "$SETTINGS" 2>/dev/null; then
+    nested_pass 'the action reached settings.json on disk'
+else
+    nested_fail "settings.json does not agree with the shell: $(grep -ao '"darkMode":[^,]*' "$SETTINGS" 2>/dev/null)"
+fi
+
+# --- 19. nothing is fighting itself --------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"
 else
     nested_pass 'no binding loops in the provider'
+fi
+
+# --- 20. a machine with no qalc -------------------------------------------------
+#
+# Last, because it restarts the shell and the restart truncates the log every
+# check above reads.
+#
+# The PATH is a directory of symlinks to everything in /usr/bin except `qalc` —
+# rather than an empty one — so that the only thing missing is the calculator's
+# tool. A shell that lost every binary would fail this check for reasons that
+# have nothing to do with #40.
+
+kill "$NESTED_SHELL_PID" 2>/dev/null
+wait "$NESTED_SHELL_PID" 2>/dev/null
+
+NOQALC="$SCRATCH/nopath"
+mkdir -p "$NOQALC"
+for binary in /usr/bin/*; do
+    ln -sf "$binary" "$NOQALC/$(basename "$binary")" 2>/dev/null
+done
+# `NESTED_QS` is a name looked up on PATH, and this is the PATH — so the shell
+# under test has to be able to find the thing that starts it. Resolved against
+# the *outer* PATH before it is replaced.
+QS_PATH=$(command -v "$NESTED_QS" 2>/dev/null || printf '%s' "$NESTED_QS")
+ln -sf "$QS_PATH" "$NOQALC/$(basename "$QS_PATH")"
+rm -f "$NOQALC/qalc"
+
+NESTED_ENV+=("PATH=$NOQALC")
+if ! nested_shell launcher-harness.qml 'harness: launcher harness ready'; then
+    nested_fail 'the shell did not come up without qalc on PATH'
+else
+    if nested_await "$NESTED_SHELL_LOG" 'launcher: no qalc on PATH' 10; then
+        nested_pass 'a missing qalc is noticed at startup, not at the first sum'
+    else
+        nested_fail 'the shell never noticed that qalc is missing'
+    fi
+
+    said=$(reply silence '=2+2')
+    if [[ "$said" == *"not installed"* ]]; then
+        nested_pass "a sum with no qalc says: $said"
+    else
+        nested_fail "a sum with no qalc said \"$said\""
+    fi
+
+    # The failure must stay inside the provider that owns it.
+    if [[ "$(reply title ':fire' 0)" == "fire" ]]; then
+        nested_pass 'the other providers are unaffected by a missing qalc'
+    else
+        nested_fail 'a missing qalc took the emoji provider down with it'
+    fi
 fi
 
 printf '\n'

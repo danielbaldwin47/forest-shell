@@ -1,4 +1,5 @@
-// A shell root that is the apps provider, and a way to ask it things (#39).
+// A shell root that is the launcher's providers, and a way to ask them things
+// (#39, #40).
 //
 // The launcher's *decisions* — routing, matching, frecency weighting, where
 // the list stops — are pure functions with their own unit tests
@@ -21,7 +22,26 @@
 // `launch()` is deliberately *not* exposed. A harness that runs `execute()`
 // spawns real applications on the machine running it, which is the same class
 // of mistake as tools/lock-harness.sh sending real passwords at the real PAM
-// stack and locking the account out (#81).
+// stack and locking the account out (#81). `runAction()` below refuses the lock
+// action for exactly the same reason, and that is the whole of the difference
+// between the two.
+//
+// ## What #40 added, and why it needs this seam
+//
+// Three more providers, and each one has a half that no unit test can see:
+//
+//   - **the calculator spawns a process.** `CalculatorPolicy` decides what to
+//     run and how to read the reply; whether a `Process` on this machine
+//     actually produces that reply — and, more sharply, what Quickshell does
+//     when the binary is *not there* — is a question with a compositor-shaped
+//     hole in it. The measured answer is that a failed spawn emits no `exited`
+//     signal at all, which is a thing you can only find out by trying.
+//   - **the emoji and calculator providers write the clipboard.**
+//     `Quickshell.clipboardText` is the Wayland data-device protocol, so the
+//     write only means anything inside a compositor.
+//   - **the actions provider reaches four other singletons.** Whether
+//     `Theme.setDark()` from a launcher row actually lands in `settings.json`
+//     is a question about Core/SpecFile.qml's debounce, not about the table.
 //
 // A second entry point at the repo root rather than a file under `tools/`, for
 // lock-harness.qml's reason: Quickshell takes the entry point's directory as
@@ -104,5 +124,134 @@ ShellRoot {
         function uses(id: string): int {
             return Number(ShellState.values.launcher.uses[id] ?? 0);
         }
+
+        // --- the dispatcher (#40) --------------------------------------------
+
+        /// What the launcher would show for a query, as the row ids,
+        /// comma-separated. One line for the reason `rank()` gives; the ids
+        /// already carry their provider, so nothing is prefixed here.
+        ///
+        /// The whole query, prefix and all — this is the dispatcher's own
+        /// entry point, so `=2+2`, `:rocket` and `/dark` all go in here and the
+        /// routing is part of what is being checked.
+        function rows(query: string): string {
+            return harness.queryRows(query).map(row => String(row.id)).join(",");
+        }
+
+        /// The title of one row — the line the user reads. Indexed, because a
+        /// script asserting on "the first row" should not have to parse the id
+        /// out of the list above.
+        function title(query: string, index: int): string {
+            const list = harness.queryRows(query);
+            return index >= 0 && index < list.length ? String(list[index].title) : "";
+        }
+
+        /// What the launcher says when there are no rows. The whole point of
+        /// #39's four-silences rule and #40's fifth: a script that could only
+        /// see "no rows" could not tell a missing `qalc` from a bad sum.
+        function silence(query: string): string {
+            harness.prime(query);
+            return String(Providers.silence(query, harness.providerSettings,
+                                            Apps.indexed).text);
+        }
+
+        // --- the calculator ---------------------------------------------------
+
+        /// Ask, without waiting. The reply is asynchronous — a process has to
+        /// start, run and exit — so the script calls this, then polls `rows()`
+        /// or `answer()` until it settles. A single `rows("=2+2")` returning
+        /// nothing is the *correct* first answer, not a failure: `qalc` has not
+        /// run yet.
+        function ask(expression: string): bool {
+            harness.prime("=" + expression);
+            return true;
+        }
+
+        function answer(): string { return Calculator.answer; }
+
+        /// Whether the probe found `qalc`. The check that matters on a machine
+        /// without it, and the one that cannot be written as a unit test: the
+        /// answer comes from a spawn that never happened.
+        function calculatorReady(): bool { return Calculator.available; }
+        function calculatorProbed(): bool { return Calculator.probed; }
+
+        // --- the clipboard ----------------------------------------------------
+
+        /// Activate a row — the Enter path, minus the keystroke, exactly as
+        /// `remember()` is for the apps provider.
+        ///
+        /// Safe for the calculator and emoji providers, which copy. For the
+        /// actions provider see `runAction()` below; for apps this refuses,
+        /// because activating an app row launches it.
+        function activate(query: string, index: int): bool {
+            const list = harness.queryRows(query);
+            if (index < 0 || index >= list.length)
+                return false;
+            if (list[index].provider === "apps") {
+                Logger.warn("harness", "refusing to activate an app row — it would launch");
+                return false;
+            }
+            if (list[index].provider === "actions")
+                return harness.runGuarded(list[index]);
+            return Providers.activate(list[index]);
+        }
+
+        /// What is on the clipboard now. Read back through Quickshell rather
+        /// than through a `wl-paste` subprocess, so the assertion is about the
+        /// protocol the shell actually wrote to.
+        function clipboard(): string { return Quickshell.clipboardText; }
+
+        // --- the actions ------------------------------------------------------
+
+        /// Run an action by id, guarded. See `runGuarded()`.
+        function runAction(id: string): bool {
+            const match = Actions.rows("").find(row => row.run.id === id);
+            if (!match) {
+                Logger.warn("harness", "no such action: " + id);
+                return false;
+            }
+            return harness.runGuarded(match);
+        }
+
+        /// The current mode, straight out of the config object rather than off
+        /// disk, so a mismatch between the two isolates to the file write —
+        /// the same split `uses()` makes for frecency.
+        function dark(): bool { return Theme.dark; }
+    }
+
+    readonly property var providerSettings: Config.values.launcher.providers
+
+    /// Ask a query the way the surface does: prime first, then read.
+    ///
+    /// Surfaces/Drawers/Launcher.qml pushes the query into the providers from
+    /// `onQueryChanged` and reads the rows from a binding. A script has no
+    /// `onQueryChanged`, so a harness function that only read would be asking
+    /// the calculator about an expression nobody had told it about — and would
+    /// report an empty list as if that were the launcher's answer. Priming here
+    /// makes one IPC call the equivalent of one keystroke settling.
+    function queryRows(query: string): var {
+        harness.prime(query);
+        return Providers.rows(query, harness.providerSettings);
+    }
+
+    function prime(query: string): void {
+        Providers.prime(query, harness.providerSettings);
+    }
+
+    /// Every action but the lock.
+    ///
+    /// Locking from here would lock the session running the harness — the same
+    /// class of mistake as exposing `launch()`, and a worse one, because the
+    /// nested session has no unlock path a script can drive (#81). The action
+    /// itself is one line in Services/Launcher/Actions.qml and is checked by
+    /// `tests/tst_actionspolicy.qml` reaching the descriptor; what stays
+    /// unchecked is the single `SessionLock.lock()` call behind it, which is
+    /// the same call tools/lock-harness.sh already drives from its own side.
+    function runGuarded(row: var): bool {
+        if (row.run.kind === "lock") {
+            Logger.warn("harness", "refusing to run the lock action — see the header");
+            return false;
+        }
+        return Actions.run(row.run);
     }
 }

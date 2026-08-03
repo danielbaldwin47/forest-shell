@@ -54,4 +54,9 @@ bash tst_qs_runtime.sh
 # gate — is a decision, but its input is a Qt log and its runner is bash.
 bash tst_frame_timing.sh
 
+# And the one decision inside the runner both budget harnesses now share (#150):
+# how many frames a log holds, from a line onwards. The launch and the teardown
+# around it need a real session; counting does not.
+bash tst_session_run.sh
+
 exec "$runner" -input .

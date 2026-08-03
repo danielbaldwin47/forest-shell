@@ -40,13 +40,23 @@ TestCase {
         compare(policy.icon(true, 0), "bluetooth");
     }
 
-    function test_a_scan_in_progress_is_visible_while_it_runs() {
-        // The shell never starts a scan itself — the control centre will — but
-        // blueman or bluetoothctl might, and a discovering adapter is doing
-        // something worth showing.
-        compare(policy.icon(true, 0, true), "bluetooth-searching");
-        compare(policy.icon(true, 1, true), "bluetooth-connected");
-        compare(policy.icon(false, 0, true), "bluetooth-off");
+    function test_a_scan_this_shell_is_holding_is_visible_while_it_runs() {
+        compare(policy.icon(true, 0, true, true), "bluetooth-searching");
+        compare(policy.icon(true, 1, true, true), "bluetooth-connected");
+        compare(policy.icon(false, 0, true, true), "bluetooth-off");
+    }
+
+    function test_somebody_else_s_scan_does_not_move_the_glyph() {
+        // #36 drew every discovering adapter, whoever started it, and that is a
+        // bar repainting on somebody else's schedule — the measurement is in
+        // BluetoothPolicy.qml's `icon` (#137). A scan the user started from the
+        // control centre still shows; one blueman started in the background is
+        // not news the bar can act on.
+        compare(policy.icon(true, 0, true, false), "bluetooth");
+        compare(policy.icon(true, 0, false, false), "bluetooth");
+        // And the holder alone is not enough: the glyph says what the radio is
+        // doing, not what was asked of it.
+        compare(policy.icon(true, 0, false, true), "bluetooth");
     }
 
     function test_the_label_counts_what_is_connected() {

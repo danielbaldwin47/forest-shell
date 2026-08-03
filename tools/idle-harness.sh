@@ -28,6 +28,10 @@
 #   run 2 — the bridge, on a session run 1 is not around to have locked. The
 #           delay inhibitor is held from startup, a sleep raises the lock first,
 #           and the inhibitor is released only after the compositor confirms.
+#   run 3 — the one timeout that moves without anybody editing anything: the
+#           dpms rung tightens to `lockedSeconds` while the session is locked
+#           (#30), and did not (#142). A fresh compositor again, because run 2
+#           ends locked for the same reason run 1 does.
 #
 # ## What is deliberately not driven, and why
 #
@@ -77,6 +81,22 @@ expect_since() {
     done
     nested_fail "$what — nothing matching /$pattern/ since the call"
     return 1
+}
+
+## The other half of expect_since, and it costs its whole window every time it
+## passes: a rung that must *not* fire can only be shown not to have fired by
+## outwaiting the timeout it would have fired on.
+refute_since() {
+    local mark="$1" pattern="$2" what="$3" ticks="${4:-60}"
+    for _ in $(seq 1 "$ticks"); do
+        if since "$mark" | grep -qaE "$pattern"; then
+            nested_fail "$what — /$pattern/ arrived anyway"
+            return 1
+        fi
+        sleep 0.1
+    done
+    nested_pass "$what"
+    return 0
 }
 
 expect_reply() {
@@ -146,6 +166,27 @@ write_settings() {
       "dim": { "enabled": false },
       "lock": { "enabled": $1, "battery": 0.02, "ac": 0.02 },
       "dpms": { "enabled": true, "battery": $dpms, "ac": $dpms,
+                "offCommand": "true", "onCommand": "true" },
+      "suspend": { "enabled": false, "battery": 0, "ac": 0 }
+    }
+  }
+}
+EOF
+}
+
+## Run 3's ladder: the dpms rung on its own, with an unlocked timeout far longer
+## than the locked one so that the swap is the only thing that can blank the
+## screen inside the window. `$1` is the unlocked timeout in minutes, `$2` the
+## locked one in seconds — `lockedSeconds`, which no other run sets.
+write_locked_dpms_settings() {
+    cat > "$SETTINGS" <<EOF
+{
+  "system": {
+    "session": { "commands": { "suspend": "true" } },
+    "idle": {
+      "dim": { "enabled": false },
+      "lock": { "enabled": false },
+      "dpms": { "enabled": true, "battery": $1, "ac": $1, "lockedSeconds": $2,
                 "offCommand": "true", "onCommand": "true" },
       "suspend": { "enabled": false, "battery": 0, "ac": 0 }
     }
@@ -416,7 +457,70 @@ expect_since "$mark" 'logind: lock confirmed after [0-9]+ms — releasing the sl
     'and lets the inhibitor go on the confirmation it already has'
 logind resume > /dev/null
 
-# --- 10. nothing is fighting itself -------------------------------------------
+# --- 10. run 3: the dpms rung tightens when the lock goes up (#142) -----------
+#
+# Check 5 moves a timeout by editing settings.json. This one moves the only
+# timeout in the ladder that moves *on its own*: the dpms rung tightens to
+# `lockedSeconds` while the session is locked (#30), by rebinding the same
+# `seconds` #139 proved a bare monitor ignores. So it is the same defect reached
+# through a different door, and it stayed open after #139 was measured — hence a
+# ticket of its own. On real hardware (#142) a locked laptop held its panel on
+# for the *unlocked* timeout: six or twelve minutes rather than thirty seconds,
+# and silently, which is why it survived a release.
+#
+# The shape of the check is what makes it one: sixty seconds unlocked, five
+# locked, and nothing but the swap can blank this screen inside the window.
+#
+# The way back out is not driven here. There is no `unlock` IPC and there will
+# not be one — PAM is the only way off the lock surface (Surfaces/Lock/Lock.qml)
+# — so "and the longer timeout comes back" is checked through the other door
+# onto the same code path: a timeout widened under the running, locked shell.
+
+restart_session || exit 1
+SCRATCH="$NESTED_WORK/xdg"
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+write_locked_dpms_settings 1 5
+nested_shell shell.qml 'idle: ladder armed' || exit 1
+
+# Settled before the lock goes up, for the reason run 2 explains.
+nested_await "$NESTED_SHELL_LOG" 'startup: stage interactive' 20 \
+    || nested_note 'the shell never said it was interactive'
+sleep 2
+
+if grep -qaE 'idle: ladder armed .* dpms 60s' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the dpms rung starts on its unlocked timeout of sixty seconds'
+else
+    nested_fail "the unlocked dpms timeout is not sixty seconds: \
+$(grep -a 'ladder armed' "$NESTED_SHELL_LOG" | tail -1)"
+fi
+
+mark=$(log_lines)
+nested_ipc call lock lock > /dev/null
+expect_since "$mark" 'lock: locking \(ipc\)' 'the session locks'
+expect_since "$mark" 'idle: dpms armed at 5s' \
+    'the lock going up re-arms the dpms rung on lockedSeconds' 120
+expect_since "$mark" 'idle: idle: dpms — screen off' \
+    'and it really blanks on the tighter clock, well inside the unlocked sixty seconds' 200
+expect_reply "$(idle isBlanked)" 'true' 'and the shell knows the locked screen is off'
+
+# And back up again, which is the unlock direction reached through the door that
+# exists. Thirty seconds locked now — longer than the window below, so the only
+# thing that can fire in it is a rung still stuck on the tighter clock.
+mark=$(log_lines)
+idle wake > /dev/null
+write_locked_dpms_settings 0.5 300
+expect_since "$mark" 'idle: activity: dpms — screen on \(ipc\)' \
+    'the screen comes back under the lock'
+expect_since "$mark" 'idle: dpms armed at 30s' \
+    'and widening the timeouts re-arms the rung on the longer one' 120
+
+mark=$(log_lines)
+refute_since "$mark" 'idle: idle: dpms — screen off' \
+    'a widened timeout really widens — the rung is not stuck on the tighter clock' 150
+
+# --- 11. nothing is fighting itself -------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"

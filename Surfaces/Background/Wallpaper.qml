@@ -77,6 +77,7 @@ Item {
         onStatusChanged: {
             if (status === Image.Ready)
                 Logger.log("background", "wallpaper " + root.source
+                           + " on " + (root.screen ? root.screen.name : "?")
                            + " (" + sourceSize.width + "×" + sourceSize.height + ")");
             else if (status === Image.Error)
                 Logger.warn("background", "could not load wallpaper " + root.source);

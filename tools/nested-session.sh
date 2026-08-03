@@ -93,6 +93,28 @@ NESTED_SHELL_LOG=""
 NESTED_SHELL_PID=""
 NESTED_ENTRY=""        # the entry point running in there; `ipc` needs it too
 NESTED_KEEP=${NESTED_KEEP:-0}      # 1 = leave it up on exit, to poke at by hand
+
+# The monitor layout, as Hyprland `monitor =` rules and in Hyprland's order:
+# the *first* is the nested backend's own output and comes up with the
+# compositor; every one after it is created as a headless output once the
+# compositor is up (#98). Override the whole array before `nested_up` to run a
+# harness on more than one screen, at more than one size and scale:
+#
+#   NESTED_MONITORS=("WAYLAND-1, 1280x800@60, 0x0, 1"
+#                    "FOREST-2, 1920x1080@60, 1280x0, 1.5")
+#
+# Headless rather than a second nested window on purpose. A second output on
+# the wayland backend is a second window on the *host*, so the host's tiling
+# decides its size — measured: adding one resized both outputs to ~618x648,
+# and the rule for the new one never applied. A headless output has no window
+# to be resized, so its geometry is the one written here.
+NESTED_MONITORS=("WAYLAND-1, 1280x800@60, 0x0, 1")
+
+# 1 = drop the backend's own output once the headless ones are up, leaving a
+# session whose every output has the geometry this file gave it. Only for a
+# harness that asserts on geometry — it needs at least one other output, and it
+# leaves nothing on screen for `--keep` to poke at.
+NESTED_HEADLESS_ONLY=${NESTED_HEADLESS_ONLY:-0}
 NESTED_QS=""           # the quickshell binary; resolved in nested_shell (#57)
 nested_fail_count=0
 
@@ -149,12 +171,22 @@ nested_up() {
     # `WAYLAND-1` is what the nested backend actually calls its output — the
     # `WL-1` this started life as matched nothing, so the size was never applied
     # and the window came up at whatever the backend defaulted to.
-    cat > "$NESTED_WORK/hyprland.conf" <<'EOF'
-monitor = WAYLAND-1, 1280x800@60, 0x0, 1
+    #
+    # Every rule in NESTED_MONITORS is written, including the ones for outputs
+    # that do not exist yet: a rule is matched by name when the output appears,
+    # which is what makes a headless output come up at a size this file chose
+    # rather than at the backend's 1920x1080@2 default.
+    {
+        local spec
+        for spec in "${NESTED_MONITORS[@]}"; do
+            printf 'monitor = %s\n' "$spec"
+        done
+        cat <<'EOF'
 animations { enabled = false }
 misc { disable_hyprland_logo = true, disable_splash_rendering = true }
 bind = SUPER, Q, exit
 EOF
+    } > "$NESTED_WORK/hyprland.conf"
 
     # Which socket is ours, by set difference rather than "the newest one" —
     # two of these run in parallel often enough (one per worktree) that picking
@@ -194,6 +226,103 @@ EOF
         || nested_note "no instance signature yet — the facade will be inert in there"
 
     nested_note "nested compositor on $NESTED_DISPLAY"
+
+    # Every output past the backend's own. Done here rather than left to the
+    # caller so that a two-screen harness has two screens before its shell
+    # starts — a shell that comes up on one output and gets a second later is
+    # the hotplug case, not the two-monitor case, and they fail differently.
+    local spec
+    for spec in "${NESTED_MONITORS[@]:1}"; do
+        nested_output_add "$spec" || return 1
+    done
+
+    # ...and, if asked, nothing but those. The backend's own output is a window
+    # on the host session, so the host's tiling resizes it whenever it feels
+    # like it — measured: 1280x800 at bring-up, 1252x648 once a second output
+    # existed, 618x648 a moment later. A harness asserting on geometry cannot
+    # live with that, and loses nothing by dropping it: the nested compositor
+    # never presents a frame anyway (hyprwm/aquamarine#348), so the window it
+    # would have drawn into is not something anyone can look at.
+    if (( NESTED_HEADLESS_ONLY )); then
+        local backend
+        backend=$(nested_output_name "${NESTED_MONITORS[0]}")
+        nested_output_remove "$backend" || return 1
+        nested_note "dropped $backend — headless outputs only"
+    fi
+}
+
+## The name a `monitor =` rule applies to: the first field, unpadded.
+nested_output_name() {
+    local name="${1%%,*}"
+    printf '%s' "${name// /}"
+}
+
+## The outputs the nested compositor currently has, one name per line.
+nested_outputs() {
+    nested_hyprctl monitors | awk '$1 == "Monitor" { print $2 }'
+}
+
+## One output's geometry as the compositor reports it: `1280x800 0x0 1.50`,
+## in physical pixels, position, and scale. Empty if there is no such output.
+##
+## Physical is what `hyprctl` reports and logical is what the shell sees, so a
+## caller asserting on a surface's size divides by the scale — the gap between
+## the two is the thing #98 exists to exercise.
+nested_output_geometry() {
+    nested_hyprctl monitors | awk -v want="$1" '
+        $1 == "Monitor" { cur = $2 }
+        cur == want && $2 == "at" { split($1, mode, "@"); size = mode[1]; pos = $3 }
+        cur == want && $1 == "scale:" { print size, pos, $2; exit }
+    '
+}
+
+## The size the *shell* sees on an output: physical divided by scale, as
+## `1280x720` for a 1920x1080 output at scale 1.5. What a surface's own
+## geometry has to agree with, and the reason a harness asks rather than
+## hard-codes: the nested backend's own output is a window on the host, so the
+## host's tiling — not this file — decides how big it is.
+nested_output_logical() {
+    nested_output_geometry "$1" | awk '
+        $3 > 0 { split($1, size, "x"); printf "%dx%d\n", size[1] / $3, size[2] / $3 }
+    '
+}
+
+## Plug an output in, from a `monitor =` rule: `nested_output_add "FOREST-2,
+## 1920x1080@60, 1280x0, 1.5"`. Returns once the compositor reports it, so the
+## next assertion is about the shell rather than about a race.
+##
+## The rule is pushed before the output is created because Hyprland applies
+## rules by name at the moment an output appears; pushed after, the output has
+## already come up at the backend's default and the rule is a resize.
+nested_output_add() {
+    local spec="$1" name
+    name=$(nested_output_name "$spec")
+
+    nested_hyprctl keyword monitor "${spec// /}" > /dev/null || return 1
+    nested_hyprctl output create headless "$name" > /dev/null || return 1
+
+    local _
+    for _ in $(seq 1 50); do
+        nested_outputs | grep -qx "$name" && return 0
+        sleep 0.1
+    done
+    echo "output $name never appeared" >&2
+    return 1
+}
+
+## Pull an output back out, and wait until it is actually gone. The waiting is
+## the point: "the surface went away" is only an assertion if the output did.
+nested_output_remove() {
+    local name="$1"
+    nested_hyprctl output remove "$name" > /dev/null || return 1
+
+    local _
+    for _ in $(seq 1 50); do
+        nested_outputs | grep -qx "$name" || return 0
+        sleep 0.1
+    done
+    echo "output $name never went away" >&2
+    return 1
 }
 
 ## Run something as a client of the nested session.

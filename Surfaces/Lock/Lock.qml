@@ -57,6 +57,33 @@ Scope {
             // mid-lock is never a flash of white (the default is white).
             color: Theme.bgBase
 
+            // One line per surface, so seam 2 can count them (#98). A lock is
+            // the one surface set where a screen arriving or leaving *while it
+            // is up* is a correctness question rather than a cosmetic one:
+            // an output that comes up mid-lock must be covered, and one that
+            // goes away must not leave its surface behind. Neither of those is
+            // visible to a script any other way.
+            //
+            // Announced from a `screen` change rather than from
+            // `Component.onCompleted`, and the name is kept: the compositor
+            // hands the surface its output *after* the component is built
+            // (measured — completion sees `screen` null), and takes it away
+            // before destruction, so neither end of the lifetime can read the
+            // name at the moment it needs it.
+            property string screenName: ""
+
+            onScreenChanged: {
+                if (lockSurface.screen && lockSurface.screenName === "") {
+                    lockSurface.screenName = lockSurface.screen.name;
+                    Logger.log("lock", "surface up on " + lockSurface.screenName);
+                }
+            }
+
+            Component.onDestruction: {
+                if (lockSurface.screenName !== "")
+                    Logger.log("lock", "surface gone from " + lockSurface.screenName);
+            }
+
             LockSurface {
                 anchors.fill: parent
                 screen: lockSurface.screen

@@ -11,7 +11,10 @@
 //
 // Uniform per screen with no per-monitor keys, per #22 §1: both target machines
 // are single-monitor, so multi-monitor is a correctness tier that must not
-// break and gets no tuning. A "bar on primary only" setting would be a dead
+// break and gets no tuning. What holds that tier up is
+// tools/multi-monitor-harness.sh, which runs this file on two headless outputs
+// at different sizes and scales and plugs a third in and out underneath it
+// (#98) — the machines are still single-monitor, the seam no longer is. A "bar on primary only" setting would be a dead
 // setting on every machine this runs on.
 //
 // The bar is on the critical path to the first frame (#22 §4 — "first frame
@@ -147,8 +150,25 @@ Scope {
             // directly" — so the bar's windows join the grab (#38, and the
             // header of Core/FocusGrabWindows.qml). Announced rather than
             // reached for, because these are created and destroyed by hotplug.
-            Component.onCompleted: FocusGrabWindows.keep(window)
-            Component.onDestruction: FocusGrabWindows.release(window)
+            //
+            // Both halves also log, and the log is the whole of what seam 2 can
+            // see of hotplug (#98): a window per output with that output's
+            // geometry, and — the leak half — a window that goes away when its
+            // output does. The name is cached because `modelData` is gone by
+            // the time the destruction of a hotplugged-out screen is announced.
+            property string screenName: ""
+
+            Component.onCompleted: {
+                window.screenName = window.modelData.name;
+                FocusGrabWindows.keep(window);
+                Logger.log("bar", "window up on " + window.screenName
+                           + " (" + window.modelData.width + "×" + window.modelData.height
+                           + " @" + window.modelData.devicePixelRatio + ")");
+            }
+            Component.onDestruction: {
+                FocusGrabWindows.release(window);
+                Logger.log("bar", "window gone from " + window.screenName);
+            }
 
             // Input is masked to what is actually there: the whole bar while
             // it is showing, and a one-pixel reveal strip along the screen edge

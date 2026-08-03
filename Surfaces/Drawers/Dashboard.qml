@@ -60,7 +60,6 @@ FocusScope {
     signal closeRequested(string reason)
 
     readonly property DashboardRegistry registry: DashboardRegistry {}
-    readonly property ClockFormat clockFormat: ClockFormat {}
 
     /// The pose, or null for the live shell. See the header.
     property var facts: null
@@ -105,8 +104,8 @@ FocusScope {
     }
 
     /// The clock this panel reads. One tick a minute, shell-wide (Core/Time.qml)
-    /// — and the format is nobody's here: Core/ClockFormat.qml holds the rule
-    /// and `weatherTime.clock.format` holds the choice (#93).
+    /// — and the format is nobody's here either: Core/TimeFormat.qml resolves
+    /// it once for every surface that draws a clock (#93).
     readonly property date now: root.facts && root.facts.now ? root.facts.now : Time.now
 
     readonly property var profile: root.facts && root.facts.profile
@@ -187,9 +186,7 @@ FocusScope {
 
                         Text {
                             Layout.fillWidth: true
-                            text: Qt.formatDateTime(root.now, root.clockFormat.timeFormatFor(
-                                Config.values.weatherTime.clock.format,
-                                Qt.locale().timeFormat(Locale.ShortFormat)))
+                            text: Qt.formatDateTime(root.now, TimeFormat.time)
                             color: Theme.textPrimary
                             // The display serif, which the brief allows "clock
                             // only, once, never twice" — this and the bar's
@@ -202,7 +199,7 @@ FocusScope {
 
                         Text {
                             Layout.fillWidth: true
-                            text: Qt.formatDate(root.now, root.clockFormat.dateFormat)
+                            text: Qt.formatDate(root.now, TimeFormat.date)
                             color: Theme.textSecondary
                             elide: Text.ElideRight
                             font.family: Theme.fontUi

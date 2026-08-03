@@ -7,7 +7,13 @@ pragma Singleton
 // `now`, so the idle cost of displaying the time does not scale with how many
 // places display it.
 //
-//     text: Qt.formatDateTime(Time.now, "ddd d MMM   HH:mm")
+//     text: Qt.formatDateTime(Time.now, TimeFormat.dateCompact + "   "
+//                                        + TimeFormat.time)
+//
+// The format is deliberately not a literal in that example. It used to be, and
+// the literal got copied — the bar hardcoded 24 hours while the lock followed
+// the locale, which is #93. Core/TimeFormat.qml is where a clock's shape comes
+// from; this singleton only owns *when* it changes.
 //
 // It ticks **once a minute, on the minute** (Core/TimeTick.qml). #22 §5 allows a
 // faster tick only when seconds are actually visible; nothing in v1 shows them,

@@ -222,6 +222,16 @@ if [[ -n "$PICK" ]]; then
     esac
 fi
 
+# The three words Core/SettingsSchema.qml's `clockFormats` accepts. Checked here
+# rather than left to the shell because `--clock 12` would otherwise be coerced
+# back to the default and photographed as if it were the thing asked for.
+if [[ -n "$CLOCK" ]]; then
+    case "$CLOCK" in
+        auto|12h|24h) ;;
+        *) echo "unknown clock format: $CLOCK (auto, 12h, 24h)" >&2; exit 2 ;;
+    esac
+fi
+
 case "$SURFACE" in
     bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd|screenshot) ;;
     *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd, screenshot)" \
@@ -301,10 +311,6 @@ mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$SCRATCH/cache"
 # the default (`auto`) rather than a value this harness chose (#93).
 CLOCK_JSON=""
 if [[ -n "$CLOCK" ]]; then
-    case "$CLOCK" in
-        auto|12h|24h) ;;
-        *) echo "unknown clock format: $CLOCK (auto|12h|24h)" >&2; exit 2 ;;
-    esac
     CLOCK_JSON=$(printf ', "weatherTime": { "clock": { "format": "%s" } }' "$CLOCK")
 fi
 printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s }%s }\n' \

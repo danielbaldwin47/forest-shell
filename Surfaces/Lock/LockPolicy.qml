@@ -232,17 +232,17 @@ QtObject {
         return count === 1 ? "1 notification" : count + " notifications";
     }
 
-    // --- clock ------------------------------------------------------------
+    // --- clock ---------------------------------------------------------------
     //
-    // Not here any more, and deliberately not here again. This file used to
-    // hold `timeFormat`/`use24Hour`/`dateFormat` of its own, and the bar held a
+    // Not here any more, and deliberately not here again. This file used to hold
+    // `timeFormat`/`use24Hour`/`dateFormat` of its own while the bar held a
     // different rule, which is exactly #93: the same shell read `19:26` on the
-    // bar and `7:30 PM` on the lock. The rule is Core/ClockFormat.qml and the
-    // choice is `weatherTime.clock.format`; LockSurface.qml asks them like
-    // every other surface with a clock.
+    // bar and `7:30 PM` on the lock. Core/ClockFormat.qml is the rule now,
+    // `weatherTime.clock.format` is the choice, and Core/TimeFormat.qml resolves
+    // the pair for every surface — LockSurface.qml reads a property.
     //
-    // The line worth keeping is why the pair was ever here: a format string at
-    // a call site is untestable. That argument holds — it just points at a file
-    // the whole shell shares rather than at this one, which is the only lock
-    // decision left to make about the clock.
+    // The line worth keeping is why the formats were ever here: a format string
+    // at a call site is untestable. That argument holds — it just points at a
+    // file the whole shell shares rather than at this one, and tst_lockpolicy
+    // checks the copy has not grown back.
 }

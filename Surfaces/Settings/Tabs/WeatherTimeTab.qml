@@ -136,12 +136,14 @@ TabPage {
         label: "Resolves to"
         hint: "The Qt format string the choice above resolves to on this machine — shown "
               + "rather than described, because *Locale* is not an answer to \"why is my "
-              + "clock in 12-hour\". The date reads " + page.clock.dateFormat
+              + "clock in 12-hour\". The date reads " + TimeFormat.date
               + " on the dashboard header."
         enabled: false
 
         Text {
-            text: page.timeFormat
+            // The very string the bar and the lock are drawing with — this row
+            // is a reader of the one answer, not a fifth copy of the rule.
+            text: TimeFormat.time
             color: Theme.textSecondary
             font.family: Theme.fontMono
             font.pointSize: Theme.pt(11.5)
@@ -197,14 +199,4 @@ TabPage {
         }
     }
 
-    // --- the clock rule (#93) ------------------------------------------------
-
-    readonly property ClockFormat clock: ClockFormat {}
-
-    /// What the bar and the lock are actually drawing, worked out the same way
-    /// they work it out — this preview is a fourth call site of the one rule,
-    /// not a fourth copy of it, which is the whole of #93.
-    readonly property string timeFormat:
-        page.clock.timeFormatFor(Config.values.weatherTime.clock.format,
-                                 Qt.locale().timeFormat(Locale.ShortFormat))
 }

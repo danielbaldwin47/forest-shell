@@ -2,10 +2,12 @@
 //
 // #93 was two surfaces answering the same question differently — the bar in
 // 24-hour, the lock following the locale. There is one rule now
-// (Core/ClockFormat.qml) behind one key (`weatherTime.clock.format`), so this
-// file covers the rule itself: what the key says, what `auto` falls back to,
-// and that the two are separable — the surfaces have nothing left to get
-// wrong beyond calling it.
+// (Core/ClockFormat.qml) behind one key (`weatherTime.clock.format`), resolved
+// once by one singleton (Core/TimeFormat.qml), so this file covers the rule
+// itself: what the key says, what `auto` falls back to, and that the two are
+// separable. The singleton imports Quickshell and so lives past this seam —
+// what is left on the far side of it is a property read, which is the smallest
+// thing four surfaces could have in common.
 import QtQuick
 import QtTest
 import "../Core"
@@ -30,24 +32,24 @@ TestCase {
     ]
 
     function test_the_meridiem_is_what_makes_a_locale_twelve_hour() {
-        verify(clock.use24Hour("HH:mm"));
-        verify(clock.use24Hour("H:mm"));
-        verify(!clock.use24Hour("h:mm AP"));
-        verify(!clock.use24Hour("h:mm ap"));
-        verify(!clock.use24Hour("hh:mm a"));
+        verify(clock.localeIs24Hour("HH:mm"));
+        verify(clock.localeIs24Hour("H:mm"));
+        verify(!clock.localeIs24Hour("h:mm AP"));
+        verify(!clock.localeIs24Hour("h:mm ap"));
+        verify(!clock.localeIs24Hour("hh:mm a"));
     }
 
     function test_a_locale_the_shell_cannot_read_is_written_as_24_hour() {
         // Empty is what `Qt.locale().timeFormat()` gives with no locale at all.
         // 24-hour is the unambiguous reading of a time, so it is the one to
         // fall back to rather than the one that needs a suffix to be right.
-        verify(clock.use24Hour(""));
+        verify(clock.localeIs24Hour(""));
     }
 
     function test_a_zone_suffix_is_not_a_meridiem() {
         // `t` is the timezone and `AP`/`ap` is the meridiem; the rule keys off
         // the `a` alone, so a format carrying both still reads as 24-hour.
-        verify(clock.use24Hour("HH:mm:ss t"));
+        verify(clock.localeIs24Hour("HH:mm:ss t"));
     }
 
     function test_neither_clock_shows_seconds() {
@@ -82,7 +84,7 @@ TestCase {
         for (const format of testCase.localeFormats)
             for (const preference of ["auto", "", "12", "24", "twenty-four"])
                 compare(clock.is24Hour(preference, format),
-                        clock.use24Hour(format), preference + " / " + format);
+                        clock.localeIs24Hour(format), preference + " / " + format);
     }
 
     function test_the_composed_call_is_the_two_decisions_in_order() {
@@ -101,8 +103,15 @@ TestCase {
     function test_the_two_surfaces_that_disagreed_now_read_the_same_minute() {
         // #93 as it was reported, at the seam: the bar showed `19:26` and the
         // lock `7:30 PM`. The surfaces differ in *shape* — the bar puts the
-        // date beside the time, the lock puts it under — but the minute is one
-        // string, built once, and both of them pass the same two arguments.
+        // date beside the time, the lock puts it under — and this checks that
+        // the shapes cannot disagree about the minute inside them.
+        //
+        // It cannot check that the surfaces still ask, because seam 1 cannot
+        // load a file importing Quickshell: the bar's shape is rebuilt here
+        // rather than imported, so this would stay green if Clock.qml went its
+        // own way again. Core/TimeFormat.qml is what makes that unlikely — one
+        // property, four readers — and the capture pair in the PR is what
+        // actually proves it.
         const evening = new Date(2026, 7, 1, 19, 30);
         for (const preference of ["auto", "12h", "24h"])
             for (const format of testCase.localeFormats) {

@@ -11,15 +11,15 @@
 // The key is three-valued — `auto`, `12h`, `24h` — and `auto` is the default,
 // because a shell that has not been told anything should read the time the way
 // the rest of the machine does. The locale reading and the key are kept as two
-// functions rather than one because they are two decisions: `use24Hour` is what
-// the locale says, `is24Hour` is what the shell shows, and `tests/` checks them
-// separately.
+// functions rather than one because they are two decisions: `localeIs24Hour` is
+// what the machine says, `is24Hour` is what the shell shows, and `tests/`
+// checks them separately.
 //
 // Nothing here reads `Config` itself. A file that imported `qs.Core`'s
 // singletons would be a file `qmltestrunner` cannot load (see CLAUDE.md's first
-// seam), so the caller passes the key's value in — which is one argument at
-// four call sites against an untestable rule, and the wrong trade in the other
-// direction.
+// seam), so the key's value is passed in — and Core/TimeFormat.qml is the
+// singleton that passes it, so the surfaces see a format string and this
+// argument reaches exactly one caller.
 import QtQuick
 
 QtObject {
@@ -31,7 +31,7 @@ QtObject {
     ///
     /// Qt time formats are built from h/H/m/s/z, `t` for the zone and AP/ap for
     /// the meridiem, so the presence of an `a` is exactly the 12-hour signal.
-    function use24Hour(localeTimeFormat: string): bool {
+    function localeIs24Hour(localeTimeFormat: string): bool {
         return !localeTimeFormat || localeTimeFormat.toLowerCase().indexOf("a") < 0;
     }
 
@@ -48,7 +48,7 @@ QtObject {
             return true;
         if (preference === "12h")
             return false;
-        return policy.use24Hour(localeTimeFormat);
+        return policy.localeIs24Hour(localeTimeFormat);
     }
 
     /// The clock itself. No seconds at any size: they are a wakeup a minute
@@ -58,15 +58,14 @@ QtObject {
         return use24Hour ? "HH:mm" : "h:mm AP";
     }
 
-    /// The two above, composed — and the only one of the four a surface should
-    /// call. The parts are kept apart because they are separate decisions that
-    /// `tests/` checks separately; a surface has no business knowing that, and
-    /// a nested call at four call sites is four chances to nest it differently,
-    /// which is precisely how #93 happened.
+    /// The two above, composed — and the only one of the four anything outside
+    /// this file calls. The parts are kept apart because they are separate
+    /// decisions that `tests/` checks separately; a caller has no business
+    /// knowing that, and a nested call once per clock is one chance per clock
+    /// to nest it differently, which is precisely how #93 happened.
     ///
-    ///     Qt.formatDateTime(Time.now, ClockFormat.timeFormatFor(
-    ///         Config.values.weatherTime.clock.format,
-    ///         Qt.locale().timeFormat(Locale.ShortFormat)))
+    /// Core/TimeFormat.qml is that one caller, and surfaces read it rather than
+    /// this — the key and the locale meet the rule in one place.
     function timeFormatFor(preference: string, localeTimeFormat: string): string {
         return policy.timeFormat(policy.is24Hour(preference, localeTimeFormat));
     }

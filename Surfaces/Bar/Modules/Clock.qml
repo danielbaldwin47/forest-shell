@@ -12,10 +12,9 @@
 //
 // The format is not decided here. It was, and that was #93: this module
 // hardcoded 24-hour while the lock followed the locale, so the same shell read
-// `19:26` on the bar and `7:30 PM` on the lock. The rule is
-// Core/ClockFormat.qml — a file that is not a surface, so every surface with a
-// clock shares one answer — and the choice is `weatherTime.clock.format`,
-// which this module passes in rather than reads around.
+// `19:26` on the bar and `7:30 PM` on the lock. Core/TimeFormat.qml answers
+// that for every surface with a clock — the rule is Core/ClockFormat.qml and
+// the choice is `weatherTime.clock.format`, and this module sees neither.
 //
 // **It is also a door** (#49). The clock is what opens the dashboard, which is
 // why that surface has no bar module of its own: the time is the thing you look
@@ -29,14 +28,12 @@ import qs.Core
 Text {
     id: clock
 
-    readonly property ClockFormat format: ClockFormat {}
-
     // Date and time in one line, which is the bar's own shape: three spaces
     // between them rather than a separator, because the pair reads as one
-    // object at 13pt and a middot would make it two readouts.
-    text: Qt.formatDateTime(Time.now, clock.format.dateFormatCompact + "   "
-        + clock.format.timeFormatFor(Config.values.weatherTime.clock.format,
-                                     Qt.locale().timeFormat(Locale.ShortFormat)))
+    // object at 13pt and a middot would make it two readouts. The shape is the
+    // bar's; the two format strings in it are not.
+    text: Qt.formatDateTime(Time.now,
+                            TimeFormat.dateCompact + "   " + TimeFormat.time)
 
     // Lit under the pointer, which is the whole of "this is pressable" on a
     // module that must not grow a button's chrome — the clock is the bar's one

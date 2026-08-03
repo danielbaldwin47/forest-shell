@@ -111,6 +111,16 @@ expect_reply() {
 ## Assert two lines arrived in this order. The whole point of the sleep hook: a
 ## log holding both lines in the wrong order is a machine that slept and then
 ## locked.
+##
+## Only for two lines the *code* orders — one emitted downstream of the other,
+## as a direct call or a later timer, so that reversing them would be a bug in
+## the shell rather than a different day. Two handlers reached from one event
+## are not that: their order is connection order, or — as in #148 — one handler
+## synchronously running the other partway through its own body. Both are
+## artefacts of how the code happens to be arranged, and #148's assertion asked
+## for the opposite of the one Qt actually produces. When the order is not the
+## shell's to promise, assert the facts with `expect_since` and leave the
+## guarantee where it lives, in the code.
 expect_order() {
     local mark="$1" first="$2" second="$3" what="$4"
     local tail_lines first_at second_at
@@ -406,9 +416,30 @@ expect_since "$mark" 'logind: sleep inhibitor released' \
 # was even raised.
 if since "$mark" | grep -qaE 'logind: lock confirmed after [0-9]+ms — releasing'; then
     nested_pass 'the inhibitor was released on the compositor confirming the lock'
-    expect_order "$mark" 'lock: compositor confirms all screens covered' \
-        'logind: sleep inhibitor released' \
-        'the screens were covered before the sleep lock was let go — a suspend cannot land unlocked'
+    # The fact this branch was missing, on its own and with no order asked of it
+    # (#148). The release is already asserted above, unconditionally; what was
+    # never asserted is that the compositor said anything at all.
+    #
+    # The order between the two used to be asserted here, and it was not the
+    # shell's to promise. The two lines come from two handlers on two *different*
+    # signals, nested: `Lock.qml`'s `onSecureChanged` is on the `WlSessionLock`'s
+    # own `secure`, and its first act is to mirror the flag onto the service —
+    # which synchronously runs `LogindBridge`'s `Connections` on the *service's*
+    # `secure`, which releases and logs, all before the mirroring handler reaches
+    # its own log line. So the release lands first, and measured over four forced
+    # fast-path runs it landed first every time, exactly one line ahead. The old
+    # assertion did not flake, it was inverted; it only looked flaky because this
+    # seam reaches the fast path rarely (ten runs straight took the ceiling below
+    # — the nested compositor's `secure` arrives past the 4 s ceiling, #85).
+    #
+    # Nesting is not a promise either: moving the log above the mirror would
+    # swap them and break nothing. What holds the guarantee is the branch we are
+    # inside — `confirmed()` is reachable only with `SessionLock.secure` true, so
+    # a release logged as "lock confirmed after Nms" is by construction a release
+    # after coverage. A suspend landing unlocked shows up as the `else` below,
+    # not as these two lines swapping.
+    expect_since "$mark" 'lock: compositor confirms all screens covered' \
+        'the compositor confirmed every screen was covered — the fact the release above was gated on'
 elif since "$mark" | grep -qa 'the compositor did not confirm the lock within'; then
     nested_note 'the nested compositor took longer than the ceiling to confirm `secure` (#85)'
     nested_pass 'the ceiling expired and the shell said so, rather than being overruled in silence'

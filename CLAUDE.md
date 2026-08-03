@@ -115,6 +115,14 @@ and typechecks redirect to a scratch file; grep the decisive lines back:
 (`mktemp`, not a fixed `/tmp` name — parallel sessions share `/tmp`.)
 Quote the shortest line that proves pass or fail.
 
+`2>&1 | tail -30` is not this rule — it is the violation the rule exists to
+stop. A tail caps one run, but runs repeat: a suite rerun ten times at
+`tail -30` is three hundred lines paid again on every call after. Measured on
+the 2026-08 relay, zero of seven sessions used the scratch file, and every
+one peaked past 200k. The test is what enters context: a grep returning one
+decisive line complies; anything printing a screenful does not. On a failure,
+grep the log for the failing case by name — never cat the log.
+
 **Prefer Edit over Write on existing files.** A Write resends the whole file
 through context; an Edit sends only the hunk. On a schema-sized file that is
 an order of magnitude.

@@ -22,7 +22,9 @@
 #           on the first keypress; an un-corked PipeWire stream holds the suspend
 #           rung and nothing else; Keep Awake freezes every rung and releases
 #           them again; editing settings.json re-arms it under the running
-#           shell; and the lock rung really locks.
+#           shell — both a rung turned on and a rung whose number moved, which
+#           are different code paths and only the second one caught #139; and
+#           the lock rung really locks.
 #   run 2 — the bridge, on a session run 1 is not around to have locked. The
 #           delay inhibitor is held from startup, a sleep raises the lock first,
 #           and the inhibitor is released only after the compositor confirms.
@@ -132,8 +134,10 @@ SETTINGS="$SCRATCH/config/forest-shell/settings.json"
 ## Timeouts in minutes, as the schema takes them: 0.05 is three seconds. The dim
 ## rung is off — it would dim the host's panel — and both commands that would
 ## touch the machine are `true`. `$1` is whether the lock rung is armed, which
-## run 1 turns on halfway through and run 2 leaves off.
+## run 1 turns on halfway through and run 2 leaves off; `$2` is the dpms rung's
+## timeout, which check 5 changes without touching whether the rung is armed.
 write_settings() {
+    local dpms="${2:-0.05}"
     cat > "$SETTINGS" <<EOF
 {
   "system": {
@@ -141,7 +145,7 @@ write_settings() {
     "idle": {
       "dim": { "enabled": false },
       "lock": { "enabled": $1, "battery": 0.02, "ac": 0.02 },
-      "dpms": { "enabled": true, "battery": 0.05, "ac": 0.05,
+      "dpms": { "enabled": true, "battery": $dpms, "ac": $dpms,
                 "offCommand": "true", "onCommand": "true" },
       "suspend": { "enabled": false, "battery": 0, "ac": 0 }
     }
@@ -274,24 +278,48 @@ expect_since "$mark" 'idle: idle: dpms — screen off' \
     'the ladder starts counting again the moment it is released' 120
 idle wake > /dev/null
 
-# --- 5. editing settings.json re-arms the ladder under the running shell -----
+# --- 5. a rung whose *timeout* changes re-arms on the new one (#139) ----------
+#
+# The rung stays armed across this edit; only its number moves. That is the case
+# #139 was: `IdleMonitor` re-registers with the compositor when `enabled` is
+# toggled and ignores a new `timeout` outright, so a rung that was already on
+# kept counting to its old value — which is every rung on the System tab (#55)
+# for anyone who tunes rather than turns on. Check 6 below flips a rung on and
+# passed all the way through the bug; only this one goes red on it.
+#
+# Read the other way round from the ticket's experiment, because a nested
+# session cannot be un-idled: the rung is *lengthened*, so a monitor that
+# re-armed goes un-idle, counts the new six seconds, and blanks again, while one
+# that ignored the change simply stays as it was and says nothing.
+
+mark=$(log_lines)
+write_settings false 0.1
+expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock off \(turned off\), dpms 6s' \
+    'the new timeout is read under the running shell' 120
+expect_since "$mark" 'idle: dpms armed at 6s' \
+    'a rung whose timeout changed says it re-armed' 120
+expect_since "$mark" 'idle: idle: dpms — screen off' \
+    'and it fires again on the new timeout rather than keeping the old one' 200
+idle wake > /dev/null
+
+# --- 6. turning a rung on under the running shell arms it --------------------
 #
 # "Timeout configurable" is only true if it is configurable *now*: a ladder that
 # had to be restarted into is one nobody would tune.
 
 mark=$(log_lines)
-write_settings true
-expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock 1s, dpms 3s' \
+write_settings true 0.1
+expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock 1s, dpms 6s' \
     'editing settings.json re-arms the ladder without a restart' 120
 
-# --- 6. and the lock rung really locks ---------------------------------------
+# --- 7. and the lock rung really locks ---------------------------------------
 
 expect_since "$mark" 'idle: idle: lock' 'the lock rung fires on its own timeout' 120
 expect_since "$mark" 'lock: locking \(idle\)' 'and the reason recorded on the lock is the ladder'
 expect_since "$mark" 'lock: compositor confirms all screens covered' \
     'the compositor confirms every screen is covered' 150
 
-# --- 7. run 2: the sleep hook, on a session nothing has locked ---------------
+# --- 8. run 2: the sleep hook, on a session nothing has locked ---------------
 #
 # The delay inhibitor is real — `systemd-inhibit --mode=delay` against the
 # caller's own logind — and so is the lock. What is simulated is only logind's
@@ -364,7 +392,7 @@ else
 $(grep -aiE 'wayland|fatal' "$NESTED_SHELL_LOG" | tail -2)"
 fi
 
-# --- 8. and it takes the lock again on the way back --------------------------
+# --- 9. and it takes the lock again on the way back --------------------------
 
 mark=$(log_lines)
 logind resume > /dev/null
@@ -373,7 +401,7 @@ expect_since "$mark" 'logind: sleep inhibitor held \(delay, what=sleep\)' \
     'resuming takes the delay inhibitor again — the second suspend of a session waits too'
 expect_reply "$(logind isInhibiting)" 'true' 'and it reports itself holding one again'
 
-# --- 8b. and the second sleep takes the fast path ----------------------------
+# --- 9b. and the second sleep takes the fast path ----------------------------
 #
 # The same hook with the lock already up and already confirmed: this is the
 # branch a real session takes on every suspend after the first, and it is the
@@ -388,7 +416,7 @@ expect_since "$mark" 'logind: lock confirmed after [0-9]+ms — releasing the sl
     'and lets the inhibitor go on the confirmation it already has'
 logind resume > /dev/null
 
-# --- 9. nothing is fighting itself -------------------------------------------
+# --- 10. nothing is fighting itself -------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"

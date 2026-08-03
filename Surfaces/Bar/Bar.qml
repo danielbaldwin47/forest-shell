@@ -21,6 +21,8 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
+import Quickshell.Io
 import Quickshell.Wayland
 import qs.Core
 import qs.Services.Compositor
@@ -34,6 +36,102 @@ Scope {
     readonly property string layerNamespace: "forest-shell:bar"
 
     readonly property var settings: Config.values.bar
+
+    // --- hide and show, from outside the pointer (#70) ------------------------
+
+    // The whole visibility decision lives next door, on the side of the line
+    // tests/ can reach (tests/tst_barvisibility.qml).
+    BarVisibilityPolicy { id: visibility }
+
+    // What a keybind or a script has asked for: "auto", "shown" or "hidden".
+    // Shell-wide rather than per-window, because the bar is uniform per screen
+    // (#22 §1) and a per-monitor override would be the dead setting that
+    // section rules out. `auto` is where it starts and where a second toggle
+    // press puts it back.
+    property string override: "auto"
+
+    onOverrideChanged: Logger.log("bar", "override: " + bar.override)
+
+    function toggle(source: string): bool {
+        // Decided against the focused screen's window, which is the one the
+        // user is looking at when they press the key. With one monitor — both
+        // calibration machines — there is nothing to choose between.
+        const ctx = bar.decisionContext();
+        bar.override = visibility.next(ctx);
+        Logger.log("bar", "toggle (" + source + "): "
+                   + visibility.describe(bar.decisionContext()));
+        return true;
+    }
+
+    function setOverride(value: string, source: string): bool {
+        bar.override = value;
+        Logger.log("bar", value + " (" + source + "): "
+                   + visibility.describe(bar.decisionContext()));
+        return true;
+    }
+
+    /// The context as the focused screen sees it, for the decisions that are
+    /// taken once for the whole shell rather than per window. Hover is not in
+    /// it: a toggle is about what the bar does when the pointer is not there.
+    function decisionContext(): var {
+        return visibility.context(bar.settings.autoHide, false, false,
+                                  bar.override, Compositor.focusedFullscreen,
+                                  true);
+    }
+
+    // No `show` on this target: the `qs ipc` client parses it as its own
+    // subcommand, prints the target listing and exits 0 without calling
+    // anything (#77, and the table in Core/SurfaceBusPolicy.qml). #70 asked
+    // for `show`; `reveal` is that door under a name a person can actually
+    // type.
+    //
+    // One handler for the shell, not one per screen: this Scope is outside
+    // Variants and is instantiated once, and two IpcHandlers on one target is
+    // one of them silently never answering.
+    IpcHandler {
+        target: "bar"
+
+        function toggle(): bool {
+            return bar.toggle("ipc");
+        }
+
+        function reveal(): bool {
+            return bar.setOverride("shown", "ipc");
+        }
+
+        function hide(): bool {
+            return bar.setOverride("hidden", "ipc");
+        }
+
+        /// Back to letting the settings and the compositor decide — the state
+        /// a second `toggle` reaches on its own, spelled out for scripts that
+        /// only ever call `reveal` and `hide`.
+        function auto(): bool {
+            return bar.setOverride("auto", "ipc");
+        }
+
+        function isRevealed(): bool {
+            return visibility.revealed(bar.decisionContext());
+        }
+    }
+
+    // The no-subprocess door, for the same reason the launcher has one
+    // (Surfaces/Drawers/Drawers.qml): a `global` dispatch spawns no `qs` per
+    // keypress. It cannot carry the `|| notify-send` fallback the exec binds
+    // use — a global dispatch has nothing to fail — so both are documented in
+    // integration/hyprland/forest-binds.conf and the user picks one.
+    //
+    //     bind = SUPER SHIFT, B, global, forest-shell:bar-toggle
+    //
+    // Nothing happens if the user has not written the bind, and that is not
+    // worth logging on a timer: the IPC door above answers the same question.
+    GlobalShortcut {
+        appid: "forest-shell"
+        name: "bar-toggle"
+        description: "Show or hide the bar"
+
+        onPressed: bar.toggle("shortcut")
+    }
 
     // Blur is the compositor's job (#22 §6 forbids QML-side full-screen blur
     // outright), and a layerrule is how it is asked for. Pushed live rather
@@ -103,9 +201,18 @@ Scope {
             readonly property var settings: bar.settings
             readonly property bool atTop: settings.position === "top"
 
-            // Whether the bar is showing. Always true unless auto-hide is on,
-            // in which case the reveal strip drives it.
-            readonly property bool revealed: !settings.autoHide || hover.hovered || linger.running
+            // Everything the visibility decision reads, built once here so the
+            // four bindings below cannot drift apart. A binding, so a change to
+            // any of it re-evaluates all four.
+            readonly property var visibilityContext: visibility.context(
+                settings.autoHide, hover.hovered, linger.running, bar.override,
+                Compositor.focusedFullscreen, Compositor.isFocused(modelData))
+
+            // Whether the bar is showing. Auto-hide and its reveal strip (#35),
+            // a fullscreen window on this screen, and an explicit hide over IPC
+            // or the keybind (#70) — resolved in Surfaces/Bar/
+            // BarVisibilityPolicy.qml, which tests/ can reach.
+            readonly property bool revealed: visibility.revealed(visibilityContext)
 
             screen: modelData
 
@@ -127,7 +234,11 @@ Scope {
 
             // An auto-hiding bar does not reserve space — that is the point of
             // it. A pinned one does, and lets the compositor tile under it.
-            exclusionMode: settings.autoHide ? ExclusionMode.Ignore : ExclusionMode.Auto
+            // An explicitly hidden one gives its band back too; a fullscreen
+            // one does not, because nothing is reading the zone while a
+            // fullscreen surface is ignoring it (BarVisibilityPolicy).
+            exclusionMode: visibility.reservesSpace(visibilityContext)
+                           ? ExclusionMode.Auto : ExclusionMode.Ignore
 
             // The window paints nothing itself: the surface material is content
             // (Surfaces/Bar/BarSurface.qml), and while hidden there is
@@ -175,7 +286,10 @@ Scope {
             // not make it flap.
             HoverHandler {
                 id: hover
-                enabled: window.settings.autoHide
+                // Armed for the reasons the shell chose — auto-hide, and a
+                // fullscreen window — and not after an explicit hide, which is
+                // intent the pointer must not undo (#70).
+                enabled: visibility.hoverArms(window.visibilityContext)
             }
 
             // No handler: the timer *running* is the state, and it stopping is
@@ -198,7 +312,7 @@ Scope {
                 function onHoveredChanged() {
                     if (hover.hovered)
                         linger.stop();
-                    else if (window.settings.autoHide)
+                    else if (visibility.hoverArms(window.visibilityContext))
                         linger.restart();
                 }
             }

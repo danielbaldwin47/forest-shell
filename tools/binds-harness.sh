@@ -202,6 +202,34 @@ else
     nested_pass 'no handler raised while every bind was exercised'
 fi
 
+# --- 7. the bar's other door: the global shortcut ----------------------------
+#
+# The bar (#70) is reachable two ways, and only one of them is a line in the
+# file this harness parses. `bind = …, global, forest-shell:bar-toggle` costs no
+# `qs` subprocess per press, and is offered over
+# hyprland-global-shortcuts-v1 — so the compositor's own list is the evidence,
+# the same way tools/drawer-harness.sh checks the launcher's. The binding in the
+# user's hyprland.conf is their half and is not something this seam can write.
+
+if nested_hyprctl globalshortcuts | grep -qa 'forest-shell:bar-toggle'; then
+    nested_pass 'the compositor has the bar-toggle global shortcut'
+else
+    nested_fail 'hyprland was never offered a bar-toggle global shortcut'
+fi
+
+# And that a toggle says which of the three hide reasons decided the bar. #81
+# was a lifecycle with no log line, and one bug then had two candidate causes
+# for a week; with auto-hide, fullscreen and an explicit override all landing on
+# one property, "the bar is not there" has to name the one that did it.
+
+bar_line=$(tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" 2>/dev/null \
+    | grep -aE 'bar: (toggle|shown|hidden|auto) ' | head -1)
+if [[ "$bar_line" =~ (pinned|hover|linger|ipc|autohide|fullscreen) ]]; then
+    nested_pass "the bar toggle named its reason: ${bar_line##* }"
+else
+    nested_fail 'the bar toggled without logging which reason decided it'
+fi
+
 # --- 4. and the fallback path, with the shell gone ---------------------------
 #
 # Deliberately the *same* nested session with its shell killed, rather than a

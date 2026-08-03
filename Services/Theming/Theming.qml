@@ -7,10 +7,16 @@ pragma Singleton
 //                     = "accent"    // the constrained wallpaper-coupled accent
 //                     = "dynamic"   // the full generated palette (#59)
 //
-// Every decision this service makes is in Services/Theming/AccentPolicy.qml
-// where tests/ can reach it. What is left here is the three things that need a
-// running shell: reading the wallpaper, noticing when it changes, and writing
-// the answer down.
+// Every decision this service makes is in Services/Theming/AccentPolicy.qml and
+// Services/Theming/MatugenPolicy.qml where tests/ can reach it. What is left
+// here is the three things that need a running shell: reading the wallpaper,
+// noticing when it changes, and writing the answer down.
+//
+// The two wallpaper-coupled modes read the same wallpaper by different means
+// and land in the same key. The constrained accent quantizes it in-process and
+// moves two roles; full dynamic hands the path to matugen and replaces all
+// seventeen (Services/Theming/Matugen.qml). Which one is running is this
+// file's business and nothing downstream's.
 //
 // ## Nothing here paints anything
 //
@@ -64,6 +70,11 @@ Singleton {
 
     readonly property string mode: Config.values.appearance.mode
 
+    /// The wallpaper, named as a property so the change handler below is the
+    /// dependency list. The quantizer notices its own source moving; matugen is
+    /// a subprocess and notices nothing, so full-dynamic mode needs this.
+    readonly property string wallpaper: Config.wallpaper
+
     readonly property ColorQuantizer quantizer: ColorQuantizer {
         // Only in the mode that uses it: quantizing a 5824×3264 wallpaper is
         // not free, and a mode that is off should cost nothing. An empty source
@@ -82,6 +93,7 @@ Singleton {
     }
 
     onModeChanged: root.retune()
+    onWallpaperChanged: root.retune()
 
     Connections {
         target: root.quantizer
@@ -91,8 +103,30 @@ Singleton {
     Connections {
         target: Theme
         // The light row's accent is a different colour at a different hue, so
-        // the same wallpaper earns a different answer in the other mode.
+        // the same wallpaper earns a different answer in the other mode. The
+        // generated palette is two whole rows apart for the same reason.
         function onDarkChanged() { root.retune(); }
+    }
+
+    Connections {
+        target: Matugen
+
+        // The probe is asynchronous, so a session that opens already in
+        // full-dynamic mode reaches `retune()` before the answer to "is it
+        // installed" exists. This is that answer arriving.
+        function onProbedChanged() { root.retune(); }
+
+        // The palette matugen produced, delivered the same way the constrained
+        // accent's is: written to `appearance.dynamic` and read back by
+        // Core/Theme.qml, so consumers stay mode-blind and nothing downstream
+        // can tell which mode painted it.
+        function onGenerated(palette, lifted) {
+            if (root.mode !== "dynamic")
+                return;   // the mode moved while the run was out
+            if (root.same(root.current(), palette))
+                return;
+            Config.set("appearance.dynamic", palette);
+        }
     }
 
     /// Recompute, and write the answer only if it is news.
@@ -103,6 +137,10 @@ Singleton {
     /// named as change handlers above so the dependencies are that list rather
     /// than whatever an expression happened to touch.
     function retune() {
+        if (root.mode === "dynamic") {
+            root.regenerate();
+            return;
+        }
         if (root.mode !== "accent") {
             root.clear();
             return;
@@ -136,14 +174,54 @@ Singleton {
             next.accentPrimary));
     }
 
+    /// Ask matugen for a palette (#59).
+    ///
+    /// Nothing is cleared on the way in. The previous palette stays on screen
+    /// until a new one arrives, which is what makes a wallpaper change a
+    /// restyle rather than a flash of the shipped forest and then a restyle —
+    /// and what makes a failed run cost nothing at all.
+    ///
+    /// The missing-binary path is a log line and no palette. It is reachable
+    /// only from a hand-edited config: the settings window greys the mode out
+    /// when `Matugen.available` is false, so the shell says so in the one place
+    /// left that can (#81).
+    function regenerate() {
+        if (!Matugen.probed)
+            return;   // the probe has not answered; `onProbedChanged` calls back
+        if (!Matugen.available) {
+            if (!root.warned) {
+                root.warned = true;
+                Logger.warn("theming", Matugen.policy.absentLine());
+            }
+            return;
+        }
+        root.warned = false;
+        Matugen.run(root.wallpaper, Theme.dark,
+                    Config.values.appearance.matugenTemplates);
+    }
+
+    /// Whether the missing-binary line has been said. Said once per stretch of
+    /// the mode being unserveable rather than once per wallpaper change: the
+    /// same sentence eight times in a row is a log nobody reads.
+    property bool warned: false
+
     /// Back to the shipped palette because the mode says so — announced only
     /// when there is a sample to drop, since a mode that never sampled has
     /// nothing to say and `theming ready (mode …)` has already said which mode
     /// it is in.
     function clear() {
-        if (Object.keys(root.current()).length === 0)
+        const stored = root.current();
+        if (Object.keys(stored).length === 0)
             return;
-        Logger.log("theming", root.policy.clearedLine(root.mode));
+        // Which mode wrote it, read off what it wrote: only the generated
+        // palette carries backgrounds — the constrained accent is two roles and
+        // neither is one. The two lines are different sentences because they
+        // are different amounts of shell going back to the shipped look, and a
+        // log that called both "accent cleared" would make the bigger one
+        // unfindable.
+        Logger.log("theming", stored.bgBase !== undefined
+                   ? Matugen.policy.clearedLine(root.mode)
+                   : root.policy.clearedLine(root.mode));
         root.forget();
     }
 

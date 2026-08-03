@@ -223,14 +223,29 @@ fi
 
 SETTINGS_FILE="$SCRATCH/config/forest-shell/settings.json"
 
-# Single presses, not a retry loop: by here the checks above have proved keys
-# are being delivered, and Space is a *toggle* — pressing it twice would put the
-# switch back on its default, which deletes the key again (#21). The focus is
-# already on the chips from the check above, so one more Tab is the switch.
-nested_key tab; sleep 0.5      # the theming-mode chips -> the Dark mode switch
-nested_key space
+# Tab until the switch answers, rather than counting stops to it.
+#
+# The count is not a constant: an inert chip is not a focus stop
+# (Surfaces/Settings/Controls/Chip.qml — `activeFocusOnTab: root.available`), so
+# the theming-mode row above this switch is two stops on a machine without
+# matugen and three on one with it (#59), where the full-dynamic chip is live.
+# A hard-coded Tab count therefore passes on whichever machine it was written on
+# and fails on the other, which is a harness reporting the tester's laptop.
+#
+# Space on a chip is harmless here — it selects a theming mode in a scratch
+# config — and the loop stops at the *first* Space that writes `darkMode`, so
+# the toggle is never pressed twice and the key is never toggled back (#21).
+wrote=0
+for _ in 1 2 3 4; do
+    nested_key tab; sleep 0.5
+    nested_key space; sleep 0.6
+    if grep -qa '"darkMode": *false' "$SETTINGS_FILE" 2>/dev/null; then
+        wrote=1
+        break
+    fi
+done
 
-if nested_await "$SETTINGS_FILE" '"darkMode": *false' 5; then
+if (( wrote )); then
     nested_pass 'Space on a focused switch writes the setting'
 else
     nested_fail "Space did not write the setting (file: $(tr -d '\n' < "$SETTINGS_FILE" 2>/dev/null))"

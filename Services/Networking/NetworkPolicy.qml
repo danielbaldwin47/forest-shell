@@ -75,29 +75,42 @@ QtObject {
     ///
     /// So the bars are read off an average rather than off the last sample, and
     /// the deadband holds that. A quarter is the weight the measured sequence
-    /// needed: it keeps the mean of a swinging signal well inside the deadband,
-    /// while a signal that really moved arrives within four samples — a walk
-    /// across the flat, not a fade.
+    /// needed: it keeps a swinging signal's mean inside the deadband, while a
+    /// signal that really moved crosses within a handful of samples — the tests
+    /// pin both ends, a swing that must not move the glyph and a climb that
+    /// must (tests/tst_networkpolicy.qml).
+    ///
+    /// A swing whose *mean* is in the next bucket is not noise, and this does
+    /// not pretend otherwise: it moves the glyph once and then holds it there,
+    /// which is one repaint rather than a flip every few seconds.
     readonly property real barSmoothing: 0.25
 
-    /// The smoothed strength, given the one carried so far.
+    /// The smoothed strength, as `{ network, strength }` — carried by the
+    /// caller for the same reason `current` is: this answer depends on its own
+    /// last answer, and a policy that kept the state would be a policy the
+    /// tests could not wind forward.
     ///
-    /// Zero means *no reading*: nothing connected, no wifi, or a wire — all
-    /// three have no strength, and the next network must not inherit the last
-    /// one's bars. It is also what a first reading is taken against, and that
-    /// one is taken whole: a bar that faded in from nothing over ten seconds at
-    /// startup would look broken rather than careful.
+    /// A zero strength means *no reading*: nothing connected, no wifi, or a
+    /// wire — none of them has a strength to average. The network's name is
+    /// carried with it because a reading only belongs to the network it was
+    /// taken on: joining a weak access point from a strong one must not draw
+    /// the strong one's bars while the average catches up, and a switch between
+    /// two networks does not reliably show a disconnected sample in between.
     ///
-    /// Carried by the caller for the same reason `current` is: this answer
-    /// depends on its own last answer, and a policy that kept the state would
-    /// be a policy the tests could not wind forward.
-    function track(previous: real, wifiEnabled: bool, device: var): real {
+    /// The first reading on a network is taken whole. A bar that faded in from
+    /// nothing over ten seconds at startup would look broken rather than
+    /// careful.
+    function track(previous: var, wifiEnabled: bool, device: var): var {
         if (!wifiEnabled || !device || device.kind !== "wifi" || !device.connected)
-            return 0;
+            return { network: "", strength: 0 };
         const sample = policy.strength(device.strength);
-        if (!(previous > 0))
-            return sample;
-        return previous + policy.barSmoothing * (sample - previous);
+        const carried = previous && previous.network === device.name
+                        && previous.strength > 0 ? previous.strength : 0;
+        return {
+            network: device.name,
+            strength: carried > 0 ? carried + policy.barSmoothing * (sample - carried)
+                                  : sample
+        };
     }
 
     /// The glyph. `wifiEnabled` is the radio's own switch, read off the

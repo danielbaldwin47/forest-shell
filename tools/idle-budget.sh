@@ -70,8 +70,25 @@ QSG_RENDER_TIMING=1 QT_ASSUME_STDERR_HAS_CONSOLE=1 \
     "$QS_RUNTIME" -p "$ENTRY" > "$LOG" 2>&1 &
 SHELL_PID=$!
 
+# When the repaints happened, and not just how many — the gap list is what says
+# a count of six is the clock rather than three pairs ten seconds apart, and it
+# is what diagnosed #137 (`10.8s, 41.1s, 29.9s, 9.9s …`: a cluster waking the
+# shell every ten seconds, hiding inside a count that was only three over).
+#
+# Stamped here because the scenegraph's own line carries no time. A separate
+# reader rather than a filter in the pipeline above, so `$!` stays the shell's
+# own pid — /proc/<pid>/stat is where the other two budgets come from.
+STAMPS=$(mktemp -t forest-idle-frames.XXXXXX)
+tail -n0 -F "$LOG" 2>/dev/null \
+    | grep --line-buffered -a 'frame rendered in' \
+    | while IFS= read -r _; do printf '%s\n' "$EPOCHREALTIME"; done > "$STAMPS" &
+STAMP_PID=$!
+
 cleanup() {
     local exit_status=$?
+    pkill -P "$STAMP_PID" 2>/dev/null
+    kill "$STAMP_PID" 2>/dev/null
+    rm -f "$STAMPS"
     if (( KEEP )); then
         printf '\nshell left up (pid %s), log: %s\n' "$SHELL_PID" "$LOG"
         return
@@ -134,12 +151,14 @@ fi
 
 printf '\n'
 python3 - "$start_ticks" "$end_ticks" "$start_switches" "$end_switches" \
-          "$start_frames" "$end_frames" "$start_time" "$end_time" "$ticks_per_second" <<'PY'
+          "$start_frames" "$end_frames" "$start_time" "$end_time" "$ticks_per_second" \
+          "$STAMPS" <<'PY'
 import sys
 
 start_ticks, end_ticks, start_sw, end_sw, start_fr, end_fr = (int(v) for v in sys.argv[1:7])
 start_time, end_time = float(sys.argv[7]), float(sys.argv[8])
 hz = int(sys.argv[9])
+stamps_path = sys.argv[10]
 
 elapsed = end_time - start_time
 cpu_seconds = (end_ticks - start_ticks) / hz
@@ -147,6 +166,30 @@ print(f"  window      {elapsed:.1f}s")
 print(f"  cpu         {cpu_seconds:.3f}s of core time — {cpu_seconds / elapsed * 100:.3f}% of one core")
 print(f"  switches    {end_sw - start_sw} — {(end_sw - start_sw) / elapsed:.2f}/s")
 print(f"  frames      {end_fr - start_fr} — one per {elapsed / max(1, end_fr - start_fr):.1f}s")
+
+# One repaint is several frames: the shell has a window per surface per screen
+# and Qt renders all of them when any one repaints, within milliseconds. The
+# gap list is between repaint *moments*, because that is the thing the budget
+# is written in — "one repaint a minute", not one frame.
+try:
+    with open(stamps_path) as handle:
+        times = [float(line) for line in handle if line.strip()]
+except OSError:
+    times = []
+
+times = [t for t in times if start_time <= t <= end_time]
+moments = []
+for t in times:
+    if not moments or t - moments[-1] > 0.5:
+        moments.append(t)
+
+gaps = [moments[i] - moments[i - 1] for i in range(1, len(moments))]
+if gaps:
+    print(f"  repaints    {len(moments)} — gaps {', '.join(f'{gap:.1f}s' for gap in gaps)}")
+elif moments:
+    print(f"  repaints    1 — no gap to measure")
+else:
+    print("  repaints    none in the window")
 PY
 
 cpu_percent=$(python3 -c "print((($end_ticks - $start_ticks) / $ticks_per_second) / ($end_time - $start_time) * 100)")

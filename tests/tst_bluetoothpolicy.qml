@@ -47,18 +47,11 @@ TestCase {
     }
 
     function test_somebody_else_s_scan_does_not_move_the_glyph() {
-        // #36 showed every discovering adapter, whoever started it. Measured on
-        // a real session (#137, tools/idle-budget.sh): something else on this
-        // machine discovers on a 60 s cycle, and the glyph flipped
-        // bluetooth ↔ bluetooth-searching six times in a 179 s idle window —
-        // twenty of that window's thirty repaints, against a budget of one a
-        // minute (#22 §5).
-        //
-        // So the glyph follows the scans *this shell* is holding. A scan the
-        // user started from the control centre still shows; one blueman started
-        // in the background is not news the bar can act on, and the drill-in's
-        // own "scanning…" line (Surfaces/Drawers/DrillIn/BluetoothPanel.qml)
-        // still reads the adapter directly for the panel that asked.
+        // #36 drew every discovering adapter, whoever started it, and that is a
+        // bar repainting on somebody else's schedule — the measurement is in
+        // BluetoothPolicy.qml's `icon` (#137). A scan the user started from the
+        // control centre still shows; one blueman started in the background is
+        // not news the bar can act on.
         compare(policy.icon(true, 0, true, false), "bluetooth");
         compare(policy.icon(true, 0, false, false), "bluetooth");
         // And the holder alone is not enough: the glyph says what the radio is

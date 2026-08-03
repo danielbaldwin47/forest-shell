@@ -452,22 +452,22 @@ Singleton {
     /// pushed instead, from the two things that can change it.
     property string icon: ""
 
-    /// The smoothed signal strength the glyph is read off — the policy's, and
-    /// pushed for the same reason the glyph is: each answer is taken against
-    /// the last one.
+    /// The glyph's working state: the smoothed strength it is read off, and the
+    /// network that reading was taken on. Pushed for the same reason the glyph
+    /// is — each answer is taken against the last one — and why it is smoothed
+    /// at all is in the policy's `barSmoothing` (#137).
     ///
-    /// Not a property any surface should bind to. The drill-in's rows show live
-    /// strength off the `WifiNetwork` itself, which is the honest number for a
-    /// list you are looking at; this one exists so the *bar* stops repainting
-    /// for a radio that reported 63, 84 and 63 within two seconds while the
-    /// laptop sat still (#137, measured with tools/idle-budget.sh).
-    property real strengthReading: 0
+    /// Not for a surface to bind to. A list you are looking at should show the
+    /// live number, and the Wi-Fi drill-in does: its rows read
+    /// `signalStrength` off the `WifiNetwork` itself. This one exists so the
+    /// *bar* holds still.
+    property var strengthReading: ({ network: "", strength: 0 })
 
     function refreshIcon() {
         root.strengthReading = root.policy.track(root.strengthReading, root.wifiEnabled,
                                                  root.primary);
         root.icon = root.policy.icon(root.wifiEnabled, root.primary, root.icon,
-                                     root.strengthReading);
+                                     root.strengthReading.strength);
     }
 
     onPrimaryChanged: root.refreshIcon()

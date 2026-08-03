@@ -1,0 +1,18 @@
+{
+  "ticketLabel": "ready-for-agent",
+  "testCommand": "tests/run.sh",
+  "hubFiles": [
+    "Core/ServiceInit.qml",
+    "Core/SettingsSchema.qml",
+    "CLAUDE.md",
+    "tools/*.sh"
+  ],
+  "worktreeDir": ".claude/worktrees",
+  "defaultBatch": 5,
+  "mergeMethod": "merge",
+  "legTimeoutBase": "2.5h",
+  "seams": [
+    { "name": "tests", "command": "tests/run.sh", "covers": "decisions: policy, formatting, parsing, merging, migration, thresholds" },
+    { "name": "capture", "command": "tools/capture-harness.sh", "covers": "client-side pictures: layout, colour, opacity compositing" }
+  ]
+}

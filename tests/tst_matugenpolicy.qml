@@ -227,17 +227,17 @@ TestCase {
         // a log nobody greps twice. The *last* numbered line is the cause: its
         // chain starts at "failed to get source colour" and ends at why.
         const stderr = "Error: \n"
-            + "   0: [91mFailed to get source color.[0m\n"
-            + "   1: [91mCould not get source color from image: wp.png[0m\n"
-            + "   2: [91mMultiple source colors found, no preference was "
-            + "inputted, and a terminal was not detected.[0m\n"
+            + "   0: \x1b[91mFailed to get source color.\x1b[0m\n"
+            + "   1: \x1b[91mCould not get source color from image: wp.png\x1b[0m\n"
+            + "   2: \x1b[91mMultiple source colors found, no preference was "
+            + "inputted, and a terminal was not detected.\x1b[0m\n"
             + "\nBacktrace omitted. Run with RUST_BACKTRACE=1 environment variable.\n";
         const failed = policy.outcome(1, "", true, stderr);
         compare(failed.ok, false);
         verify(failed.error.indexOf("matugen exited 1") === 0);
         verify(failed.error.indexOf("Multiple source colors") > 0,
                "the reason was dropped: " + failed.error);
-        compare(failed.error.indexOf("["), -1, "escape codes reached the log");
+        compare(failed.error.indexOf("\x1b["), -1, "escape codes reached the log");
     }
 
     function test_a_failure_with_nothing_on_stderr_still_says_what_it_can() {

@@ -39,6 +39,12 @@ python=$(command -v python3 || true)
 "$python" ../tools/normalize-lucide.py --check
 "$python" ../tools/make-noise.py --check
 
+# No .qml file may carry a raw control byte (#149): a NUL makes git call the
+# file binary, which makes every later diff of it unreviewable and hides it from
+# grep. Not a QML test because it walks the tree, and not a grep because grep -P
+# is the one tool that provably cannot match a NUL.
+"$python" tst_control_bytes.py
+
 # The blur measurement's arithmetic (#97). The harness that takes the two
 # captures needs a real compositor, but "does this pair show a blur" is a
 # decision, and a box blur applied here is the picture the compositor is

@@ -417,7 +417,7 @@ QtObject {
         if (!errorText || typeof errorText !== "string")
             return "";
         const lines = errorText
-            .replace(/\[[0-9;]*m/g, "")
+            .replace(/\x1b\[[0-9;]*m/g, "")
             .split("\n")
             .map(line => line.replace(/^\s*\d+:\s*/, "").trim())
             .filter(line => line !== "" && line !== "Error:"

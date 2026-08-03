@@ -105,8 +105,8 @@ FocusScope {
     }
 
     /// The clock this panel reads. One tick a minute, shell-wide (Core/Time.qml)
-    /// — the header is the third surface to show the time and the first that did
-    /// not have to invent a format for it (Core/ClockFormat.qml, #93).
+    /// — and the format is nobody's here: Core/ClockFormat.qml holds the rule
+    /// and `weatherTime.clock.format` holds the choice (#93).
     readonly property date now: root.facts && root.facts.now ? root.facts.now : Time.now
 
     readonly property var profile: root.facts && root.facts.profile
@@ -188,6 +188,7 @@ FocusScope {
                         Text {
                             Layout.fillWidth: true
                             text: Qt.formatDateTime(root.now, root.clockFormat.timeFormatFor(
+                                Config.values.weatherTime.clock.format,
                                 Qt.locale().timeFormat(Locale.ShortFormat)))
                             color: Theme.textPrimary
                             // The display serif, which the brief allows "clock

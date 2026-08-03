@@ -49,10 +49,11 @@ CardFrame {
     property int shownMonth: card.today.getMonth() + 1
 
     /// Which day the locale's week starts on — Monday in most of Europe, Sunday
-    /// in the US. Asked of the locale rather than configured, for the reason
-    /// Core/ClockFormat.qml gives about the 12/24-hour choice: the key that
-    /// would override it belongs to #50, and naming one here would be a key that
-    /// ticket has to migrate away from.
+    /// in the US. Asked of the locale rather than configured, which is where
+    /// the 12/24-hour choice started too: `weatherTime.clock.format` overrides
+    /// it now (#93) because a locale is not a preference, and the same argument
+    /// would give this one a key. It has not been asked for, so it has not been
+    /// invented — and if it is, the shape to copy is ClockFormat's `auto`.
     readonly property int firstDay: Qt.locale().firstDayOfWeek
 
     readonly property var weeks: card.policy.weeks(card.shownYear, card.shownMonth,

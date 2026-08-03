@@ -172,6 +172,12 @@ Item {
         precision: SystemClock.Minutes
     }
 
+    // *How* it is written is not the lock's to decide (#93). The lock used to
+    // follow the locale while the bar hardcoded 24-hour, so one shell showed
+    // two clocks; both surfaces now ask this file, and the choice behind it is
+    // `weatherTime.clock.format`.
+    ClockFormat { id: clockFormat }
+
     Column {
         id: clockBlock
 
@@ -184,9 +190,9 @@ Item {
         // used once and never twice).
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Qt.formatDateTime(clock.date,
-                                    policy.timeFormat(policy.use24Hour(
-                                        Qt.locale().timeFormat(Locale.ShortFormat))))
+            text: Qt.formatDateTime(clock.date, clockFormat.timeFormatFor(
+                Config.values.weatherTime.clock.format,
+                Qt.locale().timeFormat(Locale.ShortFormat)))
             color: Theme.textPrimary
             font.family: Theme.fontDisplay
             font.weight: Theme.weightDisplay
@@ -197,7 +203,7 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Qt.formatDateTime(clock.date, policy.dateFormat)
+            text: Qt.formatDateTime(clock.date, clockFormat.dateFormat)
             color: Theme.textSecondary
             font.family: Theme.fontUi
             font.weight: Theme.weightRegular

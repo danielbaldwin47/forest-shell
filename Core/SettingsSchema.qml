@@ -42,8 +42,9 @@
 // resolved *"all of it is settings, not constants"*), #41 for the Claude flags.
 // The bar itself (#35) reads these; it does not get to rename them.
 //
-// The one key still owed is the clock format: #93 owns it, the interim rule is
-// Core/ClockFormat.qml, and `weatherTime` says so where the key would go.
+// The last key owed was the clock format, and #93 took it:
+// `weatherTime.clock.format` is the one clock decision in the shell, and
+// Core/ClockFormat.qml is the rule that turns it into a format string.
 //
 // Pure data, no Quickshell imports, so tests/ can reach it.
 //
@@ -127,6 +128,14 @@ QtObject {
     /// wind in miles per hour, and Open-Meteo takes the pair as two parameters
     /// Services/Weather/WeatherPolicy.qml derives from this one word.
     readonly property var weatherUnits: ["metric", "imperial"]
+
+    /// How the clock is written, everywhere one is drawn (#93). `auto` is the
+    /// locale's own answer and the default — a shell that has not been told
+    /// anything should read the time the way the rest of the machine does — and
+    /// the other two are the override for a machine whose locale is not the
+    /// clock its user wants. Core/ClockFormat.qml turns this word into a Qt
+    /// format string, and is the only file that knows how.
+    readonly property var clockFormats: ["auto", "12h", "24h"]
 
     /// Model aliases, not ids: the launcher passes these through to `--model`
     /// (#41). `opusplan` is a plan-mode alias and resolves to sonnet under
@@ -429,18 +438,29 @@ QtObject {
         },
 
         weatherTime: {
-            // **Still no clock-format key here, and that is now the only thing
-            // this section is missing.** This stub used to say it landed with
-            // #50; #50 built the weather half and left the clock alone, because
-            // its acceptance criteria are four and none of them is a clock —
-            // the ownership gap its own maintenance comment raised was never
-            // resolved either way. The interim rule lives in
-            // Core/ClockFormat.qml (locale-derived, no seconds) and is read by
-            // the bar and the dashboard header; Surfaces/Lock/LockPolicy.qml
-            // still holds a duplicate of it, pinned to that one by
-            // tests/tst_clockformat.qml. Collapsing the two and giving the
-            // format a key is what #93 has left, and #55's Weather & Time tab
-            // is where the control would go.
+            // The clock (#93). This section spent three tickets without a
+            // clock-format key — #50 built the weather half and left the clock
+            // alone, and in the gap the bar hardcoded 24-hour while the lock
+            // followed the locale, which is the bug #93 is. One key now, read
+            // through Core/ClockFormat.qml by every surface that draws a
+            // clock: the bar strip, the lock, the dashboard header and the
+            // Weather & Time tab.
+            clock: {
+                // `auto` reads the locale's own short-time format, which is
+                // the answer for nearly everyone and so the default. The
+                // override exists because a locale is not a preference: a
+                // machine set to en_US whose user reads 24-hour had no way to
+                // say so, and "change your system locale" is not a clock
+                // setting.
+                //
+                // No seconds at any width and no key for them — a clock
+                // redrawing sixty times a minute for a glyph nobody watches is
+                // most of the idle budget (#22 §5), which is a rule rather
+                // than a taste, so ClockFormat states it and this section does
+                // not offer to break it.
+                format: { def: "auto", coerce: c.oneOf(schema.clockFormats),
+                          label: "Whether the clock is written 12- or 24-hour" }
+            },
 
             // The weather card (#50). Open-Meteo, keyless, and asked about one
             // place — Services/Weather/WeatherPolicy.qml builds every URL these

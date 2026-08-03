@@ -173,13 +173,25 @@ TestCase {
         compare(out.bar.surface, undefined);
     }
 
-    function test_empty_sections_are_sections_and_not_leaves() {
-        // Several sections are deliberately empty until their ticket lands;
-        // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["dashboard"]) {
+    function test_every_section_is_a_section_and_not_a_leaf() {
+        // A section with one sub-object in it must still be walkable rather
+        // than read as a whole-sub-object leaf. `dashboard` was the last empty
+        // one and filled in with #49; the check outlives it because the
+        // distinction is what `themed: true` turns off deliberately, and a
+        // section that acquired it by accident would half-merge under a preset.
+        for (const section of ["dashboard", "controlCenter", "weatherTime"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
-            compare(store.leafPathsUnder(settings.spec, section).length, 0);
+            verify(store.leafPathsUnder(settings.spec, section).length > 0,
+                   section + " has no keys under it");
         }
+    }
+
+    function test_the_dashboard_carries_its_cards_and_its_header() {
+        // #49. The card list is one key and not one per card, because the order
+        // is the whole of what it decides (Surfaces/Drawers/DashboardRegistry.qml).
+        compare(store.leafPathsUnder(settings.spec, "dashboard").sort(),
+                ["dashboard.cards", "dashboard.profile.avatar", "dashboard.profile.name"]);
+        compare(store.defaults(settings.spec).dashboard.cards, ["calendar", "media"]);
     }
 
     function test_the_osd_keys_live_under_the_control_centre() {

@@ -136,12 +136,17 @@ fi
 # #40 took the list from ten to twelve (Apps, Calculator) and left this at ten,
 # so the check has been red on main since it landed. #41 makes it thirteen.
 deferred_line=$(grep -a 'services: deferred stage' "$NESTED_SHELL_LOG" | head -1)
-# Sixteen since #44: PowerProfiles, NightLight and Vpn joined the list, each
-# for a reason Core/ServiceInit.qml states beside it. The number is asserted
-# rather than a lower bound because the whole point of the list is that a
-# service which quietly stopped being constructed is invisible otherwise.
-if [[ "$deferred_line" == *"16 object(s)"* ]]; then
-    nested_pass 'the deferred stage constructs all sixteen services'
+# Eighteen since #48: PowerProfiles, NightLight and Vpn joined with #44, and
+# LogindBridge and Idle with the idle ladder — each for a reason
+# Core/ServiceInit.qml states beside it. The number is asserted rather than a
+# lower bound because the whole point of the list is that a service which
+# quietly stopped being constructed is invisible otherwise.
+#
+# Counted against `report("deferred", [...])` rather than taken from the log the
+# check is reading, which is the only way round that catches a service going
+# missing; #49 found it red and at sixteen, exactly as the note above predicts.
+if [[ "$deferred_line" == *"18 object(s)"* ]]; then
+    nested_pass 'the deferred stage constructs all eighteen services'
 else
     nested_fail "the deferred stage is not what it should be: ${deferred_line:-<no line>}"
 fi
@@ -606,10 +611,13 @@ for surface in launcher controlcenter; do
     fi
 done
 
+# `dashboard` until #49 declared it, and the name has to stay one nobody has:
+# an undeclared name that quietly becomes a declared one turns this into "a
+# surface that exists reads as a shell bug", which passes for the wrong reason.
 mark=$(wc -l < "$NESTED_SHELL_LOG")
-ipc surface dashboard > /dev/null
+ipc surface notepad > /dev/null
 sleep 0.3
-if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'no such surface: dashboard'; then
+if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'no such surface: notepad'; then
     nested_pass 'a surface nobody declared reads as a shell bug rather than a missing one'
 else
     nested_fail 'an undeclared surface name was accepted silently'

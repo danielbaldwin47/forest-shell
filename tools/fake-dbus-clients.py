@@ -33,6 +33,17 @@ TRAY_TITLE = "forest-shell test item"
 TRACK_TITLE = "Test Track"
 TRACK_ARTIST = "Forest Shell"
 
+# What the dashboard's media card needs and the bar's pill never did (#49): a
+# length to be a fraction of, a position to be somewhere in it, a cover to draw
+# and a player that admits it can seek. MPRIS counts in microseconds; the shell
+# reads seconds, so this is the one place the conversion has to be right.
+TRACK_LENGTH_US = 180_000_000          # 3:00
+TRACK_START_US = 30_000_000            # 0:30
+# A real file, so the card's `Image` has something to decode: the repo's own
+# grain texture, which is checked in and the same on every machine.
+TRACK_ART = "file://" + str(
+    __import__("pathlib").Path(__file__).resolve().parent.parent / "assets" / "noise.png")
+
 
 class Properties(dbus.service.Object):
     """A DBus object with a `org.freedesktop.DBus.Properties` implementation.
@@ -95,6 +106,7 @@ class MprisPlayer(Properties):
 
     def __init__(self, bus):
         self.state = "Playing"
+        self.position = TRACK_START_US
         super().__init__(bus, "/org/mpris/MediaPlayer2", {
             "org.mpris.MediaPlayer2": {
                 "Identity": "Forest Test Player",
@@ -114,9 +126,17 @@ class MprisPlayer(Properties):
             "CanPause": True,
             "CanGoNext": True,
             "CanGoPrevious": True,
-            "CanSeek": False,
+            # True since #49: the dashboard's card offers a draggable position
+            # when the player allows one, and a fixture that always refused
+            # would make "seek if the player allows" a claim with nothing under
+            # it. `Position` is the property the shell polls rather than one it
+            # is pushed.
+            "CanSeek": True,
+            "Position": dbus.Int64(self.position),
             "Metadata": dbus.Dictionary({
                 "mpris:trackid": dbus.ObjectPath("/org/forest/track/1"),
+                "mpris:length": dbus.Int64(TRACK_LENGTH_US),
+                "mpris:artUrl": TRACK_ART,
                 "xesam:title": TRACK_TITLE,
                 "xesam:artist": dbus.Array([TRACK_ARTIST], signature="s"),
             }, signature="sv"),
@@ -158,6 +178,25 @@ class MprisPlayer(Properties):
     @dbus.service.method("org.mpris.MediaPlayer2.Player")
     def Previous(self):
         print("previous", flush=True)
+
+    # The two halves of seeking, and the shell uses the first: an absolute
+    # `Position` write is what a progress bar dragged to a point means, and
+    # `Seek` is the relative one a player may offer instead.
+    #
+    # Both print in *seconds*, because that is the unit the shell's log line is
+    # in and a harness comparing microseconds to `1:30` is a harness nobody can
+    # read.
+    @dbus.service.method("org.mpris.MediaPlayer2.Player", in_signature="ox")
+    def SetPosition(self, track, position):
+        self.position = int(position)
+        self.announce()
+        print("seeked to %.3f" % (self.position / 1_000_000), flush=True)
+
+    @dbus.service.method("org.mpris.MediaPlayer2.Player", in_signature="x")
+    def Seek(self, offset):
+        self.position = max(0, min(TRACK_LENGTH_US, self.position + int(offset)))
+        self.announce()
+        print("seeked to %.3f" % (self.position / 1_000_000), flush=True)
 
 
 def main(argv):

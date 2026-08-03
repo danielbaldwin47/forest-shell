@@ -32,6 +32,9 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Core
 import qs.Services.Compositor
+// For the dashboard's `seek` door alone (#49) — the media card itself reaches
+// the facade directly.
+import qs.Services.Media
 
 Singleton {
     id: root
@@ -207,6 +210,12 @@ Singleton {
         function toggle(): void { root.toggle("controlcenter"); }
     }
 
+    /// The dashboard's (#49). Its button is the bar's *clock* — the one module
+    /// that was a readout until this ticket and is now also a door.
+    readonly property QtObject dashboardHandle: QtObject {
+        function toggle(): void { root.toggle("dashboard"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -322,6 +331,36 @@ Singleton {
         function wallpaper(path: string): void { ControlCenterActions.wallpaper(path); }
     }
 
+    // The dashboard's door (#49). `dashboard`, lowercase and one word, which is
+    // the spelling Core/SurfaceBusPolicy.qml wrote down for the clock that
+    // dispatches to it.
+    //
+    //     bind = SUPER, D, exec, qs ipc call dashboard toggle
+    //
+    // The four doors every drawer has, and one more — for the reason the control
+    // centre has eight of its own: **a card is a drag target inside a drawer,
+    // and this repo has no pointer-injection tool it may assume**, so "seek if
+    // the player allows" would otherwise be a claim with no seam under it at
+    // all. The percentage is where along the track, which is what a pointer on
+    // the bar knows:
+    //
+    //     qs ipc call dashboard seek 50
+    //
+    // The transport needs no door of its own: play, pause, next and previous are
+    // driven from the *player's* side of the bus with `busctl`, which is what
+    // tools/services-harness.sh already does. Seeking is the one gesture with no
+    // such equivalent — a player cannot be told to seek itself from outside.
+    IpcHandler {
+        target: "dashboard"
+
+        function open(): void { root.open("dashboard"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("dashboard"); }
+        function isOpen(): bool { return root.current === "dashboard"; }
+
+        function seek(percent: int): void { Mpris.seekToFraction(percent / 100); }
+    }
+
     // --- Super+Space ---------------------------------------------------------
     //
     // The summon (#39), registered from QML rather than shelled out to. In the
@@ -353,8 +392,9 @@ Singleton {
         SurfaceBus.register("launcher", root.launcherHandle);
         SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
         SurfaceBus.register("controlcenter", root.controlCenterHandle);
+        SurfaceBus.register("dashboard", root.dashboardHandle);
         Logger.stage("drawers armed (ipc targets: session, launcher, "
-                     + "notificationcenter, controlcenter)");
+                     + "notificationcenter, controlcenter, dashboard)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

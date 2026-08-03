@@ -23,6 +23,7 @@
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
 #   tools/capture-harness.sh out.png --surface center --session   # the notification centre
+#   tools/capture-harness.sh out.png --surface dashboard --session # the dashboard
 #   tools/capture-harness.sh out.png --surface osd --session      # the OSD pill
 #   tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
@@ -59,7 +60,9 @@
 # bar the way the compositor lays it out — the picture that answers "scrim at
 # 0.10, bar above the fog". Its icons need `--session`. `osd` is #46's pill,
 # placed where the settings' position key puts it and posed with `--osd
-# channel[:percent[:muted]]`; its glyph needs `--session` too.
+# channel[:percent[:muted]]`; its glyph needs `--session` too. `dashboard` is
+# #49's panel under the clock, posed with a fixed day and a fixed player so the
+# same picture is taken twice — its glyphs need `--session` as well.
 #
 # --contrast runs tools/measure-contrast.py over the strip the bar occupies
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
@@ -129,7 +132,7 @@ while (( $# )); do
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
-        --help|-h)     sed -n '2,75p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -170,8 +173,8 @@ case "${OSD_STATE%%:*}" in
 esac
 
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|osd) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, osd)" \
+    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd)" \
            >&2; exit 2 ;;
 esac
 

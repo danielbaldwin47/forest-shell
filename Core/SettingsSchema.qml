@@ -80,6 +80,17 @@ QtObject {
     /// here so the Bar tab and the registry keep one address for it.
     readonly property var barModules: barSchema.modules
 
+    /// The dashboard's card inventory (#49), the same kind of pool as
+    /// `barModules`: what a settings GUI offers to add, and what
+    /// Surfaces/Drawers/DashboardRegistry.qml resolves the result against.
+    ///
+    /// Longer than the registry on purpose, and only in that direction. The two
+    /// data cards are #50's and cannot be drawn yet, but a config written
+    /// against a shell that has them must keep them rather than have them
+    /// stripped on the first save — which is exactly what the bar's vocabulary
+    /// does for the optional modules nobody has built.
+    readonly property var dashboardCards: ["calendar", "media", "weather", "systemMonitor"]
+
     /// Model aliases, not ids: the launcher passes these through to `--model`
     /// (#41). `opusplan` is a plan-mode alias and resolves to sonnet under
     /// `-p`, so it is deliberately not offered.
@@ -206,7 +217,40 @@ QtObject {
         },
 
         dashboard: {
-            // Card registry and per-card options land with #49 and #50.
+            // Which cards the dashboard carries, top to bottom (#49).
+            //
+            // Presence *is* enablement, exactly as it is for the bar's modules:
+            // a card that is off is a card that is not in the list, and there is
+            // no second `enabled` flag to disagree with it.
+            //
+            // A list of names and not a closed enum: an unknown name is dropped
+            // by the registry with a warning rather than refused here
+            // (Surfaces/Drawers/DashboardRegistry.qml), so a file written by a
+            // newer shell keeps the cards this one cannot draw — which is how
+            // #50's weather and system-monitor cards survive a round trip
+            // through this version.
+            //
+            // The default is #9's dashboard minus the two cards that need #50:
+            // the month, and what is playing.
+            cards: { def: ["calendar", "media"],
+                     coerce: c.arrayOf(c.string, "dashboard.cards") },
+
+            // The header, which is a person rather than a card: a name and a
+            // face beside the date (#9).
+            //
+            // Both default to empty and mean "work it out" rather than "leave it
+            // blank" — the shell knows the user's login name and where a
+            // desktop keeps a face, and a header that said nothing until it was
+            // configured would be a header nobody configures. They are keys at
+            // all because neither guess is always right: a login name is not a
+            // name, and an account picture is a per-machine file that
+            // settings.json travels away from.
+            profile: {
+                name: { def: "", coerce: c.string,
+                        label: "What the dashboard calls you" },
+                avatar: { def: "", coerce: c.path,
+                          label: "A picture for the dashboard header" }
+            }
         },
 
         notifications: {

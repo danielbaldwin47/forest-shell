@@ -36,7 +36,8 @@
 //
 // Environment, all set by tools/capture-harness.sh:
 //   CAPTURE_OUT          where to save the PNG (required)
-//   CAPTURE_SURFACE      bar | bar-full | lock | settings | drawer  (default bar)
+//   CAPTURE_SURFACE      bar | bar-full | lock | settings | drawer | launcher |
+//                        center | controlcenter | dashboard | osd  (default bar)
 //   CAPTURE_W/CAPTURE_H  scene size in logical px (default 1280x800)
 //   CAPTURE_BAR_OPACITY  override for the bar fill opacity, e.g. "0.65"
 //                        (defaults to the configured bar.surface.opacity)
@@ -158,6 +159,7 @@ ShellRoot {
                     case "launcher": return launcherScene;
                     case "center":   return centerScene;
                     case "controlcenter": return controlCenterScene;
+                    case "dashboard": return dashboardScene;
                     case "osd":      return osdScene;
                     default:         return barScene;
                     }
@@ -641,6 +643,115 @@ ShellRoot {
             // Left at the root again, so a harness run cannot leave a scanner
             // running on the machine that ran it.
             Component.onDestruction: ControlCenterActions.back("capture")
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+        }
+    }
+
+    /// The dashboard (#49), hanging from the bar's clock, posed with a day and
+    /// a player.
+    ///
+    ///     tools/capture-harness.sh out.png --surface dashboard --session
+    ///     tools/capture-harness.sh out.png --surface dashboard --light
+    ///
+    /// `--session` for the picture: the transport buttons, the calendar's
+    /// chevrons and the cover-art placeholder are all Lucide glyphs, and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph
+    /// (Widgets/Icon.qml). Offscreen still measures the fills and the layout,
+    /// which is what this surface is captured for — a seven-column grid inside a
+    /// 380px panel and a track title of arbitrary length beside it are both the
+    /// #80 shape waiting to happen.
+    ///
+    /// Everything is *posed*, and this surface needs it more than any other:
+    /// the calendar draws today, so an unposed capture is a different picture
+    /// every day and the same one is never taken twice; the media card draws
+    /// whatever this machine is playing, which on the machine running a capture
+    /// is usually nothing at all — and "nothing" removes the card entirely.
+    /// The date is #93's own example minute, so a dashboard capture and a
+    /// bar-full one can be read side by side.
+    ///
+    /// The two images are the scratch wallpaper the harness generated, used as
+    /// cover art and as the account picture. A real file rather than a
+    /// placeholder, because what is being judged is the *clipping* — album art
+    /// is the one arbitrary image this shell puts on screen, and a square
+    /// corner poking out of a rounded card is only visible with something in
+    /// it.
+    Component {
+        id: dashboardScene
+
+        Backdrop {
+            id: dashboardBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            Dashboard {
+                id: dash
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                facts: ({
+                    now: new Date(2026, 7, 1, 19, 26),
+                    profile: { name: "Daniel",
+                               avatar: Config.values.wallpaper.path },
+                    media: {
+                        showing: true,
+                        // The longest thing this row ever carries, which is the
+                        // overflow worth photographing: a title from another
+                        // application, next to a 64px cover.
+                        title: "It's Not Just Me, It's Everybody",
+                        artist: "Weyes Blood",
+                        art: Config.values.wallpaper.path,
+                        playing: true,
+                        canGoBack: true,
+                        canToggle: true,
+                        // A player that will not skip, so the dimmed state of a
+                        // transport button is in the picture too.
+                        canSkip: false,
+                        position: 128,
+                        length: 372,
+                        scrubbable: true
+                    }
+                })
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "cards=" + dash.cards.length
+                    + " (" + (dash.cards.join(",") || "none") + ")"
+                    + " mode=" + (Theme.dark ? "dark" : "light")
+                    + " panel=" + root.region(dash.panelItem, dashboardBackdrop)
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            // Deferred, like the control centre's: the panel is sized from a
+            // column of cards that are still loading at `onCompleted`, so a
+            // region reported there is the header's alone.
+            Component.onCompleted: root.describeScene = dashboardBackdrop.describe
 
             BarSurface {
                 anchors {

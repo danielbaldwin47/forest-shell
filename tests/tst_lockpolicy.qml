@@ -122,6 +122,32 @@ TestCase {
         verify(!policy.isLockout(""));
     }
 
+    function test_a_lockout_never_reads_as_an_ordinary_error() {
+        // The three dressings the message has, and the order that matters: a
+        // locked account and a wrong password are both errors, and if they wore
+        // the same colour the one message trying again cannot answer would look
+        // like the one it can (#96).
+        compare(policy.messageTone(true, true), "lockout");
+        compare(policy.messageTone(true, false), "lockout");
+        compare(policy.messageTone(false, true), "error");
+        compare(policy.messageTone(false, false), "quiet");
+    }
+
+    function test_the_posed_lockout_is_a_lockout() {
+        // capture-harness.qml's `--lock-state lockout` poses this line, and the
+        // picture it takes is only worth anything if the shell would have
+        // painted the real thing the same way. Keep the two in step: this is
+        // the literal in `lockPosedText`.
+        const posed = "Account locked due to 3 failed logins";
+        verify(policy.isLockout(posed));
+        verify(policy.lockedOutBy("failed", posed));
+        compare(policy.messageTone(policy.lockedOutBy("failed", posed), true),
+                "lockout");
+        // …and the posed refusal is deliberately *not* one, or the two pictures
+        // would be the same picture.
+        verify(!policy.isLockout("Authentication failure"));
+    }
+
     // --- caps lock -----------------------------------------------------------
 
     function test_caps_lock_is_read_off_the_keystroke() {

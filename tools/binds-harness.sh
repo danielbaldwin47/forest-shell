@@ -73,6 +73,14 @@ while IFS= read -r line; do
     CMDS+=("$cmd")
 
     call="${cmd%%||*}"                  # drop the fallback
+    # Guarded: `${call#*ipc call }` on a command that has no `ipc call` in it is
+    # a no-op, and would silently hand the whole command line on as a target and
+    # function name — a bind for a plain dispatcher would then fail four checks
+    # with unreadable text instead of one with a clear reason.
+    if [[ "$call" != *"ipc call "* ]]; then
+        echo "$CONF: ${mods}+${key} is not an 'ipc call' bind — this harness only knows those" >&2
+        exit 1
+    fi
     call="${call#*ipc call }"            # drop `qs -c forest ipc call`
     call="${call%"${call##*[![:space:]]}"}"   # rstrip
     CALLS+=("$call")
@@ -111,34 +119,20 @@ done
 #
 # shell-switch interpolates it with `sed -e "s|{{LAUNCHER_CMD}}|${cmd}|g"`, so a
 # `|` in the value breaks the expression and an `&` means "the whole match" in
-# the replacement. Read out of the registration script rather than restated, so
-# the two cannot drift.
+# the replacement. Sourced from the same data file the registration script uses,
+# so the check and the registered value cannot drift apart.
 
-LAUNCHER_CMD=$(sed -n 's/^FOREST_LAUNCHER_CMD=//p' tools/register-shell-switch.sh | tr -d '"' | head -1)
-if [[ -z "$LAUNCHER_CMD" ]]; then
-    nested_fail "could not read FOREST_LAUNCHER_CMD out of tools/register-shell-switch.sh"
-elif [[ "$LAUNCHER_CMD" == *"|"* || "$LAUNCHER_CMD" == *"&"* ]]; then
-    nested_fail "the registered launcher_cmd contains | or &, which shell-switch's sed cannot carry: $LAUNCHER_CMD"
+# The value of FOREST_REPO does not matter to the sed-safety check — no path can
+# introduce a `|` — but registration.env refuses to be sourced without one, so
+# that a caller who does care cannot get an unresolved command by accident.
+FOREST_REPO=$(pwd)
+# shellcheck source=../integration/shell-switch/registration.env
+source integration/shell-switch/registration.env
+if [[ "$FOREST_LAUNCHER_CMD" == *"|"* || "$FOREST_LAUNCHER_CMD" == *"&"* ]]; then
+    nested_fail "the registered launcher_cmd contains | or &, which shell-switch's sed cannot carry: $FOREST_LAUNCHER_CMD"
 else
     nested_pass "the registered launcher_cmd is sed-safe (no | or &), so SUPER+Space needs no fallback"
 fi
-
-# --- 4. down first: the fallback path ----------------------------------------
-#
-# Run before the shell exists rather than after killing it, so this is the real
-# "nothing is running" case and not a race with a dying process. `-c forest`
-# is the form the binds actually use.
-
-QS=$(qs_runtime_bin) || exit 1
-for i in "${!CALLS[@]}"; do
-    read -r target fn _ <<< "${CALLS[$i]}"
-    # shellcheck disable=SC2086
-    if "$QS" -c forest ipc call $target $fn > /dev/null 2>&1; then
-        nested_fail "${CHORDS[$i]}: 'ipc call $target $fn' exited 0 with no shell running — the fallback would never fire"
-    else
-        nested_pass "${CHORDS[$i]}: falls through to its fallback with the shell down"
-    fi
-done
 
 # --- bring one up ------------------------------------------------------------
 
@@ -167,6 +161,24 @@ done
 # The check the whole harness exists for. A non-zero exit here means `||` runs
 # the fallback *as well as* the shell's own handler.
 
+# Marked before the first call so the handler check below reads only what the
+# binds produced — but not until startup has actually finished talking. The
+# ready line nested_shell waits for is stage 2's, and stages keep logging after
+# it: measured 37 ms and 29 lines between "settings window armed" and the last
+# startup line, including a Wallpaper warning that has nothing to do with any
+# bind. Marking at the ready line would attribute all of that to the first key.
+settle() {
+    local last=-1 now
+    for _ in $(seq 1 40); do
+        now=$(wc -l < "$NESTED_SHELL_LOG" 2>/dev/null || echo 0)
+        [[ "$now" == "$last" ]] && return 0
+        last="$now"
+        sleep 0.25
+    done
+}
+settle
+mark=$(wc -l < "$NESTED_SHELL_LOG" 2>/dev/null || echo 0)
+
 for i in "${!CALLS[@]}"; do
     read -r target fn _ <<< "${CALLS[$i]}"
     # shellcheck disable=SC2086
@@ -175,6 +187,42 @@ for i in "${!CALLS[@]}"; do
         nested_pass "${CHORDS[$i]}: $target.$fn() exits 0 on a live shell — no double fire"
     else
         nested_fail "${CHORDS[$i]}: $target.$fn() exited $rc on a live shell, so the fallback fires too: $reply"
+    fi
+done
+
+# Handlers that threw rather than returned. Exit status only proves the call was
+# routed — a QML error inside the handler still unwinds to a 0 from the CLI, so
+# the log is the only place it shows up. Read from the mark, so this is about
+# the binds and not about anything startup already said.
+raised=$(tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" 2>/dev/null \
+    | grep -aE 'TypeError|ReferenceError|is not a function|Binding loop' | head -1)
+if [[ -n "$raised" ]]; then
+    nested_fail "a bind's handler raised: $raised"
+else
+    nested_pass 'no handler raised while every bind was exercised'
+fi
+
+# --- 4. and the fallback path, with the shell gone ---------------------------
+#
+# Deliberately the *same* nested session with its shell killed, rather than a
+# call made before bring-up. An earlier draft ran this first, against
+# `qs -c forest` — which resolves through the caller's own XDG_CONFIG_HOME, so
+# the moment forest-shell became the daily driver this harness would have fired
+# `lock lock` and `recorder toggle` at the real session. Seam 2's rule is that a
+# harness never touches the session running it; killing the nested shell keeps
+# the down-case contained and makes it a true "config present, nothing running"
+# rather than "config not found".
+
+nested_kill_shell
+nested_note 'shell killed — checking the binds fall through'
+
+for i in "${!CALLS[@]}"; do
+    read -r target fn _ <<< "${CALLS[$i]}"
+    # shellcheck disable=SC2086
+    if nested_ipc call $target $fn > /dev/null 2>&1; then
+        nested_fail "${CHORDS[$i]}: 'ipc call $target $fn' exited 0 with the shell dead — the fallback would never fire"
+    else
+        nested_pass "${CHORDS[$i]}: falls through to its fallback with the shell down"
     fi
 done
 

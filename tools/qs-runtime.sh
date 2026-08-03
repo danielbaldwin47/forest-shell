@@ -71,10 +71,14 @@ qs_runtime_verdict() {
 # harnesses all have a `--help` that must keep working on a machine whose
 # runtime is not ready yet, and resolving during sourcing would fail the script
 # before it ever reached argument parsing.
+# The failure is memoised too. A caller that asks twice on a machine with the
+# wrong runtime should not get the whole diagnostic block printed twice.
 _qs_runtime_bin=""
+_qs_runtime_failed=0
 qs_runtime_bin() {
+    (( _qs_runtime_failed )) && return 1
     if [[ -z "$_qs_runtime_bin" ]]; then
-        _qs_runtime_bin=$(qs_runtime_resolve) || return 1
+        _qs_runtime_bin=$(qs_runtime_resolve) || { _qs_runtime_failed=1; return 1; }
     fi
     printf '%s\n' "$_qs_runtime_bin"
 }

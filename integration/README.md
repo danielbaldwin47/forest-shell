@@ -89,12 +89,18 @@ tools/register-shell-switch.sh --check   # say what would change, touch nothing
 tools/register-shell-switch.sh           # apply
 ```
 
-This writes three things: a `~/.config/quickshell/forest` symlink pointing at
-the repo (so `qs -c forest` resolves), a `SHELL_DB` block and a `get_all_shells`
-entry in `~/.config/shell-switch/lib/shell-manager.sh`, and a cosmetic entry in
-that tool's `config.json`. It backs up each file it edits, once, before the
-first edit, and it is idempotent — re-running it after the fork is updated or
-reset restores the entry rather than stacking a second one.
+This writes two things: a `SHELL_DB` block and a `get_all_shells` entry in
+`~/.config/shell-switch/lib/shell-manager.sh`, and a cosmetic entry in that
+tool's `config.json`. It backs up each file it edits, once, before the first
+edit, and it is idempotent — re-running it after the fork is updated or reset
+restores the entry rather than stacking a second one.
+
+There is nothing to install for the shell itself. The launch is the direct path,
+`qs -p <repo>/shell.qml`, with **no `~/.config/quickshell` symlink** — the
+shell-switch research recommends the symlink, but #12 settled it the other way
+and the [#13 assembly refinements](https://github.com/danielbaldwin47/forest-shell/issues/13)
+closed the question: "direct-path launch … no config-dir symlink". Where the
+research file and the decision disagree, the decision wins.
 
 It does **not** run shell-switch's `install.sh`, ever. That script is a
 first-time bootstrap: `create_config()` rewrites `config.json` from scratch with
@@ -118,6 +124,24 @@ The reload is not optional and not cosmetic. `reload_compositor()` exists in
 `bind = SUPER, Space, …` line sits in a sourced file the compositor has not
 re-read. The switch changes the running process immediately and the keybind
 lazily.
+
+### Autostart
+
+There is nothing separate to wire. Autostart *is* the switch: `shell-switch`
+regenerates `~/.config/hypr/shell-switcher-startup.conf` from its template
+before it switches, so picking "Forest Shell" leaves that file holding
+
+```
+exec-once = qs -p /home/daniel/repos/forest-shell/shell.qml
+```
+
+and `hyprland.conf` already sources it (line 320). It takes effect at the next
+login, not at the switch.
+
+The thing worth checking once, per the contract's ambiguity A6, is that nothing
+*else* starts a shell at login, or two race. Checked as of #57: every other
+`exec-once` in `hyprland.conf` is commented out and `hyprland-gui.conf` has
+none, so the generated file is the only autostart. Re-check if that changes.
 
 ### If the switch rolls back immediately
 
@@ -174,10 +198,25 @@ deliberately lazy.
 
 ## 5. What is still open
 
-The first-frame ≤ 1.5 s / interactive ≤ 2 s budgets from #57 have **not** been
-re-measured on the pacman runtime; they were last measured against the
-`qs-upstream` prefix. Same binary version, different build and different library
-paths, so the numbers are probably but not certainly unchanged. Re-run
+Everything here needs step 1 to have happened, so none of it could be done from
+the repo side. All three are #57 acceptance criteria that are **not** met yet.
+
+**The seams have not been re-run on the pacman runtime.** Every result behind
+this work was measured with `QS_BIN=qs-upstream`, against the prefix. The
+maintenance pass on #57 is explicit that the swap "must update them and re-run
+all three seams under the pacman runtime, or it lands blind". Same upstream
+version, different build and different library paths. After step 1, re-run the
+list in §4 with no `QS_BIN` set.
+
+**The shell-switch round-trip has not been performed.** "shell-switch switches
+to and from forest-shell; launcher entry point works" needs a live session:
+switch to Forest Shell, confirm it comes up, press SUPER+Space after
+`hyprctl reload`, then switch *back* to another shell and confirm that works
+too. The rollback direction is the one worth doing deliberately — it is what
+you need if the swap goes badly.
+
+**The startup budgets have not been re-measured.** First frame ≤ 1.5 s /
+interactive ≤ 2 s, last measured against the prefix. Re-run
 `tools/idle-budget.sh` after step 1 and judge on `render` time — the swap blocks
 on the Wayland frame callback — using the same method as #95 so the two tickets
 do not measure differently.

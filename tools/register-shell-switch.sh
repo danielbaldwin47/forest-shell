@@ -31,53 +31,37 @@ set -uo pipefail
 
 # --- the registration, as data ----------------------------------------------
 #
-# Read by tools/binds-harness.sh, which checks the launcher command is sed-safe.
-# shell-switch interpolates launch_cmd and launcher_cmd with
-# `sed -e "s|{{VAR}}|${value}|g"`, so neither may contain `|` (ends the sed
-# expression) or `&` (means "the whole match" in a replacement). That is the
-# reason SUPER+Space is the one bind with no `|| fallback`.
-FOREST_ID="forest"
-FOREST_NAME="Forest Shell"
-FOREST_LAUNCH_CMD="qs -c forest"
-FOREST_LAUNCHER_CMD="qs -c forest ipc call launcher toggle"
+# Kept in a sourceable file rather than inline, because tools/binds-harness.sh
+# needs the launcher command too — to check it is sed-safe, which is what makes
+# SUPER+Space the one bind that cannot have a fallback. Two readers, so the
+# values are data and neither has to scrape the other's source.
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-# Fed to `pgrep -f` and `pkill -f` as an unanchored substring of the full
-# command line. Two hazards, both real: it must not match another registered
-# shell (`detect_running_shell` takes the first hit and `stop_shell` would kill
-# the wrong process), and it must not be a prefix of a longer config name — a
-# pattern of `qs -c forest` would also match a `qs -c forest-shell`. The config
-# directory is named exactly `forest` and nothing else here starts with it;
-# existing patterns are `qs.*noctalia-shell`, `dms run`, `qs -c ghibli`.
-FOREST_PROCESS_PATTERN="qs -c forest"
+# The checkout the registered commands should point at. Resolved from the git
+# common dir so running this from a worktree still registers the main checkout —
+# a `-p` into .claude/worktrees/ would break the moment that worktree was
+# removed, and it is the daily driver being registered, not a scratch copy.
+COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+FOREST_REPO="${COMMON:+$(dirname "$COMMON")}"
+FOREST_REPO="${FOREST_REPO:-$HERE}"
+export FOREST_REPO
 
-# Probed with `pacman -Q`, and only ever by install.sh, which this never runs.
-# ghibli names `noctalia-qs` here — the runtime, not a package for the config
-# itself, since a config directory has no package. Post-#57 the runtime is the
-# real `quickshell` package, so unlike ghibli's entry this one is simply true.
-FOREST_PACKAGES="quickshell"
+# shellcheck source=../integration/shell-switch/registration.env
+source "$HERE/integration/shell-switch/registration.env"
 
 SWITCH_DIR="${SHELL_SWITCH_DIR:-$HOME/.config/shell-switch}"
 MANAGER="$SWITCH_DIR/lib/shell-manager.sh"
 CONFIG_JSON="$SWITCH_DIR/config.json"
-QS_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell"
-LINK="$QS_CONFIG_DIR/$FOREST_ID"
-
 CHECK=0
 for arg in "$@"; do
     case "$arg" in
         --check) CHECK=1 ;;
-        --help|-h) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # Stop at the first line that is not a comment, so the header can grow
+        # without the range drifting past it into the code.
+        --help|-h) sed -n '2,/^[^#]/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
-
-# The repo the symlink should point at. Resolved from the git common dir so
-# running this from a worktree still registers the main checkout — a symlink
-# into .claude/worktrees/ would break the moment that worktree was removed.
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-COMMON=$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-REPO="${COMMON:+$(dirname "$COMMON")}"
-REPO="${REPO:-$HERE}"
 
 changes=0
 note()   { printf '  ....  %s\n' "$1"; }
@@ -93,45 +77,30 @@ die()    { printf '  \033[31mFAIL\033[0m  %s\n' "$1" >&2; exit 1; }
 # the same timestamped name and overwrite the only pre-edit copy there was.
 BACKED_UP=()
 backup() {
-    local f="$1" stamp
+    local f="$1" stamp done_f
     for done_f in ${BACKED_UP+"${BACKED_UP[@]}"}; do
         [[ "$done_f" == "$f" ]] && return 0
     done
     stamp=$(date +%Y%m%d-%H%M%S)
-    cp -p "$f" "$f.forest-$stamp.bak"
+    # Fatal, not best-effort. There is no `set -e` here, so an unchecked `cp`
+    # would let the rewrite below overwrite an uncommitted, unversioned file
+    # with no copy of it anywhere.
+    cp -p "$f" "$f.forest-$stamp.bak" || die "could not back up $f — refusing to edit it"
     BACKED_UP+=("$f")
     note "backed up $(basename "$f") -> $(basename "$f").forest-$stamp.bak"
 }
 
-# --- 1. the config directory forest-shell is reachable as --------------------
+# --- 1. the entry point the registration will name ---------------------------
 #
-# Quickshell resolves `-c forest` to $XDG_CONFIG_HOME/quickshell/forest/shell.qml.
-# A symlink to the repo keeps the checkout git-clean and keeps the process
-# pattern short, which is what #57 chose over the `-p /absolute/path` form.
+# Nothing to install: the launch is the direct path (`qs -p <repo>/shell.qml`),
+# per the #13 assembly refinements closing A1 — see registration.env. So this
+# step only checks the path it is about to hand shell-switch is real, because a
+# SHELL_DB entry naming a file that is not there fails at switch time with
+# shell-switch's own rollback rather than anything readable.
 
-if [[ -L "$LINK" ]]; then
-    current=$(readlink -f "$LINK")
-    if [[ "$current" == "$(readlink -f "$REPO")" ]]; then
-        ok "$LINK -> $REPO"
-    else
-        would "repoint $LINK: $current -> $REPO"
-        if (( ! CHECK )); then
-            ln -sfn "$REPO" "$LINK"
-            ok "repointed $LINK -> $REPO"
-        fi
-    fi
-elif [[ -e "$LINK" ]]; then
-    die "$LINK exists and is not a symlink — refusing to replace it"
-else
-    would "create $LINK -> $REPO"
-    if (( ! CHECK )); then
-        mkdir -p "$QS_CONFIG_DIR"
-        ln -sfn "$REPO" "$LINK"
-        ok "created $LINK -> $REPO"
-    fi
-fi
-
-[[ -f "$REPO/shell.qml" ]] || die "no shell.qml at $REPO — the link would point at nothing runnable"
+[[ -f "$FOREST_REPO/shell.qml" ]] \
+    || die "no shell.qml at $FOREST_REPO — that is what the registration would launch"
+ok "entry point: $FOREST_REPO/shell.qml"
 
 # --- 2. the SHELL_DB block ---------------------------------------------------
 #

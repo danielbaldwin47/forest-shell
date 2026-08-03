@@ -1,13 +1,12 @@
 // forest-shell — entry point.
 //
-//   qs -c forest                              # installed, via the symlink
-//   qs -p ~/repos/forest-shell/shell.qml      # straight out of the checkout
+//   qs -p ~/repos/forest-shell/shell.qml
 //
-// The repo root is the Quickshell config dir (#12 §3): this file is the config
-// and layer directories are imported through the `qs.` namespace. #57 added
-// a `~/.config/quickshell/forest` symlink pointing here so `-c forest` resolves
-// — that is what shell-switch launches and what the keybinds call over IPC; the
-// `-p` form still works and is what the harnesses use.
+// The repo root is the Quickshell config dir (#12 §3): this file is the config,
+// layer directories are imported through the `qs.` namespace, and there is no
+// symlink into ~/.config/quickshell — the launch is the direct path, which #12
+// settled and the #13 assembly refinements closed. That is also what
+// shell-switch is registered with and what the keybinds call over IPC.
 //
 // The runtime is upstream Quickshell >= 0.3.0 at plain `qs`. #57 retired the
 // side-by-side `qs-upstream` prefix (#14/#15) that stood in while /usr/bin/qs

@@ -656,6 +656,7 @@ else
     # preview is truncated, and copying it would paste a mangled prefix while
     # reporting success.
     Quickshell_before=$(reply clipboard)
+    copy_mark=$(wc -l < "$NESTED_SHELL_LOG")
     if [[ "$(reply activate ';force-with-lease' 0)" == "true" ]]; then
         tries=40
         while (( tries-- > 0 )); do
@@ -669,6 +670,17 @@ else
         fi
     else
         nested_fail 'Enter on a clipboard row was refused'
+    fi
+
+    # #141 reported this path as silent. It is not — `Clipboard.qml` logs the
+    # copy on both halves of the split — so the assertion is here to keep it
+    # that way rather than to fix anything: a copy that failed and a copy that
+    # worked must not read the same, which is the whole of the ticket.
+    if tail -n "+$((copy_mark + 1))" "$NESTED_SHELL_LOG" \
+            | grep -qaE 'launcher: clipboard entry [0-9]+ copied'; then
+        nested_pass 'a text copy says so in the log (#141)'
+    else
+        nested_fail 'a text copy reached the selection and logged nothing (#141)'
     fi
 
     # The image half. A row that says what it is, a thumbnail that decodes to a
@@ -699,6 +711,7 @@ else
         nested_fail 'the image entry has no id to decode'
     fi
 
+    copy_mark=$(wc -l < "$NESTED_SHELL_LOG")
     if [[ "$(reply activate ';image' 0)" == "true" ]]; then
         tries=40
         while (( tries-- > 0 )); do
@@ -712,6 +725,16 @@ else
         fi
     else
         nested_fail 'Enter on an image row was refused'
+    fi
+
+    # The image half separately, because it is a different process with a
+    # different exit condition: `wl-copy` forks and stays alive to serve the
+    # offer, and a `sh` that never exits would take the log line with it.
+    if tail -n "+$((copy_mark + 1))" "$NESTED_SHELL_LOG" \
+            | grep -qaE 'launcher: clipboard entry [0-9]+ copied'; then
+        nested_pass 'an image copy says so in the log (#141)'
+    else
+        nested_fail 'an image reached the selection and logged nothing (#141)'
     fi
 fi
 

@@ -80,6 +80,20 @@ print(data if isinstance(data, str) else json.dumps(data))
 ' "$snapshot" "$path"
 }
 
+## Wait for a log line written *after* a mark, so a check cannot be satisfied by
+## a line the startup already wrote. `wc -l` is the mark: the log only grows.
+await_since() {
+    local mark="$1" pattern="$2" timeout="${3:-10}"
+    local deadline=$((SECONDS + timeout))
+    while (( SECONDS < deadline )); do
+        if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qaE "$pattern"; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 ## Assert a log line arrived, and say what it was about.
 expect_log() {
     local pattern="$1" what="$2" timeout="${3:-15}"
@@ -145,8 +159,15 @@ deferred_line=$(grep -a 'services: deferred stage' "$NESTED_SHELL_LOG" | head -1
 # Counted against `report("deferred", [...])` rather than taken from the log the
 # check is reading, which is the only way round that catches a service going
 # missing; #49 found it red and at sixteen, exactly as the note above predicts.
-if [[ "$deferred_line" == *"18 object(s)"* ]]; then
-    nested_pass 'the deferred stage constructs all eighteen services'
+#
+# Twenty-five since Weather, Screenshot and Recorder joined it — and it stayed
+# at eighteen while they did, so this check has been red on main for exactly the
+# reason its own note gives: the number is updated by the ticket that adds a
+# service, and it was not. Counted off `report("deferred", [...])` again here.
+# It is a bookkeeping fix rather than #141's, but a check that is always red is
+# a check nobody reads, which is what #141 is about at the other seam.
+if [[ "$deferred_line" == *"25 object(s)"* ]]; then
+    nested_pass 'the deferred stage constructs all twenty-five services'
 else
     nested_fail "the deferred stage is not what it should be: ${deferred_line:-<no line>}"
 fi
@@ -282,6 +303,35 @@ else
     fi
 fi
 
+# The scan's *result*, not just its start (#141). Switching the scanner on was
+# logged and what came back never was, so a scan that saw four access points and
+# one that saw none read the same from the log — and the Wi-Fi half of #136's
+# manual pass had to be evidenced against `nmcli` from outside the shell.
+#
+# Held and let go through the same two calls the drill-in makes, so this is the
+# real scanner rather than a read of the candidate list.
+if [[ "$(snapshot_field "$snapshot" network.wifiEnabled)" == "true" ]]; then
+    mark=$(wc -l < "$NESTED_SHELL_LOG")
+    ipc wifiScan true > /dev/null
+    if await_since "$mark" 'network: scanning' 5; then
+        nested_pass 'a scan says it started'
+    else
+        nested_fail 'the scanner was switched on and said nothing'
+    fi
+
+    # Twenty seconds: NetworkManager answers a fresh scan in a few, and a
+    # machine whose last scan is still warm answers immediately.
+    if await_since "$mark" 'network: (no networks|[0-9]+ networks?) visible' 20; then
+        nested_pass "a scan says what it found: $(tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" \
+            | grep -aoE '(no networks|[0-9]+ networks?) visible' | tail -1) (#141)"
+    else
+        nested_fail 'a scan returned and the log cannot say whether it found anything (#141)'
+    fi
+    ipc wifiScan false > /dev/null
+else
+    nested_note 'the wifi radio is off — the scan-result check is skipped'
+fi
+
 bt_expected=$([[ -n "$(ls /sys/class/bluetooth 2>/dev/null)" ]] && echo true || echo false)
 if [[ "$(snapshot_field "$snapshot" bluetooth.present)" == "$bt_expected" ]]; then
     nested_pass "the bluetooth service agrees with /sys about the adapter ($bt_expected)"
@@ -313,6 +363,125 @@ if [[ "$(snapshot_field "$snapshot" audio.hasSink)" == "true" ]]; then
     ipc micMute false > /dev/null
     ipc volume "$was_volume" > /dev/null
     nested_note "volume put back to $was_volume%"
+    # 5b — the *mixer's* half of it (#141). Per-app volume and per-app mute
+    # changed real PipeWire state and logged nothing, so a set that worked and a
+    # set that hit the wrong node looked identical from outside — the #81 shape
+    # this seam exists to catch.
+    #
+    # A stream to move is made rather than found: a machine with nothing playing
+    # has no mixer rows at all, and one with a real player has rows belonging to
+    # the developer's own music. `pw-play` on a few seconds of generated silence
+    # is a sink-input like any other, and inaudible either way.
+    if command -v pw-play >/dev/null 2>&1; then
+        silence="$NESTED_WORK/silence.wav"
+        python3 -c '
+import struct, sys, wave
+with wave.open(sys.argv[1], "wb") as out:
+    out.setnchannels(1)
+    out.setsampwidth(2)
+    out.setframerate(48000)
+    out.writeframes(b"\x00\x00" * 48000 * 60)
+' "$silence"
+
+        before_ids=$(snapshot_field "$(ipc snapshot)" audio.streams)
+        pw-play "$silence" > "$NESTED_WORK/pw-play.log" 2>&1 &
+        PW_PLAY_PID=$!
+
+        # The new row, by difference: the id is PipeWire's node id and nothing
+        # outside PipeWire can predict it, and a machine that already had
+        # streams must not have one of those picked instead.
+        stream_id=""
+        for _ in $(seq 1 40); do
+            stream_id=$(python3 -c '
+import json, sys
+try:
+    before = {row["id"] for row in json.loads(sys.argv[1])}
+    now = json.loads(sys.argv[2])
+except (ValueError, KeyError, TypeError):
+    sys.exit(0)
+for row in now:
+    if row["id"] not in before:
+        print(row["id"])
+        break
+' "$before_ids" "$(snapshot_field "$(ipc snapshot)" audio.streams)")
+            [[ -n "$stream_id" ]] && break
+            sleep 0.25
+        done
+
+        if [[ -z "$stream_id" ]]; then
+            nested_note 'pw-play never became a mixer row — the per-app checks are skipped'
+        else
+            stream_row() {
+                python3 -c '
+import json, sys
+for row in json.loads(sys.argv[1]):
+    if row["id"] == sys.argv[2]:
+        print(row[sys.argv[3]] if isinstance(row[sys.argv[3]], str)
+              else json.dumps(row[sys.argv[3]]))
+        break
+' "$(snapshot_field "$(ipc snapshot)" audio.streams)" "$stream_id" "$1"
+            }
+            stream_name=$(stream_row name)
+            nested_note "a generated stream is on the mixer: $stream_name (node $stream_id)"
+
+            mark=$(wc -l < "$NESTED_SHELL_LOG")
+            ipc streamVolume "$stream_id" 35 > /dev/null
+            sleep 0.4
+            moved=$(stream_row percent)
+            if [[ "$moved" == "35" ]]; then
+                nested_pass 'a per-app volume reaches pipewire and reads back'
+            else
+                nested_fail "set the stream to 35%, the node reports $moved%"
+            fi
+            if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qaE "audio: stream .* 35%"; then
+                nested_pass 'the per-app volume says so in the log (#141)'
+            else
+                nested_fail 'a per-app volume changed pipewire and logged nothing (#141)'
+            fi
+
+            mark=$(wc -l < "$NESTED_SHELL_LOG")
+            ipc streamMute "$stream_id" > /dev/null
+            sleep 0.4
+            if [[ "$(stream_row muted)" == "true" ]]; then
+                nested_pass 'a per-app mute reaches pipewire and reads back'
+            else
+                nested_fail 'the stream did not mute'
+            fi
+            if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qaE "audio: stream .* muted"; then
+                nested_pass 'the per-app mute says so in the log (#141)'
+            else
+                nested_fail 'a per-app mute changed pipewire and logged nothing (#141)'
+            fi
+
+            # And back. The unmute is its own assertion rather than tidying:
+            # "muted" and "unmuted" being distinguishable in the log is the
+            # whole of what #141 asks for, and a line that said `muted` both
+            # times would pass the check above.
+            mark=$(wc -l < "$NESTED_SHELL_LOG")
+            ipc streamMute "$stream_id" > /dev/null
+            sleep 0.4
+            if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qaE "audio: stream .* unmuted"; then
+                nested_pass 'the per-app unmute is a different line from the mute (#141)'
+            else
+                nested_fail 'an unmute logged nothing, or logged the same line as the mute (#141)'
+            fi
+        fi
+
+        # The refusal, which has always been logged — asserted here so that a
+        # success line added on top of it cannot quietly replace it.
+        mark=$(wc -l < "$NESTED_SHELL_LOG")
+        ipc streamVolume 99999999 50 > /dev/null
+        sleep 0.3
+        if tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" | grep -qa 'stream 99999999 unchanged'; then
+            nested_pass 'a set on a stream that is not there is refused, in the log'
+        else
+            nested_fail 'a set on a missing stream logged nothing'
+        fi
+
+        [[ -n "${PW_PLAY_PID:-}" ]] && kill "$PW_PLAY_PID" 2>/dev/null
+    else
+        nested_note 'no pw-play on this machine — the per-app mixer checks are skipped'
+    fi
 else
     nested_note 'no default sink on this machine — the audio checks are skipped'
 fi

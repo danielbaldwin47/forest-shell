@@ -261,4 +261,28 @@ TestCase {
         compare(policy.refused("CAMPUS", "enterprise networks need NetworkManager"),
                 "wifi CAMPUS unchanged — enterprise networks need NetworkManager");
     }
+
+    // --- what a scan found (#141) --------------------------------------------
+
+    function test_a_scan_says_how_many_it_saw() {
+        compare(policy.visible(4), "4 networks visible");
+    }
+
+    function test_one_network_is_not_one_networks() {
+        compare(policy.visible(1), "1 network visible");
+    }
+
+    function test_a_scan_that_found_nothing_says_so_in_words() {
+        // The whole point of the line: a scan that saw nothing and a scan whose
+        // result was never logged used to read the same, which is what made the
+        // Wi-Fi step of #136's manual pass unevidenceable from the log.
+        compare(policy.visible(0), "no networks visible");
+    }
+
+    function test_a_count_that_is_not_a_count_reads_as_nothing() {
+        // `wifiCandidates` is a JS array on a service that may have no device,
+        // and a length read off nothing must not print "undefined networks".
+        for (const bad of [-1, undefined, null, NaN])
+            compare(policy.visible(bad), "no networks visible", "count " + bad);
+    }
 }

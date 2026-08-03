@@ -252,6 +252,57 @@ TestCase {
         compare(policy.windLabel(undefined, "metric"), "");
     }
 
+    // --- the card's two sentences ---------------------------------------------
+    //
+    // Both were in Surfaces/Drawers/Cards/WeatherCard.qml first, which put a
+    // decision with a right answer on the far side of the seam line — the card
+    // imports a Quickshell service, so `tests/` cannot reach anything left in
+    // it (CLAUDE.md).
+
+    function test_the_small_print_carries_only_what_the_service_answered() {
+        compare(policy.detailLine({ feelsLike: 25.1, humidity: 61, wind: 12.4 }, "metric"),
+                "feels 25° · 61% humidity · 12 km/h");
+        compare(policy.detailLine({ feelsLike: 25.1, humidity: 61, wind: 12.4 }, "imperial"),
+                "feels 25° · 61% humidity · 12 mph");
+    }
+
+    function test_a_missing_part_takes_its_separator_with_it() {
+        // A middle dot with nothing on one side of it is worse than a shorter
+        // line.
+        compare(policy.detailLine({ humidity: 61 }, "metric"), "61% humidity");
+        compare(policy.detailLine({ wind: 3 }, "metric"), "3 km/h");
+        compare(policy.detailLine(({}), "metric"), "");
+        compare(policy.detailLine(null, "metric"), "");
+    }
+
+    function test_a_card_with_no_reading_says_which_of_the_three_it_is() {
+        // Three sentences and not a blank card (#81 inside a surface).
+        verify(policy.emptyMessage("unset", "").indexOf("weatherTime.weather.place") > 0);
+        compare(policy.emptyMessage("failed", "no such place: Bostn"), "no such place: Bostn");
+        compare(policy.emptyMessage("failed", ""), "The forecast could not be read.");
+        compare(policy.emptyMessage("loading", ""), "Checking the weather…");
+        compare(policy.emptyMessage("idle", ""), "Checking the weather…");
+    }
+
+    function test_the_glyph_beside_it_asks_or_apologises() {
+        compare(policy.emptyIcon("unset"), "map-pin");
+        compare(policy.emptyIcon("loading"), "map-pin");
+        compare(policy.emptyIcon("failed"), "cloud-off");
+    }
+
+    // --- one table, two readings ----------------------------------------------
+
+    function test_a_code_has_one_row_and_both_readings_come_off_it() {
+        // The word and the glyph were separate `switch`es first: one code added
+        // in two places, and the day they disagree the card says "Snow" over a
+        // raincloud.
+        for (const code in policy.conditions) {
+            const row = policy.conditions[code];
+            compare(policy.conditionLabel(Number(code)), row.label);
+            compare(policy.conditionIcon(Number(code), true), row.icon);
+        }
+    }
+
     function test_the_first_row_is_today_and_the_rest_are_weekdays() {
         // 2026-08-03 is a Monday.
         compare(policy.dayLabel("2026-08-03", "2026-08-03"), "Today");

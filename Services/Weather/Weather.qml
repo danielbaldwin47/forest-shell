@@ -120,8 +120,16 @@ Singleton {
             root.status = "unset";
             return;
         }
-        if (!force && !root.policy.stale(root.cache, Date.now(),
-                                         root.settings.refreshMinutes))
+        // Two questions, and both have to be asked: a cache for *this* place in
+        // *these* units that is recent enough. Age alone was the first version
+        // and it stranded the card — changing the place with the dashboard shut
+        // blanks the reading but leaves the old entry's timestamp, so the next
+        // open found a "fresh" cache for somewhere else and drew "Checking the
+        // weather…" until the entry aged out, which is half a day at the top of
+        // the range.
+        const wrong = !root.policy.usable(root.cache, root.place, root.units);
+        if (!force && !wrong && !root.policy.stale(root.cache, Date.now(),
+                                                   root.settings.refreshMinutes))
             return;
 
         if (root.location === null) {
@@ -136,7 +144,7 @@ Singleton {
     function locate(): void {
         root.status = "locating";
         if (root.mode === "auto") {
-            root.get(root.policy.ipUrl(), body => {
+            root.get(root.policy.ipBase, body => {
                 const found = body === null ? null : root.policy.parseIp(body);
                 if (found === null) {
                     root.fail("could not work out where this machine is");
@@ -247,6 +255,14 @@ Singleton {
         request.onreadystatechange = () => {
             if (request.readyState !== XMLHttpRequest.DONE)
                 return;
+            // `abort()` runs this handler too, and the timeout below has
+            // already said something more useful than "the forecast could not
+            // be read" — so a request the deadline gave up on is not reported
+            // twice, with the wrong one last.
+            if (inFlight.abandoned) {
+                inFlight.abandoned = false;
+                return;
+            }
             inFlight.stop();
             inFlight.request = null;
             done(request.status === 200 ? request.responseText : null);
@@ -265,9 +281,13 @@ Singleton {
 
         property var request: null
 
+        /// Set for the one handler call `abort()` provokes — see `get` above.
+        property bool abandoned: false
+
         interval: 15000
         onTriggered: {
             if (inFlight.request !== null) {
+                inFlight.abandoned = true;
                 inFlight.request.abort();
                 inFlight.request = null;
             }

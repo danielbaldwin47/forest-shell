@@ -119,6 +119,25 @@ ShellRoot {
             return out;
         }
 
+        // A full row and a row that has only just started, which are the two
+        // states a sparkline is ever in (#50). Generated rather than typed out,
+        // and deterministic, so the gallery draws the same two rows every time.
+        readonly property var sparkFull: {
+            const out = [];
+            for (let i = 0; i < 60; i++)
+                out.push(0.45 + 0.35 * Math.sin(i / 6));
+            return out;
+        }
+
+        readonly property var sparkPartial: {
+            const out = [];
+            // The first three are the gap: a sample that could not be taken —
+            // which is what the CPU row of a freshly opened card holds.
+            for (let i = 0; i < 17; i++)
+                out.push(i < 3 ? NaN : 0.2 + 0.5 * Math.abs(Math.sin(i / 4)));
+            return out;
+        }
+
         readonly property var oversampleCases: [
             { label: "oversample 1.0", value: 1.0 },
             { label: "oversample 3.0 — the default", value: 3.0 }
@@ -389,6 +408,45 @@ ShellRoot {
                         easingCurve: Theme.fogEase
 
                         onCellActivated: id => win.ridgeActive = id
+                    }
+                }
+
+                // --- the sparkline ------------------------------------------------
+                CapsLabel { text: "SPARKLINE — A MINUTE OF A FRACTION, NEWEST AT THE RIGHT" }
+
+                Note {
+                    Layout.fillWidth: true
+                    text: "Fixed slots and a fixed 0–1 scale, so a row that has been "
+                          + "filling for ten seconds is ten bars against the right edge "
+                          + "rather than ten bars stretched across the whole width. The "
+                          + "gap at the left of the second row is a sample that could not "
+                          + "be taken — drawn as nothing, never as a zero."
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 76
+                    color: Theme.surface
+                    radius: Theme.radiusMd
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: Theme.space3
+                        spacing: Theme.space3
+
+                        Sparkline {
+                            Layout.fillWidth: true
+                            implicitHeight: 20
+                            values: win.sparkFull
+                            color: Theme.accentDeep
+                        }
+
+                        Sparkline {
+                            Layout.fillWidth: true
+                            implicitHeight: 20
+                            values: win.sparkPartial
+                            color: Theme.accentPrimary
+                        }
                     }
                 }
 

@@ -84,11 +84,12 @@ QtObject {
     /// `barModules`: what a settings GUI offers to add, and what
     /// Surfaces/Drawers/DashboardRegistry.qml resolves the result against.
     ///
-    /// Longer than the registry on purpose, and only in that direction. The two
-    /// data cards are #50's and cannot be drawn yet, but a config written
-    /// against a shell that has them must keep them rather than have them
-    /// stripped on the first save — which is exactly what the bar's vocabulary
-    /// does for the optional modules nobody has built.
+    /// The same four the registry has since #50 built the data cards. It was
+    /// longer than the registry for one ticket, on purpose and only in that
+    /// direction: `weather` and `systemMonitor` were named here before either
+    /// could be drawn, so a config written against a newer shell kept them
+    /// rather than having them stripped on the first save — which is what the
+    /// bar's vocabulary still does for the optional modules nobody has built.
     readonly property var dashboardCards: ["calendar", "media", "weather", "systemMonitor"]
 
     /// What a temperature and a wind speed are measured in (#50). Two systems
@@ -233,8 +234,8 @@ QtObject {
             // by the registry with a warning rather than refused here
             // (Surfaces/Drawers/DashboardRegistry.qml), so a file written by a
             // newer shell keeps the cards this one cannot draw — which is how
-            // #50's weather and system-monitor cards survive a round trip
-            // through this version.
+            // #50's weather and system-monitor cards survived a round trip
+            // through the version before they existed.
             //
             // The default is #9's four-card dashboard: the month, the weather,
             // the machine and what is playing. The header is not in the list —

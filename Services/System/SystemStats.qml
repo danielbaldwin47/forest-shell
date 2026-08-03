@@ -73,7 +73,8 @@ Singleton {
             // The counters are *not* cleared. Reopening the dashboard within a
             // minute should show the minute of history it already has, and the
             // CPU baseline is what makes the first sample after a reopen a real
-            // percentage instead of a gap.
+            // percentage instead of a gap — for as long as that baseline is
+            // still recent, which is `previousCpuAt`'s whole job.
             Logger.log("sysmon", root.policy.idle());
         }
     }
@@ -121,9 +122,21 @@ Singleton {
 
     // --- sampling -------------------------------------------------------------
 
-    /// The previous `/proc/stat` totals. CPU is the only reading that needs two
-    /// samples to mean anything — the file counts ticks since boot.
+    /// The previous `/proc/stat` totals, and when they were taken. CPU is the
+    /// only reading that needs two samples to mean anything — the file counts
+    /// ticks since boot.
+    ///
+    /// The timestamp is what keeps a reopen honest. The counters survive
+    /// `release()` on purpose, so a dashboard closed and reopened inside a
+    /// minute picks its history back up — but a snapshot from an hour ago is
+    /// not a baseline, it is an hour's average, and drawing it as this second's
+    /// first bar would report an idle machine as busy (or the reverse) at every
+    /// open. Past `staleBaselineTicks` intervals it is dropped, and the first
+    /// bar after that is the honest gap a first sample always is.
     property var previousCpu: null
+    property real previousCpuAt: 0
+
+    readonly property int staleBaselineTicks: 4
 
     /// How many ticks between `df` runs. Disk usage moves by the gigabyte over
     /// hours, and it is the one reading here that costs a process rather than a
@@ -172,10 +185,16 @@ Singleton {
         printErrors: false
 
         onLoaded: {
+            const now = Date.now();
+            const fresh = root.previousCpu !== null
+                && (now - root.previousCpuAt) <= root.intervalMs * root.staleBaselineTicks;
+
             const totals = root.policy.cpuTotals(procStat.text());
-            root.cpu = root.policy.cpuBusy(root.previousCpu, totals);
-            if (totals !== null)
+            root.cpu = root.policy.cpuBusy(fresh ? root.previousCpu : null, totals);
+            if (totals !== null) {
                 root.previousCpu = totals;
+                root.previousCpuAt = now;
+            }
             root.record();
         }
     }

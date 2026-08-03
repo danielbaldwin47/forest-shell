@@ -729,6 +729,11 @@ ShellRoot {
                         status: "ready",
                         label: "Boston, Massachusetts, US",
                         message: "",
+                        // Posed with the rest of the reading rather than read
+                        // from the settings: a capture taken on a machine
+                        // configured in Fahrenheit would otherwise draw "12
+                        // mph" under these Celsius numbers.
+                        units: "metric",
                         current: { temperature: 24.3, feelsLike: 25.1,
                                    humidity: 61, wind: 12.4, code: 3, day: true },
                         days: [

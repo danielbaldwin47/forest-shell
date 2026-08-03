@@ -50,12 +50,18 @@ CardFrame {
 
     /// Everything the card draws, in one object, so the posed and the live case
     /// differ in one place rather than in a dozen bindings.
+    ///
+    /// `units` is in here with the rest, and it has to be: read from `Config`
+    /// beside a posed reading it would put "12 mph" under a metric pose on an
+    /// imperial machine, which is a capture that changes with the settings of
+    /// whoever took it.
     readonly property var state: card.posed ? card.facts.weather : ({
         status: Weather.status,
         label: Weather.label,
         message: Weather.message,
         current: Weather.current,
-        days: Weather.days
+        days: Weather.days,
+        units: Weather.units
     })
 
     readonly property bool hasReading: card.state.current !== null
@@ -118,28 +124,13 @@ CardFrame {
                 font.pointSize: Theme.pt(10.5)
             }
 
-            // Feels-like, humidity and wind on one line, and only the parts the
-            // service actually answered: a middle dot with nothing on one side
-            // of it is worse than a shorter line.
+            // Feels-like, humidity and wind on one line — which parts are on it
+            // is Services/Weather/WeatherPolicy.qml's, like every other word on
+            // this card.
             Text {
                 Layout.fillWidth: true
                 visible: text !== ""
-                text: {
-                    if (!card.hasReading)
-                        return "";
-                    const reading = card.state.current;
-                    const parts = [];
-                    if (!isNaN(Number(reading.feelsLike)))
-                        parts.push("feels " + card.policy.temperature(reading.feelsLike));
-                    const humidity = card.policy.humidityLabel(reading.humidity);
-                    if (humidity !== "")
-                        parts.push(humidity + " humidity");
-                    const wind = card.policy.windLabel(reading.wind,
-                                                       Config.values.weatherTime.weather.units);
-                    if (wind !== "")
-                        parts.push(wind);
-                    return parts.join(" · ");
-                }
+                text: card.policy.detailLine(card.state.current, card.state.units)
                 color: Theme.textMuted
                 elide: Text.ElideRight
                 font.family: Theme.fontUi
@@ -241,25 +232,14 @@ CardFrame {
 
         Icon {
             Layout.alignment: Qt.AlignVCenter
-            name: card.state.status === "failed" ? "cloud-off" : "map-pin"
+            name: card.policy.emptyIcon(card.state.status)
             size: 24
             color: Theme.textMuted
         }
 
         Text {
             Layout.fillWidth: true
-            text: {
-                switch (card.state.status) {
-                // The common case on a fresh install, and the only one the user
-                // can act on — so it names the key rather than the feeling.
-                case "unset":
-                    return "Set weatherTime.weather.place to a town, or to “auto”.";
-                case "failed":
-                    return card.state.message !== "" ? card.state.message
-                                                     : "The forecast could not be read.";
-                }
-                return "Checking the weather…";
-            }
+            text: card.policy.emptyMessage(card.state.status, card.state.message)
             color: Theme.textMuted
             wrapMode: Text.WordWrap
             font.family: Theme.fontUi

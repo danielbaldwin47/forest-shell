@@ -173,8 +173,10 @@ QtObject {
     /// *directory listing* — hwmon numbers are assigned in probe order and are
     /// not stable across boots, so there is no fixed path to read.
     ///
-    /// Run once, at the deferred stage. What it finds is then read directly on
-    /// every sample, which costs no process at all.
+    /// Run once, when the first watcher arrives — not at the deferred stage,
+    /// because a shell nobody has opened the dashboard on should spawn nothing
+    /// at all. What it finds is then read directly on every sample, which costs
+    /// no process after that.
     function sensorProbeCommand(): var {
         return ["sh", "-c",
                 "for d in /sys/class/hwmon/hwmon*; do "

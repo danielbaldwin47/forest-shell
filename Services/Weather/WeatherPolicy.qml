@@ -87,10 +87,6 @@ QtObject {
              + "&count=1&language=en&format=json";
     }
 
-    function ipUrl(): string {
-        return root.ipBase;
-    }
-
     /// Current conditions plus the daily rows the card draws under them.
     ///
     /// `timezone=auto` is what makes a day boundary mean the *forecast's* day
@@ -249,51 +245,65 @@ QtObject {
     /// way, and a card that said "slight rain" against "moderate rain" would be
     /// making a distinction nobody acts on. Intensity survives only where it
     /// changes what you would do — freezing and thunder.
-    function conditionLabel(code: var): string {
+    ///
+    /// One table and not two, which it was first: a word and a glyph read off
+    /// separate `switch`es is one code added in two places, and the day the two
+    /// disagree the card says "Snow" over a raincloud.
+    ///
+    /// `night` is given only for the two codes where the sky itself is the
+    /// picture — clear and mainly clear. A moon behind rain is a detail nobody
+    /// looks for and four more glyph names to keep vendored.
+    readonly property var conditions: ({
+        0: { label: "Clear", icon: "sun", night: "moon" },
+        1: { label: "Mainly clear", icon: "cloud-sun", night: "cloud-moon" },
+        2: { label: "Partly cloudy", icon: "cloud-sun" },
+        3: { label: "Overcast", icon: "cloudy" },
+        45: { label: "Fog", icon: "cloud-fog" },
+        48: { label: "Fog", icon: "cloud-fog" },
+        51: { label: "Drizzle", icon: "cloud-drizzle" },
+        53: { label: "Drizzle", icon: "cloud-drizzle" },
+        55: { label: "Drizzle", icon: "cloud-drizzle" },
+        56: { label: "Freezing drizzle", icon: "cloud-drizzle" },
+        57: { label: "Freezing drizzle", icon: "cloud-drizzle" },
+        61: { label: "Rain", icon: "cloud-rain" },
+        63: { label: "Rain", icon: "cloud-rain" },
+        65: { label: "Rain", icon: "cloud-rain" },
+        66: { label: "Freezing rain", icon: "cloud-hail" },
+        67: { label: "Freezing rain", icon: "cloud-hail" },
+        71: { label: "Snow", icon: "cloud-snow" },
+        73: { label: "Snow", icon: "cloud-snow" },
+        75: { label: "Snow", icon: "cloud-snow" },
+        77: { label: "Snow", icon: "cloud-snow" },
+        80: { label: "Rain showers", icon: "cloud-rain-wind" },
+        81: { label: "Rain showers", icon: "cloud-rain-wind" },
+        82: { label: "Rain showers", icon: "cloud-rain-wind" },
+        85: { label: "Snow showers", icon: "cloud-snow" },
+        86: { label: "Snow showers", icon: "cloud-snow" },
+        95: { label: "Thunderstorm", icon: "cloud-lightning" },
+        96: { label: "Thunderstorm with hail", icon: "cloud-lightning" },
+        99: { label: "Thunderstorm with hail", icon: "cloud-lightning" }
+    })
+
+    /// The row for a code, or null for one this table has never heard of — a
+    /// forecast from a newer WMO revision, or a service having a bad day.
+    function condition(code: var): var {
         const value = root.number(code);
         if (isNaN(value))
-            return "Unknown";
-        switch (Math.round(value)) {
-        case 0: return "Clear";
-        case 1: return "Mainly clear";
-        case 2: return "Partly cloudy";
-        case 3: return "Overcast";
-        case 45: case 48: return "Fog";
-        case 51: case 53: case 55: return "Drizzle";
-        case 56: case 57: return "Freezing drizzle";
-        case 61: case 63: case 65: return "Rain";
-        case 66: case 67: return "Freezing rain";
-        case 71: case 73: case 75: case 77: return "Snow";
-        case 80: case 81: case 82: return "Rain showers";
-        case 85: case 86: return "Snow showers";
-        case 95: return "Thunderstorm";
-        case 96: case 99: return "Thunderstorm with hail";
-        }
-        return "Unknown";
+            return null;
+        const row = root.conditions[Math.round(value)];
+        return row === undefined ? null : row;
     }
 
-    /// The Lucide glyph for a code. Day and night differ for exactly the two
-    /// codes where the sky itself is the picture — clear and mainly clear —
-    /// because a moon behind rain is a detail nobody looks for and four more
-    /// glyph names to keep vendored.
+    function conditionLabel(code: var): string {
+        const row = root.condition(code);
+        return row === null ? "Unknown" : row.label;
+    }
+
     function conditionIcon(code: var, day: bool): string {
-        const value = root.number(code);
-        if (isNaN(value))
+        const row = root.condition(code);
+        if (row === null)
             return "cloud-off";
-        switch (Math.round(value)) {
-        case 0: return day === false ? "moon" : "sun";
-        case 1: return day === false ? "cloud-moon" : "cloud-sun";
-        case 2: return "cloud-sun";
-        case 3: return "cloudy";
-        case 45: case 48: return "cloud-fog";
-        case 51: case 53: case 55: case 56: case 57: return "cloud-drizzle";
-        case 61: case 63: case 65: return "cloud-rain";
-        case 66: case 67: return "cloud-hail";
-        case 71: case 73: case 75: case 77: case 85: case 86: return "cloud-snow";
-        case 80: case 81: case 82: return "cloud-rain-wind";
-        case 95: case 96: case 99: return "cloud-lightning";
-        }
-        return "cloud-off";
+        return (day === false && row.night !== undefined) ? row.night : row.icon;
     }
 
     // --- words ----------------------------------------------------------------
@@ -314,6 +324,51 @@ QtObject {
     function humidityLabel(value: var): string {
         const parsed = root.number(value);
         return isNaN(parsed) ? "" : Math.round(parsed) + "%";
+    }
+
+    /// The small print under the reading: what it feels like, how humid, how
+    /// windy — and only the parts the service actually answered. A middle dot
+    /// with nothing on one side of it is worse than a shorter line.
+    ///
+    /// Here rather than in the card because it is a decision with a right
+    /// answer, which is the rule the seams are drawn on (CLAUDE.md): the card
+    /// draws a string, and what is in the string is checked at seam 1.
+    function detailLine(current: var, units: string): string {
+        if (current === null || current === undefined)
+            return "";
+
+        const parts = [];
+        if (!isNaN(root.number(current.feelsLike)))
+            parts.push("feels " + root.temperature(current.feelsLike));
+        const humidity = root.humidityLabel(current.humidity);
+        if (humidity !== "")
+            parts.push(humidity + " humidity");
+        const wind = root.windLabel(current.wind, units);
+        if (wind !== "")
+            parts.push(wind);
+        return parts.join(" · ");
+    }
+
+    /// What the card says when it has no reading: nowhere configured, a lookup
+    /// that failed, or a request still in flight.
+    ///
+    /// Three sentences and not a blank card, which is #81's rule inside a
+    /// surface — and the unconfigured one is both the common case on a fresh
+    /// install and the only one the reader can act on, so it names the key.
+    function emptyMessage(status: string, why: string): string {
+        switch (status) {
+        case "unset":
+            return "Set weatherTime.weather.place to a town, or to “auto”.";
+        case "failed":
+            return String(why ?? "") !== "" ? why : "The forecast could not be read.";
+        }
+        return "Checking the weather…";
+    }
+
+    /// The glyph beside that sentence. A pin for "tell me where you are", a
+    /// struck-through cloud for a service that would not answer.
+    function emptyIcon(status: string): string {
+        return status === "failed" ? "cloud-off" : "map-pin";
     }
 
     /// The row heading in the forecast strip: `Today`, then three letters of

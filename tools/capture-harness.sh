@@ -78,7 +78,12 @@
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
 # #79 measurement, bar surface only. Without compositor blur the composite here
 # is the *stricter* floor: blur only averages the wallpaper locally, so a
-# window that passes unblurred passes blurred.
+# window that passes unblurred passes blurred. #97 put a number on how much
+# stricter, by measuring both ends over the same wallpaper on a real session:
+# blur bought the worst 100px window 3.98:1 -> 4.02:1 at Hyprland's default
+# strength and 4.08:1 at size 8/passes 3, and moved the worst *pixel* not at
+# all. So the gap this bound leaves is ~1-3% and the floor #79 chose does not
+# change — see tools/blur-measure.sh.
 #
 # --bar-opacity sets the *setting*. What gets painted is that setting raised to
 # whatever the wallpaper behind it demands (#79) — the bar reads the strip under
@@ -105,7 +110,10 @@
 #
 # What neither mode judges: compositor composition — blur behind the bar, layer
 # stacking, frame pacing (#78). Those are the compositor's pixels, not the
-# client's.
+# client's, and no change here can reach them: the wallpaper behind the bar is
+# another surface entirely. Blur specifically now has a tool of its own,
+# tools/blur-measure.sh, which photographs a real session with grim; layer
+# stacking and frame pacing are still unmeasured.
 #
 # --clock writes `weatherTime.clock.format` into the scratch config: `auto`,
 # `12h` or `24h`. #93 was the bar and the lock reading the same minute two ways,

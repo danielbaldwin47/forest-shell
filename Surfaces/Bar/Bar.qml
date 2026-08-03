@@ -60,10 +60,12 @@ Scope {
     // error it returned for four PRs. And a line in hyprland.conf cannot be a
     // setting: #10 ships this as a Bar-tab toggle and #22 §7 makes it the first
     // rung of the `reducedEffects` ladder, both of which have to take effect
-    // while the shell is running. The caveat is that "accepted" and "blurred"
-    // are still different claims: #78 could not tell them apart on a machine
-    // where blur renders nowhere, so the first session on a machine where it
-    // does is what confirms the rule has the effect it asks for.
+    // while the shell is running. "Accepted" and "blurred" are different claims
+    // and #78 could only make the first — it ran on a machine with
+    // `decoration:blur:enabled = 0`, where nothing blurs for any window. #97
+    // photographed the second on a machine where blur renders: with this rule
+    // in force the wallpaper behind the bar keeps 34% of its detail and without
+    // it 100%, over the same shot (tools/blur-measure.sh).
     Connections {
         target: Startup
         function onDeferredStage() { bar.applyBlurRule(); }

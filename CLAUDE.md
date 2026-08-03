@@ -68,6 +68,27 @@ currently make and pixels a client-side grab never sees. That still takes a
 real session; a ticket whose acceptance lives there should say that in the PR,
 not claim a seam.
 
+**4. `tools/blur-measure.sh` — one piece of that, on the caller's own session.**
+Blur is the part of compositor composition that turned out to be measurable:
+`grim` the screen with `bar.surface.blur` on and off and read the difference
+with `tools/measure-blur.py` — a blur is a low-pass filter, so the detail
+behind the surface collapses while its mean stays put. It borrows the session
+(empty workspace, `hyprctl keyword`, `hyprctl reload` on the way out) and gives
+it back, which is why it is not a seam the other three can be run alongside: it
+is a thing you do to a desktop, once, deliberately.
+
+Two rules it follows and any future real-session tool should copy. First, the
+run opens with a *control* — an ordinary translucent window, no layer rule
+anywhere near it. #78 spent a session unable to tell "the rule did nothing"
+from "this machine draws no blur"; the answer, found in #97, was
+`decoration:blur:enabled = 0` in the machine's own Hyprland config. Second, the
+arithmetic lives in a stdlib script with unit tests of its own
+(`tests/tst_measure_blur.py`) — a box blur applied in the test is the picture
+the compositor is supposed to produce, so what the numbers mean is settled at
+seam 1 and only the photograph needs the desktop.
+
+Layer stacking and frame pacing are still uncovered.
+
 ### Why this is a rule
 
 The build ran seven tickets green against `tests/` alone. The first pass under a

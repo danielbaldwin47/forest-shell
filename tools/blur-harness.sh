@@ -19,11 +19,16 @@
 #   5. two rules pushed at once are both applied, not one killing the other
 #
 # What it still cannot check is the picture: whether the bar looks blurred. That
-# is the screenshot gap in the header of tools/nested-session.sh, and #78's "by
-# eye" acceptance is the part of it a real session still owns — the more so
-# after #78's own comment found that blur renders nowhere on the test machine,
-# so even a real session there answered "is the rule taken", not "is it blurred".
-# What is checked here is everything up to the compositor's own `ok`.
+# is the screenshot gap in the header of tools/nested-session.sh, and what is
+# checked here is everything up to the compositor's own `ok`.
+#
+# The picture belongs to tools/blur-measure.sh (#97), which photographs a real
+# session with grim and measures the pair. That is also where #78's "blur
+# renders nowhere on the test machine" was finally explained: the machine had
+# `decoration:blur:enabled = 0` in its own Hyprland config, so nothing blurred
+# for any window and a corrected rule could not have looked like anything. The
+# ordinary-window control that measurement opens with exists so that cannot be
+# mistaken for a broken rule a second time.
 set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"

@@ -1,0 +1,35 @@
+name: review-gate
+
+# The lander's triple gate requires the PR body's `Review:` line to read
+# `clean` before merge. This check makes that gate mechanical: PR #128 was
+# merged by hand over `Review: findings held`, which the skill text alone
+# could not prevent. To make it a hard block, require this check on main:
+#   gh api --method PUT repos/danielbaldwin47/forest-shell/branches/main/protection \
+#     -f 'required_status_checks[strict]=false' \
+#     -f 'required_status_checks[checks][][context]=review-line' \
+#     -F enforce_admins=false \
+#     -F required_pull_request_reviews=null -F restrictions=null
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+jobs:
+  review-line:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require "Review: clean" in the PR body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          line=$(printf '%s' "$BODY" | tr -d '\r' | grep -E '^Review:' | tail -1 || true)
+          case "$line" in
+            "Review: clean")
+              echo "gate: $line" ;;
+            "")
+              echo "::error::PR body has no 'Review:' line — run /code-review, then add 'Review: clean' or 'Review: findings held'."
+              exit 1 ;;
+            *)
+              echo "::error::Review line reads '$line', not 'Review: clean' — resolve the held findings before merging."
+              exit 1 ;;
+          esac

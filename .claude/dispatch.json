@@ -11,8 +11,11 @@
   "defaultBatch": 5,
   "mergeMethod": "merge",
   "legTimeoutBase": "2.5h",
+  "legModel": "opus",
+  "maxStackDepth": 3,
   "seams": [
     { "name": "tests", "command": "tests/run.sh", "covers": "decisions: policy, formatting, parsing, merging, migration, thresholds" },
+    { "name": "nested", "command": "tools/nested-session.sh", "covers": "compositor lifecycles: Wayland protocol events, IPC, layer-shell, keyboard focus, per-screen geometry and hotplug via headless outputs — assert on the log, no screenshots (upstream present stall)" },
     { "name": "capture", "command": "tools/capture-harness.sh", "covers": "client-side pictures: layout, colour, opacity compositing" }
   ]
 }

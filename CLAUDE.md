@@ -142,7 +142,9 @@ boundary is a session boundary, so churn from one phase never dulls the next.
 where is Y decided" goes to a read-only subagent (`cavecrew-investigator`
 where available, Explore otherwise), which returns an address or a
 conclusion, not the files. Reserve main-session Read for files about to be
-edited — and do not re-read a file after editing it.
+edited — and do not re-read a file after editing it: Edit and Write fail
+loudly when a change misses, so the re-read buys nothing (measured: 11 of 24
+sessions did it anyway, always on a script the session had just written).
 
 **Code review means the two-axis skill, not a lone reviewer agent.** When a
 session is told to `/code-review` its work, invoke the
@@ -173,6 +175,15 @@ the 2026-08 relay, zero of seven sessions used the scratch file, and every
 one peaked past 200k. The test is what enters context: a grep returning one
 decisive line complies; anything printing a screenful does not. On a failure,
 grep the log for the failing case by name — never cat the log.
+
+**Bash `cat` is a Read.** These rules govern content entering context, not
+which tool fetched it. `cat`/`sed -n` of a source file in Bash is a
+whole-file Read with a worse interface — one 237k-token session scored a
+perfect zero on the Read rules by pulling 162KB through `cat` loops and never
+calling Read once. Use Read (ranged, after a grep), or pipe to grep for the
+decisive lines. A PreToolUse hook (`.claude/hooks/context-guard.py`) blocks
+both this and the tail-pipe pattern above; a block from it is the rule
+firing, not an obstacle to route around.
 
 **Prefer Edit over Write on existing files.** A Write resends the whole file
 through context; an Edit sends only the hunk. On a schema-sized file that is

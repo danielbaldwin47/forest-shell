@@ -68,6 +68,47 @@ real compositor (#73) produced eight bugs at once (#74–#81), including a lock
 that could not be unlocked on a live session. Every one of them lived at seam 2,
 which did not exist yet.
 
+## Context discipline
+
+Implementation sessions were peaking at 200–340k tokens against a ~120k
+budget. The budget is about sharpness, not cost: a model deep in a long
+context reasons worse than the same model early in one. Everything printed
+into the session is paid for again on every call that follows, so the rules
+below are all one rule — nothing enters the main session unless the main
+session is about to act on it. Measured on the transcripts (2026-08), the
+dominant costs were accumulated Bash output (test, typecheck and harness
+runs) and whole-file Reads of large files, often repeated; review subagents
+were *not* a cost — a subagent's report returns a few KB and its own reading
+never enters this context.
+
+**Plan outside the session that will build.** The planning read-through is
+the widest exploration a ticket does. Have a Plan agent (or equivalent)
+produce the plan in its own context and hand back only the plan; the build
+session starts executing, not exploring. One ticket per session — a phase
+boundary is a session boundary, so churn from one phase never dulls the next.
+
+**Delegate exploration; only Read what you will edit.** "How does X work /
+where is Y decided" goes to a read-only subagent (`cavecrew-investigator`
+where available, Explore otherwise), which returns an address or a
+conclusion, not the files. Reserve main-session Read for files about to be
+edited — and do not re-read a file after editing it.
+
+**On a big file, grep first and Read a range.** `Grep -n` for the key or
+section name, then Read with offset/limit around the hit. Never write down or
+reuse line numbers across edits — they drift; the grep is the address. Section
+keys and knob names are unique in the schema files precisely so this works.
+
+**Never let a noisy command print into the session.** Test suites, harnesses
+and typechecks redirect to a scratch file; grep the decisive lines back:
+
+    log=$(mktemp); tests/run.sh >"$log" 2>&1; grep -E 'FAIL|Totals' "$log"
+
+(`mktemp`, not a fixed `/tmp` name — parallel sessions share `/tmp`.)
+Quote the shortest line that proves pass or fail.
+
+**Prefer Edit over Write on existing files.** A Write resends the whole file
+through context; an Edit sends only the hunk. On a schema-sized file that is
+an order of magnitude.
 ## Session workflow
 
 If you implemented anything during a session, when fully done: push the branch,

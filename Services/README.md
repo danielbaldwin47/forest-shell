@@ -143,6 +143,31 @@ Fourteen of them exist so far:
   `tools/launcher-harness.sh` check 20 restarts the shell against a PATH with
   everything on it but `qalc` to prove it does not.
 
+  `Clipboard.qml` (#53) is the fifth, and the one with a dependency the shell
+  cannot supply. Quickshell reads and writes the *current* selection and keeps
+  no history — the Wayland data-device protocol hands out the current offer and
+  nothing before it — so the store is `cliphist` and the thing that fills it is
+  `wl-paste`. Both have to be installed, and the watcher has to be running:
+
+  ```
+  exec-once = wl-paste --type text --watch cliphist store
+  exec-once = wl-paste --type image --watch cliphist store
+  ```
+
+  Two lines and not one. `wl-paste --watch` serves a single MIME family per
+  invocation, so a single untyped watcher stores text and silently drops every
+  image — a clipboard history that works until the first screenshot. The lines
+  live in `ClipboardPolicy.autostart` as data as well as here, so the sentence
+  the launcher shows on an empty history cannot drift from this block.
+
+  It is in the deferred list for `Calculator`'s reason and one of its own. The
+  one run at startup is both the probe for `cliphist` and the first read of the
+  history, so the first `;` shows rows instead of a spinner — and without a name
+  in that list nothing would ever discover that `cliphist` is absent, which is a
+  history that reads as empty for a reason no message anywhere would give.
+  `tools/launcher-harness.sh` check 26 removes `cliphist` from PATH on purpose
+  to prove it says so.
+
   `Actions.qml` is the one file under `Services/` that imports a surface
   (`qs.Surfaces.Settings`). That is sanctioned rather than accidental:
   `SettingsWindow.qml`'s own header names this caller, and

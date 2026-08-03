@@ -567,8 +567,12 @@ FocusScope {
                             spacing: Theme.space3
 
                             // The icon slot, and exactly one of three things is
-                            // in it: a real application icon, an emoji, or a
-                            // Lucide glyph. Three items rather than a `Loader`
+                            // in it: an image, an emoji, or a Lucide glyph. The
+                            // image is a real application icon, or a decoded
+                            // clipboard thumbnail (#53) — the row carries a
+                            // path in `iconSource` either way, which is the
+                            // whole reason the clipboard provider needed no
+                            // change here. Three items rather than a `Loader`
                             // per row, for the reason the delegates themselves
                             // are fixed — a component swapped per keystroke is
                             // the #75 cost, and two hidden `Item`s are cheaper

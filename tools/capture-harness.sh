@@ -237,7 +237,7 @@ EOF
 fi
 [[ -f "$WALLPAPER" ]] || { echo "no such wallpaper: $WALLPAPER" >&2; exit 2; }
 
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$SCRATCH/cache"
 # The wallpaper picker's folder (#45). Defaults to the one the deterministic
 # wallpaper above was written into, so `--drill wallpaper` has exactly one
 # thumbnail to draw and the picture is the same on every machine — the folder
@@ -260,8 +260,26 @@ cat > "$SCRATCH/offscreen.json" <<EOF
                  "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1 } ] }
 EOF
 
+# The clipboard list (#53), seeded so `--surface launcher --query ';'` draws the
+# same rows on every machine — the argument the generated wallpaper above makes,
+# and a sharper one: cliphist's store lives under `XDG_CACHE_HOME`, so a capture
+# without the scratch cache in CAPTURE_ENV below would render the caller's own
+# clipboard history into a PNG. Two entries, because the picture worth looking at
+# is a text row and an image row in the same list.
+if [[ "$SURFACE" == launcher && "$LAUNCHER_QUERY" == \;* ]]; then
+    if command -v cliphist >/dev/null 2>&1; then
+        printf 'git push --force-with-lease' \
+            | XDG_CACHE_HOME="$SCRATCH/cache" cliphist store
+        XDG_CACHE_HOME="$SCRATCH/cache" cliphist store < assets/noise.png
+        note 'seeded a scratch clipboard history (one text entry, one image)'
+    else
+        note 'no cliphist — the clipboard rows will be the empty-history line'
+    fi
+fi
+
 CAPTURE_ENV=(
     XDG_CONFIG_HOME="$SCRATCH/config" XDG_STATE_HOME="$SCRATCH/state"
+    XDG_CACHE_HOME="$SCRATCH/cache"
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"

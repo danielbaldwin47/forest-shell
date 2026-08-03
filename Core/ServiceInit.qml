@@ -91,6 +91,15 @@ Singleton {
         // the first turn can run in it. Constructed on the first `?`, the
         // panel would take a question, spawn into a working directory that
         // does not exist yet, and fail in the shape of a missing binary.
+        // Clipboard (#53) is the calculator's argument with a second half. Its
+        // one startup run is both the probe for `cliphist` and the first read of
+        // the history, so a shell that constructed it on the first `;` would
+        // spawn a process and show a spinner at exactly the moment the user
+        // wanted a list. The half the calculator does not have: without a name
+        // here the provider is never constructed, so nothing would ever discover
+        // that `cliphist` is missing — and a clipboard history that is empty
+        // because the binary is absent looks identical to one that is empty
+        // because nothing has been copied (#78).
         // The control centre's three (#44) are here for two different reasons.
         // PowerProfiles and Vpn each read their state with a subprocess and
         // never poll after it, so constructing them when the drawer opens would
@@ -120,7 +129,7 @@ Singleton {
         // ladder that starts counting a frame late.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
-                            SystemTray, Mpris, Apps, Calculator, Claude,
+                            SystemTray, Mpris, Apps, Calculator, Claude, Clipboard,
                             PowerProfiles, NightLight, Vpn,
                             LogindBridge, Idle]);
     }

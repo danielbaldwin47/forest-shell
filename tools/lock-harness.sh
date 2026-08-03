@@ -15,7 +15,11 @@
 # What it asserts, in the order the lock does them:
 #
 #   1. Enter with no conversation says so, instead of going quiet
-#   2. the compositor confirms every screen is covered (`secure`)
+#   2. the compositor confirms every screen is covered (`secure`) — on a
+#      session with one screen, which is a screen it cannot fail to cover.
+#      tools/multi-monitor-harness.sh is where that claim is made to mean
+#      something: two outputs, one buffer behind both, and an output plugged
+#      in and out while the session is locked (#98)
 #   3. a PAM conversation actually opens, and prompts
 #   4. the shell survives opening it
 #   5. the field can hear a keyboard

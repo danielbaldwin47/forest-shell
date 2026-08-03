@@ -27,6 +27,15 @@ assert on the log. `tools/lock-harness.sh` and `tools/settings-harness.sh` are
 the worked examples; a harness that edits config sets `NESTED_ENV` to a scratch
 `XDG_CONFIG_HOME` so it does not touch the session running it.
 
+This seam is also the only place the shell is ever on more than one screen.
+`NESTED_MONITORS` declares the layout and `nested_output_add` /
+`nested_output_remove` plug one in and out mid-run, so per-screen geometry and
+hotplug are assertions rather than theory (#98,
+`tools/multi-monitor-harness.sh`). The outputs are headless and the backend's
+own window is dropped (`NESTED_HEADLESS_ONLY=1`): a second wayland-backend
+output is a second window on the *host*, so the host's tiling decides its size
+— measured, and fatal to any geometry assertion.
+
 Surfaces get a log line for each state change worth asserting on. #81 was a
 silent lifecycle: nothing logged, so a lock that could not be unlocked had two
 candidate causes for a week and cost a session to narrow.

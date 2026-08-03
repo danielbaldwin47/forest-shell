@@ -33,4 +33,9 @@ python=$(command -v python3 || true)
 "$python" ../tools/normalize-lucide.py --check
 "$python" ../tools/make-noise.py --check
 
+# Same reason, different language: which quickshell binary may run the shell is
+# a decision (parse a version, compare against a floor), but it is bash, and
+# qmltestrunner only loads QML. It rides along here (#57).
+bash tst_qs_runtime.sh
+
 exec "$runner" -input .

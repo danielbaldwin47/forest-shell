@@ -1,12 +1,17 @@
 // forest-shell — entry point.
 //
-//   qs-upstream -p ~/repos/forest-shell/shell.qml
+//   qs -c forest                              # installed, via the symlink
+//   qs -p ~/repos/forest-shell/shell.qml      # straight out of the checkout
 //
-// The repo root is the Quickshell config dir (#12 §3): this file is the config,
-// layer directories are imported through the `qs.` namespace, and there is no
-// symlink into ~/.config/quickshell. `qs-upstream` is the dev wrapper for the
-// side-by-side upstream 0.3.0 prefix (#14) — the runtime swap ticket (#57)
-// retires it.
+// The repo root is the Quickshell config dir (#12 §3): this file is the config
+// and layer directories are imported through the `qs.` namespace. #57 added
+// a `~/.config/quickshell/forest` symlink pointing here so `-c forest` resolves
+// — that is what shell-switch launches and what the keybinds call over IPC; the
+// `-p` form still works and is what the harnesses use.
+//
+// The runtime is upstream Quickshell >= 0.3.0 at plain `qs`. #57 retired the
+// side-by-side `qs-upstream` prefix (#14/#15) that stood in while /usr/bin/qs
+// was still the noctalia fork. See integration/README.md.
 //
 // Startup is staged (Core/Startup.qml):
 //   stage 1, synchronous — Config, Theme, Background, Bar. #22 §4 budgets the

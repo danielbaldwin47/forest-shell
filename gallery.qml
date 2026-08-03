@@ -1,6 +1,6 @@
 // forest-shell — the Widgets/ kit gallery. Dev-only, never loaded by the shell.
 //
-//   qs-upstream -p ~/repos/forest-shell/gallery.qml
+//   qs -p ~/repos/forest-shell/gallery.qml
 //
 // A second entry point rather than a file under `tools/`, because Quickshell
 // takes the entry point's directory as the config root: only from here do

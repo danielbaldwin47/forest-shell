@@ -63,7 +63,7 @@
 # ydotool), so the keyboard path is a `--keep` step:
 #
 #   tools/drawer-harness.sh --keep
-#   qs-upstream -p shell.qml ipc call session open   # in the nested session
+#   qs -p shell.qml ipc call session open   # in the nested session
 #   ...press Escape in it, and look for `drawers: session closed (escape)`
 #
 # tools/settings-harness.sh can press keys only because the settings window is

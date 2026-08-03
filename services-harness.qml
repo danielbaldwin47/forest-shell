@@ -17,7 +17,7 @@
 // gallery.qml's reason: Quickshell takes the entry point's directory as the
 // config root, and only from here does `qs.Services.…` resolve at all.
 //
-//   qs-upstream -p services-harness.qml   # inside the nested display
+//   qs -p services-harness.qml   # inside the nested display
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell

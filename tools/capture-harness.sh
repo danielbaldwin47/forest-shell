@@ -100,7 +100,8 @@
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-QS_BIN="${QS_BIN:-qs-upstream}" # #14/#15: upstream prefix until the swap (#57)
+# shellcheck source=qs-runtime.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
 
 OUT=""
 WALLPAPER=""
@@ -308,8 +309,10 @@ else
                  "${CAPTURE_ENV[@]}")
 fi
 
+QS_RUNTIME=$(qs_runtime_bin) || exit 1
+
 LOG="$SCRATCH/shell.log"
-env "${CAPTURE_ENV[@]}" timeout 30 "$QS_BIN" -p capture-harness.qml > "$LOG" 2>&1
+env "${CAPTURE_ENV[@]}" timeout 30 "$QS_RUNTIME" -p capture-harness.qml > "$LOG" 2>&1
 rc=$?
 
 SAVED=$(grep -a 'capture: saved=' "$LOG" || true)

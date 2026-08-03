@@ -75,6 +75,12 @@
 # composition — blur behind the bar, layer stacking, frame pacing. That is the
 # compositor's own pixels, and it stays real-session work.
 
+# Which quickshell binary is allowed to run the shell, and why plain `qs` is
+# not assumed to be it (#57). Sourced rather than inlined so the three harnesses
+# that launch a runtime agree on one answer.
+# shellcheck source=qs-runtime.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
+
 # --- state, all owned by this file ------------------------------------------
 
 NESTED_DISPLAY=""       # the wayland-N socket the nested compositor is on
@@ -87,7 +93,7 @@ NESTED_SHELL_LOG=""
 NESTED_SHELL_PID=""
 NESTED_ENTRY=""        # the entry point running in there; `ipc` needs it too
 NESTED_KEEP=${NESTED_KEEP:-0}      # 1 = leave it up on exit, to poke at by hand
-NESTED_QS="${QS_BIN:-qs-upstream}" # #14/#15: upstream prefix until the swap (#57)
+NESTED_QS=""           # the quickshell binary; resolved in nested_shell (#57)
 nested_fail_count=0
 
 nested_pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
@@ -261,6 +267,11 @@ nested_shell() {
     local entry="${1:-shell.qml}" ready="${2:-}" timeout="${3:-20}"
     NESTED_SHELL_LOG="$NESTED_WORK/shell.log"
     NESTED_ENTRY="$entry"
+
+    # Resolved here rather than at load time so `--help` still answers on a
+    # machine whose runtime is not swapped yet. Everything downstream that
+    # needs the binary — nested_ipc, the closing note — runs after this.
+    NESTED_QS=$(qs_runtime_bin) || return 1
 
     # NESTED_ENV is how a harness keeps the shell under test off the user's own
     # files: `NESTED_ENV=(XDG_CONFIG_HOME=… XDG_STATE_HOME=…)` before this call

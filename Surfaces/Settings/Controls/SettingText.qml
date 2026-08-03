@@ -37,7 +37,40 @@ Rectangle {
 
     readonly property bool valid: root.validate(field.text)
 
-    implicitWidth: 132
+    /// How wide the row's slot will let this be, read the same way the wrapping
+    /// chip rows read it.
+    property real availableWidth: root.parent?.availableWidth ?? 0
+
+    /// Wide enough for the value it holds, between a floor and the row's
+    /// ceiling (#80).
+    ///
+    /// 132px flat was a floor pretending to be a size, and #55's System tab is
+    /// what made that visible: every session command and every dpms command is
+    /// longer than the box, so the tab that configures what ends your session
+    /// showed `tl dispatch exit` and no way to see the rest.
+    ///
+    /// Measured off the *configured* value and not the live text, for two
+    /// reasons: a box that grew per keystroke would reflow the row under the
+    /// cursor, and `TextInput.contentWidth` is a property of the laid-out field
+    /// — feeding it back into the field's own width is the loop `SettingChoice`
+    /// avoids by measuring its chips' implicit sizes rather than its own.
+    ///
+    /// The clamp is `Math.min` against the ceiling and not an assignment of it,
+    /// which is the other half: the slot's `implicitWidth` is its child's, so a
+    /// control that *takes* the ceiling widens the row that computed it and the
+    /// page grows sideways off the window. Asking for less than is available is
+    /// always safe; asking for exactly what is available is not.
+    implicitWidth: {
+        const wanted = Math.max(132, valueMetrics.width + Theme.space3 * 2 + 2);
+        return root.availableWidth > 0 ? Math.min(wanted, root.availableWidth) : wanted;
+    }
+
+    TextMetrics {
+        id: valueMetrics
+
+        font: field.font
+        text: root.configured === "" ? root.placeholder : root.configured
+    }
     implicitHeight: 28
     radius: Theme.radiusSm
     color: Theme.bgSunken

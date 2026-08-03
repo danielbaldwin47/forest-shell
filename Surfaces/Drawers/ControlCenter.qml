@@ -89,7 +89,15 @@ FocusScope {
     /// is the state Surfaces/Drawers/DrawerPolicy.qml makes unrepresentable.
     signal closeRequested(string reason)
 
-    readonly property ControlCenterPolicy policy: ControlCenterPolicy {}
+    readonly property ControlCenterPolicy policy: ControlCenterPolicy {
+        // The grid is a setting (#55). Bound and not read once: an edit on the
+        // Control Center tab has to move the panel behind it, and
+        // Core/Config.qml replaces `values` wholesale on every write.
+        tileOrder: Config.values.controlCenter.tiles
+        sliderOrder: Config.values.controlCenter.sliders
+        columns: Config.values.controlCenter.columns
+        step: Config.values.controlCenter.step
+    }
     readonly property DrillInPolicy drillPolicy: DrillInPolicy {}
 
     /// Which detail view is open, or `""`. Read from the singleton rather than

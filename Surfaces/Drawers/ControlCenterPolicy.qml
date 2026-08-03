@@ -22,6 +22,11 @@
 // position is muscle memory — the tile you reach for without looking must not
 // move because a VPN profile got configured. What a missing tile does is close
 // the gap behind it, so the grid is always full rows and never a hole.
+//
+// Since #55 the order is the *user's* fixed order: the grid, the sliders, the
+// column count and the scroll step are `controlCenter.*` keys the Control
+// Center tab edits, and the panel binds them onto the four properties below.
+// The rule is unchanged — what changed is who wrote the list.
 import QtQuick
 
 QtObject {
@@ -33,8 +38,21 @@ QtObject {
     /// the two halves disagreeing in the one way the user can see.
     readonly property DrillInPolicy drill: DrillInPolicy {}
 
+    // --- what the file says, and what this file says when it does not --------
+    //
+    // These four are settings (#55): the panel binds them to
+    // `Config.values.controlCenter`, and what is written here is the factory
+    // grid the schema also states as its default. Two declarations, because
+    // Core/ cannot import Surfaces/ — tests/tst_schemas.qml holds them
+    // together, which is the only place both files are reachable at once.
+    //
+    // Settable rather than `readonly`, and that is the whole of the change:
+    // everything below still reads them off `policy`, so a configured grid and
+    // the factory one go through the same code.
+
     /// The grid, in the order it is drawn. Ten on a full laptop; fewer on a
-    /// machine missing the hardware.
+    /// machine missing the hardware, and fewer again on a machine whose user
+    /// took some out.
     ///
     /// The tenth is #52's recorder, and it makes the grid 3×3 plus one rather
     /// than the 3×3 #44 asked for. Deliberate: `rows()` already leaves a short
@@ -42,21 +60,26 @@ QtObject {
     /// control center", and a machine without either encoder installed drops it
     /// and is back to nine. Last in the order because it is the one tile whose
     /// press produces a file.
-    readonly property var tileOrder: [
+    ///
+    /// An id this shell has never heard of is dropped by `tile()` rather than
+    /// refused, which is why the schema coerces this to plain strings: a config
+    /// from a newer shell keeps its tile instead of having it stripped on the
+    /// first save.
+    property var tileOrder: [
         "wifi", "bluetooth", "dnd", "nightlight", "keepawake",
         "mode", "powerprofile", "vpn", "wallpaper", "recording"
     ]
 
-    readonly property int columns: 3
+    property int columns: 3
 
     /// The sliders, in the order they are drawn, above the grid.
-    readonly property var sliderOrder: ["volume", "mic", "brightness"]
+    property var sliderOrder: ["volume", "mic", "brightness"]
 
     /// One notch of a wheel or an arrow key, in percent. The same step
     /// Services/Media/AudioPolicy.qml and Services/Hardware/BacklightPolicy.qml
     /// use for the bar's scroll, so a notch means one thing in the shell rather
     /// than two.
-    readonly property int step: 5
+    property int step: 5
 
     // --- the grid ------------------------------------------------------------
 
@@ -68,7 +91,7 @@ QtObject {
     /// visible consequence.
     function tiles(facts: var): var {
         const out = [];
-        for (const id of policy.tileOrder) {
+        for (const id of (policy.tileOrder ?? [])) {
             const tile = policy.tile(id, facts ?? ({}));
             if (tile !== null)
                 out.push(tile);
@@ -265,7 +288,7 @@ QtObject {
     /// in both cases a slider that moves nothing is worse than an absent one.
     function sliders(facts: var): var {
         const out = [];
-        for (const id of policy.sliderOrder) {
+        for (const id of (policy.sliderOrder ?? [])) {
             const slider = policy.slider(id, facts ?? ({}));
             if (slider !== null)
                 out.push(slider);

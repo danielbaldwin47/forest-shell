@@ -72,6 +72,15 @@ ShellRoot {
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
 
+    /// How far down the settings page to scroll before grabbing, in px. The
+    /// System tab (#55) is several windows tall and its lower half — the idle
+    /// ladder and the session commands — is exactly the #80 class this seam
+    /// exists to catch, so "the top of the page" is not the whole surface.
+    /// Clamped to what there is to scroll, so a number past the bottom lands on
+    /// the bottom rather than on blank.
+    readonly property int settingsScroll:
+        Number(Quickshell.env("CAPTURE_SETTINGS_SCROLL") ?? "0") || 0
+
     /// Which control-centre detail view to open before the grab (#45), or "" for
     /// the grid. `wifi`, `bluetooth`, `audio`, `vpn`, `wallpaper`.
     readonly property string drillPanel: Quickshell.env("CAPTURE_DRILL") ?? ""
@@ -1039,6 +1048,17 @@ ShellRoot {
             page.parent = settingsBacking;
             page.anchors.fill = settingsBacking;
 
+            // Applied just before the grab and not here: the page is a
+            // Flickable whose `contentHeight` is the sum of a column that has
+            // not been laid out yet at `onLoaded`, so a clamp computed now
+            // would clamp against zero.
+            root.describeScene = function () {
+                if (root.settingsScroll > 0)
+                    settingsLoader.item.scrollPageTo(root.settingsScroll);
+                const at = settingsLoader.item.pageScroll;
+                root.sceneDescription = "tab=" + settingsLoader.item.currentTab
+                                      + (at > 0 ? "+scroll=" + Math.round(at) : "");
+            };
             root.sceneDescription = "tab=" + settingsLoader.item.currentTab;
         }
     }

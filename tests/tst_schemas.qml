@@ -3,6 +3,7 @@
 import QtQuick
 import QtTest
 import "../Core"
+import "../Surfaces/Drawers"
 
 TestCase {
     name: "Schemas"
@@ -11,6 +12,11 @@ TestCase {
     StateSchema { id: state }
     SpecStore { id: store }
     Migrations { id: migrations }
+
+    // Only for the one check that the control centre's factory grid and the
+    // schema's default grid are the same list (#55). Both files are pure
+    // QtQuick, which is the whole reason that check can live at this seam.
+    ControlCenterPolicy { id: control }
 
     // --- settings.json -------------------------------------------------------
 
@@ -207,9 +213,50 @@ TestCase {
         // three channels the control centre puts sliders on — Core/
         // SettingsSchema.qml argues it where the keys are.
         compare(store.leafPathsUnder(settings.spec, "controlCenter").sort(),
-                ["controlCenter.osd.margin",
+                ["controlCenter.columns",
+                 "controlCenter.osd.margin",
                  "controlCenter.osd.position",
-                 "controlCenter.osd.timeout"]);
+                 "controlCenter.osd.timeout",
+                 "controlCenter.sliders",
+                 "controlCenter.step",
+                 "controlCenter.tiles"]);
+    }
+
+    function test_the_grid_and_the_sliders_are_two_lists_of_names() {
+        // #55's Control Center tab. The same shape as `dashboard.cards` and the
+        // bar's module lists, and for the same reason: presence *is*
+        // enablement, so a tile that is off is a tile that is not in the list
+        // and there is no second flag to disagree with it.
+        //
+        // Names rather than a closed enum, so a file written by a newer shell
+        // keeps a tile this one cannot draw —
+        // Surfaces/Drawers/ControlCenterPolicy.qml drops an unknown id when it
+        // builds the grid, which is the same rule the dashboard registry
+        // follows.
+        const values = store.defaults(settings.spec);
+        compare(values.controlCenter.tiles,
+                ["wifi", "bluetooth", "dnd", "nightlight", "keepawake",
+                 "mode", "powerprofile", "vpn", "wallpaper", "recording"]);
+        compare(values.controlCenter.sliders, ["volume", "mic", "brightness"]);
+        compare(values.controlCenter.columns, 3);
+        compare(values.controlCenter.step, 5);
+    }
+
+    function test_the_grid_defaults_are_the_grid_the_panel_draws() {
+        // The schema cannot import the policy — Core/ does not reach up into
+        // Surfaces/ — so the order and the two numbers are written twice, and
+        // this is what holds them together. A disagreement would otherwise only
+        // be visible as a panel whose factory settings differ from the file's,
+        // which is the kind of thing nobody goes looking for.
+        //
+        // Same arrangement as the night-light temperature range, which
+        // Services/Hardware/NightLightPolicy.qml and the schema both state.
+        compare(settings.controlCenterTiles, control.tileOrder);
+        compare(settings.controlCenterSliders, control.sliderOrder);
+        compare(store.defaults(settings.spec).controlCenter.tiles, control.tileOrder);
+        compare(store.defaults(settings.spec).controlCenter.sliders, control.sliderOrder);
+        compare(store.defaults(settings.spec).controlCenter.columns, control.columns);
+        compare(store.defaults(settings.spec).controlCenter.step, control.step);
     }
 
     function test_the_night_light_keys_live_under_weather_time() {
@@ -307,12 +354,14 @@ TestCase {
         compare(idle.lock.ac, 10);
     }
 
-    // --- the keys the settings window is built on (#54) ----------------------
+    // --- the keys the settings window is built on (#54, #55) -----------------
 
-    function test_the_four_built_tabs_have_keys_to_edit() {
-        // Appearance, Bar, Launcher and Notifications are implemented in #54, so
-        // an empty section there is a tab with nothing in it.
-        for (const section of ["appearance", "bar", "launcher", "notifications"])
+    function test_every_tab_has_keys_to_edit() {
+        // #54 built four tabs and #55 the other six, so every section now has a
+        // tab in front of it and an empty one is a tab with nothing in it.
+        // About is the tenth tab and has no section, which
+        // tests/tst_settingstabs.qml pins from the other side.
+        for (const section in settings.spec)
             verify(store.leafPathsUnder(settings.spec, section).length > 0,
                    section + " has no keys");
     }

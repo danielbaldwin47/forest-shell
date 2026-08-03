@@ -20,6 +20,7 @@
 #   tools/capture-harness.sh out.png --surface bar-full --session   # with modules
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
+#   tools/capture-harness.sh out.png --surface settings --tab system --scroll 900
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
 #   tools/capture-harness.sh out.png --surface center --session   # the notification centre
@@ -57,7 +58,9 @@
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module
 # clusters, `lock` is the lock surface (`--lock-state summoned` reveals the
-# field), `settings` is the settings window at the tab `--tab` names, and
+# field), `settings` is the settings window at the tab `--tab` names — scrolled
+# down `--scroll <px>` first, because the System tab is several windows tall and
+# a capture of its first screen is not a capture of the tab — and
 # `drawer` is #38's fog scrim with the session menu in it, laid out below the
 # bar the way the compositor lays it out — the picture that answers "scrim at
 # 0.10, bar above the fog". Its icons need `--session`. `osd` is #46's pill,
@@ -109,6 +112,7 @@ SURFACE="bar"
 SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
+SETTINGS_SCROLL="0"
 LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
 DRILL=""
@@ -132,6 +136,7 @@ while (( $# )); do
         --session)     SESSION=1; shift ;;
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
+        --scroll)      SETTINGS_SCROLL="$2"; shift 2 ;;
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --drill)       DRILL="$2"; shift 2 ;;
@@ -289,6 +294,7 @@ CAPTURE_ENV=(
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
+    CAPTURE_SETTINGS_SCROLL="$SETTINGS_SCROLL"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
     CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
     CAPTURE_OSD="$OSD_STATE" CAPTURE_PICK="$PICK"

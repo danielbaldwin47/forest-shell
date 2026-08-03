@@ -447,4 +447,68 @@ TestCase {
     function test_a_slider_logs_where_it_landed() {
         compare(policy.moved("brightness", 60), "brightness 60%");
     }
+
+    // --- what the Control Center tab edits (#55) -----------------------------
+    //
+    // The grid, the sliders, the column count and the step are settings now,
+    // and this policy is where a configured list becomes a drawn one. The
+    // panel binds these four properties to `Config.values.controlCenter`; the
+    // defaults above are what the file says when nobody has touched it, which
+    // tests/tst_schemas.qml pins against the schema.
+
+    ControlCenterPolicy {
+        id: configured
+        tileOrder: ["dnd", "nonesuch", "wifi"]
+        sliderOrder: ["brightness", "volume"]
+        columns: 2
+        step: 10
+    }
+
+    function test_a_configured_grid_is_drawn_in_the_order_it_names() {
+        // Grid position is muscle memory, so the order is fixed — but it is the
+        // *user's* fixed order now rather than this file's, which is the whole
+        // of what the tab edits.
+        const tiles = configured.tiles(fullFacts()).map(tile => tile.id);
+        compare(tiles, ["dnd", "wifi"]);
+    }
+
+    function test_a_tile_this_shell_cannot_draw_is_dropped_rather_than_refused() {
+        // Same rule Surfaces/Drawers/DashboardRegistry.qml follows, and the
+        // reason the schema coerces this list to plain strings rather than a
+        // closed enum: a config written by a newer shell keeps its tile, and
+        // this one leaves a gap-free grid instead of a hole or a crash.
+        verify(configured.tile("nonesuch", fullFacts()) === null);
+        compare(configured.tiles(fullFacts()).length, 2);
+    }
+
+    function test_a_configured_slider_list_is_honoured_the_same_way() {
+        const sliders = configured.sliders(fullFacts()).map(slider => slider.id);
+        compare(sliders, ["brightness", "volume"]);
+    }
+
+    function test_the_column_count_is_what_chunks_the_rows() {
+        // Two columns is three rows of the six tiles a two-column grid gets,
+        // and the short last row is still short rather than padded.
+        const rows = configured.rows(["a", "b", "c"]);
+        compare(rows.length, 2);
+        compare(rows[0], ["a", "b"]);
+        compare(rows[1], ["c"]);
+    }
+
+    function test_a_configured_step_is_the_notch_the_arrows_move() {
+        // The nudge still lands *on* the step grid rather than adding to
+        // wherever a drag left the value — at 10, 43 up is 50 and not 53.
+        compare(configured.nudge(43, 1), 50);
+        compare(configured.nudge(43, -1), 40);
+    }
+
+    function test_an_empty_grid_in_the_file_is_an_empty_grid() {
+        // Not a fallback to the default list: emptying the grid is a thing the
+        // tab lets you do, and quietly restoring ten tiles would be the panel
+        // ignoring the file.
+        empty.tileOrder = [];
+        compare(empty.tiles(fullFacts()).length, 0);
+    }
+
+    ControlCenterPolicy { id: empty }
 }

@@ -119,9 +119,9 @@ TabPage {
               + "quiet icon group."
     }
 
-    BarModuleCluster { cluster: "left"; label: "Left"; pool: page.pool }
-    BarModuleCluster { cluster: "center"; label: "Centre"; pool: page.pool }
-    BarModuleCluster { cluster: "right"; label: "Right"; pool: page.pool }
+    OrderedList { path: "bar.modules.left"; label: "Left"; pool: page.pool }
+    OrderedList { path: "bar.modules.center"; label: "Centre"; pool: page.pool }
+    OrderedList { path: "bar.modules.right"; label: "Right"; pool: page.pool }
 
     // --- what the schema says ------------------------------------------------
 

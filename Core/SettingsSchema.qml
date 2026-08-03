@@ -29,13 +29,16 @@
 // configures — guessing them here would commit names those tickets would then
 // have to migrate away from. So the sections whose control has not been
 // designed yet stay empty, and a section fills in when either the feature or
-// **its settings tab** lands. The settings window (#54) is the second of those:
-// Appearance, Bar, Launcher and Notifications are built there, so their keys are
-// here, taken from the resolutions that already fixed them — #9 for the launcher
-// providers and the Claude surface, #10 for the bar geometry, surface and
-// ridgeline (which resolved *"all of it is settings, not constants"*), #41 for
-// the Claude flags. The bar itself (#35) reads these; it does not get to rename
-// them.
+// **its settings tab** lands. The settings window is the second of those: #54
+// built Appearance, Bar, Launcher and Notifications, and #55 the other six, so
+// every section now has keys and a tab in front of them. The names are taken
+// from the resolutions that fixed them — #9 for the launcher providers and the
+// Claude surface, #10 for the bar geometry, surface and ridgeline (which
+// resolved *"all of it is settings, not constants"*), #41 for the Claude flags.
+// The bar itself (#35) reads these; it does not get to rename them.
+//
+// The one key still owed is the clock format: #93 owns it, the interim rule is
+// Core/ClockFormat.qml, and `weatherTime` says so where the key would go.
 //
 // Pure data, no Quickshell imports, so tests/ can reach it.
 //
@@ -141,6 +144,21 @@ QtObject {
         "WebSearch", "WebFetch", "Read", "Grep", "Glob"
     ]
 
+    /// The control centre's grid, in the order it is drawn (#44, #52), and the
+    /// sliders above it. What a settings GUI offers to put back, and what
+    /// Surfaces/Drawers/ControlCenterPolicy.qml resolves the configured list
+    /// against — the same pool-and-list arrangement `barModules` and
+    /// `dashboardCards` have, for the same reason: presence is enablement.
+    ///
+    /// Written here *and* in the policy, which cannot be imported from Core/.
+    /// tests/tst_schemas.qml holds the two together.
+    readonly property var controlCenterTiles: [
+        "wifi", "bluetooth", "dnd", "nightlight", "keepawake",
+        "mode", "powerprofile", "vpn", "wallpaper", "recording"
+    ]
+
+    readonly property var controlCenterSliders: ["volume", "mic", "brightness"]
+
     /// Where the OSD pill sits (#46). One edge with the pill centred against
     /// it, or the middle of the screen — layer-shell centres a surface on
     /// whichever axis it is not anchored to, so this list is the anchor table.
@@ -208,7 +226,52 @@ QtObject {
         },
 
         controlCenter: {
-            // Sliders, toggle grid and drill-ins land with #44 and #45.
+            // The toggle grid (#44, #52), as a list of tile names in the order
+            // they are drawn.
+            //
+            // Presence *is* enablement, exactly as it is for the bar's modules
+            // and the dashboard's cards: a tile that is off is a tile that is
+            // not in the list, and there is no second `enabled` flag to
+            // disagree with it. Removing one closes the gap behind it rather
+            // than leaving a hole — Surfaces/Drawers/ControlCenterPolicy.qml
+            // states that rule and does the chunking.
+            //
+            // Names and not a closed enum, for the reason `dashboard.cards`
+            // gives: a file written by a newer shell keeps a tile this one
+            // cannot draw, and the policy drops the unknown id when it builds
+            // the grid rather than the coercer stripping it on the first save.
+            //
+            // Order matters and is the user's: grid position is muscle memory,
+            // so the tile you reach for without looking must not move because a
+            // VPN profile got configured. What this key adds is that it is now
+            // *your* fixed order.
+            tiles: { def: schema.controlCenterTiles.slice(),
+                     coerce: c.arrayOf(c.string, "controlCenter.tiles"),
+                     label: "The tiles the grid carries, in order" },
+
+            // How wide the grid is. Three is #44's, and the ceiling is five
+            // because the panel is 380px and a sixth column is a tile with no
+            // room for the label under its glyph. The floor is two: one column
+            // is a list, and the panel already has one of those.
+            columns: { def: 3, coerce: c.integer(2, 5),
+                       label: "Tiles per row" },
+
+            // The sliders above the grid, same shape and same rule. A machine
+            // with no backlight has no brightness slider whatever this says —
+            // absent hardware has no control, and a list is a preference rather
+            // than a claim about what exists.
+            sliders: { def: schema.controlCenterSliders.slice(),
+                       coerce: c.arrayOf(c.string, "controlCenter.sliders"),
+                       label: "The sliders above the grid, in order" },
+
+            // One notch of a wheel or an arrow key, in percent. The same step
+            // the bar's scroll uses, which is why it is one key and not one per
+            // channel: a notch should mean one thing in the shell rather than
+            // three. 25 is the ceiling because a coarser step cannot reach most
+            // of the range at all, and 1 is a scroll that takes a hundred
+            // notches to cross the track.
+            step: { def: 5, coerce: c.integer(1, 25),
+                    label: "Percent per scroll notch" },
 
             // The OSD (#46) — the pill that pops on a volume, mic or
             // brightness change.
@@ -222,9 +285,9 @@ QtObject {
             // under the section that owns those controls, and reads as "what
             // the control centre does when it is not open".
             //
-            // JSON-only for now, which #9 permits in as many words ("long-tail
-            // options may stay JSON-only until they earn a control"): the
-            // Control Center tab is #55's, and these three rows land with it.
+            // Three rows on the Control Center tab (#55), under a heading of
+            // their own: the OSD is what the control centre does when it is not
+            // open, so it reads as part of that tab rather than as a stray.
             osd: {
                 // How long it stays up, in ms. Bounded either side rather than
                 // at zero: a 0 here would be a surface that maps and unmaps in
@@ -461,8 +524,7 @@ QtObject {
             // system-level action the shell performs rather than a surface it
             // draws.
             //
-            // JSON-only for now, which #9 permits for the long tail: the four
-            // keys below have no control on the System tab yet.
+            // All four have a row on the System tab (#55).
             screenshot: {
 
                 // Where shots land. Empty means `~/Pictures/Screenshots`, worked
@@ -504,8 +566,8 @@ QtObject {
             // section to put it in. It shares the picker with the screenshot
             // too: a recorded region is the same drag.
             //
-            // JSON-only for now, like the screenshot keys next door, which #9
-            // permits for the long tail.
+            // All six have a row on the System tab (#55), beside the
+            // screenshot's.
             recording: {
 
                 // Where recordings land. Empty means `~/Videos/Recordings`,
@@ -625,8 +687,10 @@ QtObject {
             // Nor is the audio gate: it is on suspend only, and which stage a
             // rule applies to is not a setting.
             //
-            // JSON-only for now, which #9 permits for the long tail: the System
-            // tab is #55's, and these rows land with it.
+            // Every rung is editable on the System tab (#55), and a change
+            // applies without a restart: Services/System/Idle.qml binds this
+            // sub-tree, so writing a minute here rearms the monitor that reads
+            // it (tests/tst_idlepolicy.qml owns the conversion).
             idle: {
                 // Screen down to `level`, restored on the first activity. The
                 // backlight facade does it (#36), so this is one number rather

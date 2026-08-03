@@ -87,7 +87,7 @@ Variants {
         /// with four pixels of desktop down its side, and some people want the
         /// four pixels.
         function snapped(drawn: var): var {
-            if (Config.values.system?.screenshot?.snapToWindows === false)
+            if (Screenshot.settings.snapToWindows === false)
                 return drawn;
             return Screenshot.policy.snap(drawn, Screenshot.windows, Screenshot.bounds);
         }
@@ -109,7 +109,6 @@ Variants {
             freezeSource: Screenshot.freeze
             windows: Screenshot.windows
             selection: window.selection
-            dragging: window.dragging
             hovered: window.hovered
             outputScale: Screenshot.scale
         }
@@ -246,6 +245,6 @@ Variants {
         }
 
         Component.onCompleted: if (window.mine)
-            Logger.log("screenshot", "picker window built on " + window.modelData.name)
+            Logger.log("screenshot", Screenshot.policy.windowBuilt(window.modelData.name))
     }
 }

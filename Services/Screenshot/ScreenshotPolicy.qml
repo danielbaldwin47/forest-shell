@@ -471,4 +471,42 @@ QtObject {
     function editorOff(): string {
         return "no editor configured — skipping the edit handoff";
     }
+
+    /// The clipboard turned off in settings, which is not the same statement as
+    /// a clipboard that failed.
+    function clipboardOff(): string {
+        return "clipboard copy is off — leaving the selection alone";
+    }
+
+    /// `wl-copy` ran and came back non-zero. Logged from its `onExited` and not
+    /// from the moment it was spawned: a copy reported at spawn time is a copy
+    /// reported before it can have failed.
+    function copyFailed(code: int): string {
+        return "wl-copy failed (exit " + code + ") — the image is not on the clipboard";
+    }
+
+    function copyProbed(): string {
+        return "wl-copy is not installed — screenshots will put their path on "
+            + "the clipboard rather than the image";
+    }
+
+    /// The fourth cause of "the picker did not open", and the one the header
+    /// claims to enumerate — so it belongs here with the other three rather
+    /// than as a string in the service.
+    function noMonitor(): string {
+        return "no focused monitor — nothing to photograph";
+    }
+
+    function directoryFailed(code: int): string {
+        return "could not make the screenshot directory (exit " + code
+            + ") — not opening the picker";
+    }
+
+    function armed(): string {
+        return "screenshot picker armed (ipc target: screenshot)";
+    }
+
+    function windowBuilt(screen: string): string {
+        return "picker window built on " + screen;
+    }
 }

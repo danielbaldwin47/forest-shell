@@ -32,10 +32,9 @@ Item {
     /// the opposite of the help.
     property var windows: []
 
-    /// The committed selection, and whether a drag is in flight. A zero-size
-    /// selection means "nothing chosen yet", which is the veil-everything case.
+    /// The committed selection. A zero-size one means "nothing chosen yet",
+    /// which is the veil-everything case.
     property rect selection: Qt.rect(0, 0, 0, 0)
-    property bool dragging: false
 
     /// The window under the pointer, or null. This is what a click would take,
     /// and drawing it is the whole of "window snapping highlights window rects".

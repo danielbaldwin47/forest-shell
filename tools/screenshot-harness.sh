@@ -222,6 +222,33 @@ fi
 # --- 6. the picker is down again once the shot is taken ----------------------
 expect_reply "$(ipc isOpen)" 'false' 'the picker comes down once the shot is written'
 
+# --- 6b. a cancel during the freeze stays cancelled --------------------------
+# The bug this exists for: `cancel()` used to stop only the settle timer, so
+# grim kept running and its `onExited` set the picker back to open and logged
+# "picker opened" — an Escape that raced the freeze reopened what it dismissed.
+mark=$(log_lines)
+ipc open > /dev/null
+ipc cancel > /dev/null
+expect_since "$mark" 'screenshot: picker cancelled \(ipc\)' \
+    'a cancel issued around the freeze is taken'
+
+# Ordering, not presence. The stand-in freeze is a `cp` and each `ipc` call is
+# its own process spawn, so the open usually *completes* before the cancel
+# arrives — "picker opened" after the mark is therefore expected. The invariant
+# that actually distinguishes the bug is that nothing reopens the picker
+# *after* the cancel line.
+sleep 1
+if since "$mark" | awk '
+        /screenshot: picker cancelled \(ipc\)/ { seen = 1; next }
+        seen && /screenshot: picker opened on / { found = 1 }
+        END { exit !found }
+    '; then
+    nested_fail 'the picker reopened after being cancelled — a freeze that outlived its cancel'
+else
+    nested_pass 'nothing reopens the picker after a cancel, however the freeze finishes'
+fi
+expect_reply "$(ipc isOpen)" 'false' 'the picker stays down after a cancel that raced the freeze'
+
 # --- 7. a region under the floor is refused, and says so ---------------------
 # Without this a stray click writes a 3x2 PNG and the window snapping looks
 # broken (ScreenshotPolicy.minSide).
@@ -236,19 +263,30 @@ refute_since "$mark" 'screenshot: saved ' \
 # The branch that actually runs on this machine, and the one most likely to be
 # silent: a person who pressed the key and then pressed paste has to be told
 # they have a path and not a picture.
-if grep -qa 'screenshot: wl-copy is not installed' "$NESTED_SHELL_LOG"; then
-    nested_pass 'an absent wl-copy is reported, and the path goes on the clipboard instead'
-elif grep -qa 'screenshot: copied the image to the clipboard' "$NESTED_SHELL_LOG"; then
-    nested_pass 'wl-copy is installed here and the image went to the clipboard'
+# Which branch is *expected* is decided by PATH here rather than by accepting
+# whichever one the log happens to show: a check that passes on either branch
+# asserts "the log said something about the clipboard", not the criterion. On a
+# machine with neither tool this is the degraded path, and the degraded path is
+# the one that has to be loud.
+if command -v wl-copy > /dev/null; then
+    expect_since 0 'screenshot: copied the image to the clipboard' \
+        'wl-copy is installed, so the image itself went on the clipboard'
+    refute_since 0 'screenshot: wl-copy is not installed' \
+        'the shell did not claim wl-copy was missing when it is on PATH'
 else
-    nested_fail 'nothing in the log says what happened to the clipboard'
+    expect_since 0 'screenshot: wl-copy is not installed — put the path on the clipboard' \
+        'wl-copy is absent, so the path went on the clipboard and the log says which'
+    refute_since 0 'screenshot: copied the image to the clipboard' \
+        'the shell did not claim an image copy it could not have made'
 fi
 
-if grep -qaE 'screenshot: (swappy is not installed|handed .* to swappy|no editor configured)' \
-        "$NESTED_SHELL_LOG"; then
-    nested_pass 'the edit handoff says whether it happened, and why not when it did not'
+EDITOR_TOOL=swappy
+if command -v "$EDITOR_TOOL" > /dev/null; then
+    expect_since 0 "screenshot: handed .* to $EDITOR_TOOL" \
+        "$EDITOR_TOOL is installed, so the shot was handed to it"
 else
-    nested_fail 'nothing in the log says what happened to the edit handoff'
+    expect_since 0 "screenshot: $EDITOR_TOOL is not installed — skipping the edit handoff" \
+        "$EDITOR_TOOL is absent, so the handoff was skipped and the log names the tool"
 fi
 
 # --- 9. the target advertises nothing the CLI eats ---------------------------

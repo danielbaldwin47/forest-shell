@@ -37,13 +37,18 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Hyprland
 import qs.Core
+import qs.Services.Compositor
 
 Singleton {
     id: root
 
     readonly property ScreenshotPolicy policy: ScreenshotPolicy {}
+
+    /// This surface's settings, walked once. `Config.values.system.screenshot`
+    /// in six places was six chances to mistype the path and get `undefined`
+    /// rather than an error.
+    readonly property var settings: Config.values.system?.screenshot ?? ({})
 
     // --- what the surface binds to -------------------------------------------
 
@@ -79,14 +84,6 @@ Singleton {
     /// committed selection; the surface answers with `saved()`.
     signal saveRequested(rect region, string file, var raster)
 
-    // --- the compositor's answer ---------------------------------------------
-
-    // Bound, never polled: Hyprland's models populate asynchronously and an
-    // imperative read at `Component.onCompleted` returns an empty list with the
-    // windows all there (the DesktopEntries trap, same shape).
-    readonly property var toplevels: Hyprland.toplevels.values
-    readonly property var focusedMonitor: Hyprland.focusedMonitor
-
     // --- opening -------------------------------------------------------------
 
     /// Put the picker up: freeze the screen, gather the windows, show it.
@@ -111,27 +108,25 @@ Singleton {
     /// Zero for the keybind and IPC paths, which have nothing to wait for and
     /// should not pay for someone else's fade.
     function openAfter(reason: string, settleMs: int): bool {
-        if (root.active || settle.running || seed.running || freezer.running) {
+        if (root.busy) {
             Logger.log("screenshot", root.policy.alreadyOpen());
             return false;
         }
 
-        const monitor = root.focusedMonitor;
+        const monitor = Compositor.monitorSnapshot;
         if (!monitor) {
-            Logger.warn("screenshot", "no focused monitor — nothing to photograph");
+            Logger.warn("screenshot", root.policy.noMonitor());
             return false;
         }
 
-        const ipc = monitor.lastIpcObject ?? {};
+        // Only the screen name is read now — it is what grim is pointed at.
+        // The rectangles are gathered on the far side of the freeze, because
+        // the refresh below is asynchronous and reading them here would answer
+        // with the snapshots taken before it (Compositor.refreshWindowGeometry).
         root.screen = String(monitor.name ?? "");
-        root.bounds = root.policy.bounds(ipc);
-        root.scale = Number(ipc.scale) > 0 ? Number(ipc.scale) : 1;
-        root.windows = root.policy.windows(
-            root.toplevels.map(t => t.lastIpcObject),
-            (ipc.activeWorkspace ?? {}).id,
-            ipc.id);
+        Compositor.refreshWindowGeometry();
 
-        root.openReason = reason;
+        root.cancelled = false;
         root.freezeEpoch++;
         root.freeze = "";
 
@@ -153,13 +148,36 @@ Singleton {
     /// Put it away. Every exit but a completed save comes through here, and the
     /// reason is in the log line because "the picker closed" has four causes.
     function cancel(reason: string): void {
-        if (!root.active && !settle.running && !seed.running && !freezer.running)
+        if (!root.busy)
             return;
+
+        // Every one of these, not just the timer. A cancel that stopped only
+        // `settle` left grim running, and `freezer.onExited` then set `active`
+        // back to true and logged "picker opened" — an Escape that raced the
+        // freeze reopened the picker it had just dismissed.
         settle.stop();
+        watchdog.stop();
+        if (freezer.running)
+            freezer.signal(15);
+        seed.running = false;
+
         root.active = false;
         root.pendingRegion = null;
+        root.cancelled = true;
         Logger.log("screenshot", root.policy.cancelled(reason));
     }
+
+    /// Whether anything is in flight. One predicate rather than the same four
+    /// disjuncts written twice, which is how `cancel()` came to test a
+    /// different set from `open()`.
+    readonly property bool busy:
+        root.active || settle.running || seed.running || freezer.running
+
+    /// Set by `cancel()` and cleared by the next `open()`, so a process that
+    /// exits after being told to stop does not resurrect the picker. A killed
+    /// `Process` still delivers `onExited`, and without this the handler cannot
+    /// tell "it finished" from "it was cancelled".
+    property bool cancelled: false
 
     // --- taking it -----------------------------------------------------------
 
@@ -173,7 +191,7 @@ Singleton {
             return false;
         }
 
-        const dir = root.policy.directory(Config.values.system?.screenshot?.directory, Paths.home);
+        const dir = root.policy.directory(root.settings.directory, Paths.home);
         const file = root.policy.path(dir, root.policy.filename(new Date()));
         const raster = root.policy.nativeSize(wanted, root.scale);
 
@@ -209,8 +227,8 @@ Singleton {
     /// goes on the clipboard instead: not what was asked for, but pasteable
     /// into a terminal, and the log says which one happened.
     function toClipboard(file: string): void {
-        if (!Config.values.system?.screenshot?.copyToClipboard) {
-            Logger.log("screenshot", "clipboard copy is off — leaving the selection alone");
+        if (!root.settings.copyToClipboard) {
+            Logger.log("screenshot", root.policy.clipboardOff());
             return;
         }
 
@@ -220,16 +238,26 @@ Singleton {
             return;
         }
 
-        copier.command = root.policy.copyArgv(file);
-        copier.running = true;
-        Logger.log("screenshot", root.policy.copied(file));
+        // A fresh Process per copy, never a reassigned `command`: `wl-copy`
+        // daemonises to keep serving the selection, so the previous one may
+        // still be alive and reassigning `command` on a running Process kills
+        // the run in flight (#78) — which would drop the selection the *last*
+        // screenshot put there. Logged from its exit rather than from here,
+        // because a copy reported at spawn time is a copy reported before it
+        // can have failed.
+        const runner = copyRunner.createObject(root, {
+            command: root.policy.copyArgv(file),
+            file: file
+        });
+        if (runner)
+            runner.running = true;
     }
 
     /// The shot to an editor, when one is configured and installed. An absent
     /// editor is a normal outcome — the ticket says "when present; silently
     /// absent otherwise" — so it is a `log` and not a `warn`.
     function toEditor(file: string): void {
-        const tool = String(Config.values.system?.screenshot?.editor ?? "");
+        const tool = String(root.settings.editor ?? "");
         if (!root.policy.wants(tool)) {
             Logger.log("screenshot", root.policy.editorOff());
             return;
@@ -239,14 +267,21 @@ Singleton {
             return;
         }
 
-        editor.command = root.policy.editorArgv(tool, file);
-        editor.running = true;
-        Logger.log("screenshot", root.policy.handedOff(tool, file));
+        // A fresh Process for the same reason the copy gets one, and more
+        // sharply: an editor is long-lived, so a second screenshot taken while
+        // the first is still open would reassign `command` on a running
+        // Process and kill the editor the user was working in (#78).
+        const runner = editorRunner.createObject(root, {
+            command: root.policy.editorArgv(tool, file)
+        });
+        if (runner) {
+            runner.running = true;
+            Logger.log("screenshot", root.policy.handedOff(tool, file));
+        }
     }
 
     // --- internals -----------------------------------------------------------
 
-    property string openReason: ""
     property string lastFile: ""
     property var pendingRegion: null
 
@@ -288,13 +323,14 @@ Singleton {
         command: ["sh", "-c",
                   "mkdir -p \"$1\" \"$2\" && rm -f \"$2\"/screenshot-freeze-*.png",
                   "sh",
-                  root.policy.directory(Config.values.system?.screenshot?.directory, Paths.home),
+                  root.policy.directory(root.settings.directory, Paths.home),
                   Paths.stateDir]
 
         onExited: (code) => {
+            if (root.cancelled)
+                return;
             if (code !== 0) {
-                Logger.warn("screenshot", "could not make the screenshot directory (exit "
-                            + code + ") — not opening the picker");
+                Logger.warn("screenshot", root.policy.directoryFailed(code));
                 root.pendingRegion = null;
                 return;
             }
@@ -316,12 +352,24 @@ Singleton {
 
         onExited: (code) => {
             watchdog.stop();
+            if (root.cancelled)
+                return;
             if (code !== 0) {
                 Logger.warn("screenshot", root.policy.freezeFailed(code));
                 return;
             }
 
             Logger.log("screenshot", root.policy.froze(root.freezeFile));
+
+            // Now, not at open(): the geometry refresh asked for there has had
+            // the whole of grim's runtime to answer.
+            const monitor = Compositor.monitorSnapshot ?? {};
+            root.bounds = root.policy.bounds(monitor);
+            root.scale = Number(monitor.scale) > 0 ? Number(monitor.scale) : 1;
+            root.windows = root.policy.windows(Compositor.toplevelSnapshots,
+                                               (monitor.activeWorkspace ?? {}).id,
+                                               monitor.id);
+
             root.freeze = Paths.fileUrl(root.freezeFile);
             root.active = true;
             Logger.log("screenshot", root.policy.opened(root.screen, root.windows.length));
@@ -361,8 +409,29 @@ Singleton {
         }
     }
 
-    Process { id: copier }
-    Process { id: editor }
+    // One Process per run, created on demand and destroyed when it exits —
+    // see `toClipboard()` and `toEditor()` for why neither may be a single
+    // reused object.
+    Component {
+        id: copyRunner
+        Process {
+            required property string file
+            onExited: (code) => {
+                if (code === 0)
+                    Logger.log("screenshot", root.policy.copied(file));
+                else
+                    Logger.warn("screenshot", root.policy.copyFailed(code));
+                destroy();
+            }
+        }
+    }
+
+    Component {
+        id: editorRunner
+        Process {
+            onExited: destroy()
+        }
+    }
 
     // Two one-shot probes. Each gets its own Process because reassigning
     // `command` on a running one kills the run in flight (#78).
@@ -377,20 +446,43 @@ Singleton {
                 return;
             root.copyAvailable = copyProbe.started;
             if (!copyProbe.started)
-                Logger.log("screenshot", "wl-copy is not installed — screenshots will put "
-                           + "their path on the clipboard rather than the image");
+                Logger.log("screenshot", root.policy.copyProbed());
         }
     }
 
+    // `command` is *assigned*, never bound to the setting: settings hot-reload,
+    // and a binding that re-evaluated while the probe was running would kill it
+    // mid-flight (#78). `probeEditor()` re-runs it instead, so changing the
+    // editor does not leave `editorAvailable` answering for the old one.
     Process {
         id: editorProbe
         property bool started: false
-        command: [String(Config.values.system?.screenshot?.editor ?? "swappy"), "--version"]
         onStarted: editorProbe.started = true
         onRunningChanged: {
             if (editorProbe.running)
                 return;
             root.editorAvailable = editorProbe.started;
+        }
+    }
+
+    function probeEditor(): void {
+        if (editorProbe.running)
+            return;
+        const tool = String(root.settings.editor ?? "");
+        if (!root.policy.wants(tool)) {
+            root.editorAvailable = false;
+            return;
+        }
+        editorProbe.started = false;
+        editorProbe.command = [tool, "--version"];
+        editorProbe.running = true;
+    }
+
+    Connections {
+        target: Config
+        function onKeyChanged(path, value, previous) {
+            if (path === "system.screenshot.editor")
+                root.probeEditor();
         }
     }
 
@@ -436,7 +528,7 @@ Singleton {
     Component.onCompleted: {
         // Probed after Config has a value to read, not at declaration: the
         // editor's name is a setting.
-        editorProbe.running = true;
-        Logger.stage("screenshot picker armed (ipc target: screenshot)");
+        root.probeEditor();
+        Logger.stage(root.policy.armed());
     }
 }

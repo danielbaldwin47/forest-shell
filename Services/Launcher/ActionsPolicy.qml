@@ -116,8 +116,14 @@ QtObject {
                 // straight to the service the same way the lock row does.
                 kind: "screenshot",
                 arg: "",
-                target: "screenshot",
-                verb: "open"
+                // Empty, like `session.lock` above and unlike the surface rows:
+                // these two are the IPC door a *bus* surface advertises, and
+                // this action does not go through the bus. The picker does have
+                // an IPC target of its own — `qs ipc call screenshot open` —
+                // but it is not what this row dispatches through, and naming it
+                // here would be a claim the reserved-verb test cannot check.
+                target: "",
+                verb: ""
             },
             {
                 id: "session.menu",

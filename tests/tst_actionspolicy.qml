@@ -114,6 +114,26 @@ TestCase {
         verify(bus.known(testCase.find("session.menu").arg));
     }
 
+    function test_the_screenshot_row_goes_direct_rather_than_through_the_bus() {
+        // #51. Like `session.lock` and unlike the surface rows: every verb the
+        // bus dispatches is `toggle()`, and asking a picker to toggle mid-drag
+        // would throw the drag away.
+        const row = testCase.find("screenshot.region");
+        verify(row !== null);
+        compare(row.kind, "screenshot");
+        compare(row.target, "");
+        compare(row.verb, "");
+        // Not a bus name either, which is the mistake the empty verb prevents.
+        verify(!bus.known("screenshot"));
+    }
+
+    function test_the_words_people_reach_for_a_screenshot_by_all_find_it() {
+        // "print" is on the list because the key is called Print Screen, and
+        // "snip" because that is what the other desktop calls it.
+        for (const word of ["screenshot", "capture", "region", "snip", "print"])
+            compare(policy.rows(word, testCase.dark)[0].run.id, "screenshot.region");
+    }
+
     // --- matching ------------------------------------------------------------
 
     function test_an_empty_query_is_the_whole_table_in_table_order() {

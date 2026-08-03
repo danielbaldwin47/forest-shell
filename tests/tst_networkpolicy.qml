@@ -111,6 +111,85 @@ TestCase {
         compare(policy.icon(true, wifi(true, 60), "wifi-zero"), "wifi-high");
     }
 
+    // --- the reading the deadband is taken on (#137) -------------------------
+    //
+    // The deadband above holds a glyph against a signal that *wanders* past a
+    // threshold. It does nothing about one that jumps clean over it: measured
+    // on a real session with tools/idle-budget.sh, this laptop's radio reported
+    // 0.63, 0.84, 0.63 within two seconds, and 8 points of margin either side of
+    // 75 is no margin at all against a 21-point swing. The glyph flipped twice
+    // and the bar repainted four times.
+    //
+    // So the bars are read off a smoothed strength rather than the last sample,
+    // and `track` is what carries it: one number, the caller's, in the same
+    // shape as `current` above.
+
+    function test_a_swinging_signal_never_moves_the_glyph() {
+        // The measured sequence, twice over. Nothing in it is a real change:
+        // the mean sits around 70, which is `wifi-high` and stays there.
+        const samples = [63, 84, 63, 66, 67, 74, 84, 63, 79, 63, 84, 66];
+        let reading = 0;
+        let glyph = "";
+        for (const sample of samples) {
+            reading = policy.track(reading, true, wifi(true, sample));
+            glyph = policy.icon(true, wifi(true, sample), glyph, reading);
+        }
+        compare(glyph, "wifi-high");
+    }
+
+    function test_a_signal_that_really_climbed_still_gets_there() {
+        // Smoothing is a delay, not a wall — a laptop carried towards the
+        // access point must read as full bars within a few seconds of settling,
+        // or the glyph is decoration.
+        let reading = 0;
+        let glyph = "";
+        for (let i = 0; i < 8; i++) {
+            reading = policy.track(reading, true, wifi(true, 95));
+            glyph = policy.icon(true, wifi(true, 95), glyph, reading);
+        }
+        compare(glyph, "wifi");
+    }
+
+    function test_a_signal_that_really_fell_gets_there_too() {
+        let reading = policy.track(0, true, wifi(true, 95));
+        let glyph = policy.icon(true, wifi(true, 95), "", reading);
+        compare(glyph, "wifi");
+        // Walking out of range, one sample at a time. The average is what falls,
+        // so the glyph steps down through the buckets rather than jumping — and
+        // it arrives: full bars to none in eight samples.
+        for (let i = 0; i < 8; i++) {
+            reading = policy.track(reading, true, wifi(true, 5));
+            glyph = policy.icon(true, wifi(true, 5), glyph, reading);
+        }
+        compare(glyph, "wifi-zero");
+    }
+
+    function test_the_first_reading_is_taken_whole() {
+        // Startup has no history to average against, and a bar that fades in
+        // from zero bars over ten seconds is a bar that looks broken.
+        compare(policy.track(0, true, wifi(true, 90)), 90);
+        compare(policy.icon(true, wifi(true, 90), "", policy.track(0, true, wifi(true, 90))), "wifi");
+    }
+
+    function test_the_reading_is_forgotten_when_there_is_nothing_to_read() {
+        // A link that drops, a radio switched off, a wire: none of them has a
+        // strength, and a stale average must not be waiting for the next
+        // network — joining a weak one from a strong one would draw the strong
+        // one's bars.
+        compare(policy.track(70, true, wifi(false, 0)), 0);
+        compare(policy.track(70, false, wifi(true, 90)), 0);
+        compare(policy.track(70, true, wired(true)), 0);
+        compare(policy.track(70, true, null), 0);
+    }
+
+    function test_a_glyph_asked_without_a_reading_answers_on_the_sample() {
+        // The reading is the caller's to carry, and a caller that has none —
+        // the tests above, and anything asking a one-off question — still gets
+        // the plain answer rather than no bars.
+        compare(policy.icon(true, wifi(true, 90), ""), "wifi");
+        compare(policy.icon(true, wifi(true, 30), "", 0), "wifi-low");
+    }
+
     function test_a_connected_wire_has_its_own_glyph() {
         compare(policy.icon(true, wired(true)), "ethernet-port");
     }

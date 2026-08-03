@@ -62,7 +62,12 @@ Singleton {
 
     readonly property int connectedCount: root.enabled ? root.policy.connectedCount(root.devices) : 0
 
-    readonly property string icon: root.policy.icon(root.enabled, root.connectedCount, root.discovering)
+    /// `discoveryHolders` and not `discovering` alone: the glyph follows the
+    /// scans this shell is holding, so a background scan somebody else started
+    /// does not wake the bar (#137 — see the policy).
+    readonly property string icon: root.policy.icon(root.enabled, root.connectedCount,
+                                                    root.discovering,
+                                                    root.discoveryHolders > 0)
     readonly property string label: root.policy.label(root.enabled, root.connectedCount)
 
     /// The radio switch (#44) — the caller #36 left this note waiting for.

@@ -62,6 +62,44 @@ QtObject {
     /// deadband is what turns a live measurement into a stable reading.
     readonly property int barHysteresis: 8
 
+    /// How much of each new sample the reading takes — the rest is what it
+    /// already had.
+    ///
+    /// The deadband above answers a signal that *wanders* across a threshold.
+    /// It does nothing about one that jumps clean over it, and this radio does:
+    /// measured on a real session (#137, tools/idle-budget.sh), it reported 63,
+    /// then 84, then 63 again inside two seconds, sitting still on a desk. Eight
+    /// points of margin either side of 75 is no margin at all against a
+    /// 21-point swing — the glyph flipped both ways and the bar repainted four
+    /// times for a signal that never actually changed.
+    ///
+    /// So the bars are read off an average rather than off the last sample, and
+    /// the deadband holds that. A quarter is the weight the measured sequence
+    /// needed: it keeps the mean of a swinging signal well inside the deadband,
+    /// while a signal that really moved arrives within four samples — a walk
+    /// across the flat, not a fade.
+    readonly property real barSmoothing: 0.25
+
+    /// The smoothed strength, given the one carried so far.
+    ///
+    /// Zero means *no reading*: nothing connected, no wifi, or a wire — all
+    /// three have no strength, and the next network must not inherit the last
+    /// one's bars. It is also what a first reading is taken against, and that
+    /// one is taken whole: a bar that faded in from nothing over ten seconds at
+    /// startup would look broken rather than careful.
+    ///
+    /// Carried by the caller for the same reason `current` is: this answer
+    /// depends on its own last answer, and a policy that kept the state would
+    /// be a policy the tests could not wind forward.
+    function track(previous: real, wifiEnabled: bool, device: var): real {
+        if (!wifiEnabled || !device || device.kind !== "wifi" || !device.connected)
+            return 0;
+        const sample = policy.strength(device.strength);
+        if (!(previous > 0))
+            return sample;
+        return previous + policy.barSmoothing * (sample - previous);
+    }
+
     /// The glyph. `wifiEnabled` is the radio's own switch, read off the
     /// NetworkManager backend rather than off the device, so airplane mode
     /// shows as itself instead of as "no signal" — it is the one network state
@@ -71,14 +109,19 @@ QtObject {
     /// hysteresis possible: this answer depends on its own last answer, so the
     /// caller carries it rather than the function keeping state. Pass "" (or
     /// nothing) for a fresh reading with no memory.
-    function icon(wifiEnabled: bool, device: var, current: string): string {
+    /// `reading` is `track`'s answer — the smoothed strength. Zero, or nothing
+    /// at all, falls back to the sample on the device: a caller asking a
+    /// one-off question gets the plain reading rather than no bars.
+    function icon(wifiEnabled: bool, device: var, current: string, reading: real): string {
         if (device && device.kind === "wired" && device.connected)
             return "ethernet-port";
         if (!wifiEnabled)
             return "wifi-off";
         if (!device || !device.connected)
             return "wifi-zero";
-        return policy.bars(policy.strength(device.strength), current);
+        const strength = reading > 0 ? Math.round(reading)
+                                     : policy.strength(device.strength);
+        return policy.bars(strength, current);
     }
 
     /// Which bars a strength reads as, given which it is already showing.

@@ -452,8 +452,22 @@ Singleton {
     /// pushed instead, from the two things that can change it.
     property string icon: ""
 
+    /// The smoothed signal strength the glyph is read off — the policy's, and
+    /// pushed for the same reason the glyph is: each answer is taken against
+    /// the last one.
+    ///
+    /// Not a property any surface should bind to. The drill-in's rows show live
+    /// strength off the `WifiNetwork` itself, which is the honest number for a
+    /// list you are looking at; this one exists so the *bar* stops repainting
+    /// for a radio that reported 63, 84 and 63 within two seconds while the
+    /// laptop sat still (#137, measured with tools/idle-budget.sh).
+    property real strengthReading: 0
+
     function refreshIcon() {
-        root.icon = root.policy.icon(root.wifiEnabled, root.primary, root.icon);
+        root.strengthReading = root.policy.track(root.strengthReading, root.wifiEnabled,
+                                                 root.primary);
+        root.icon = root.policy.icon(root.wifiEnabled, root.primary, root.icon,
+                                     root.strengthReading);
     }
 
     onPrimaryChanged: root.refreshIcon()

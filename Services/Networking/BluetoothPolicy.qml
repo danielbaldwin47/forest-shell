@@ -37,17 +37,27 @@ QtObject {
     /// goes down, and drawing those as connected would be a headset the user
     /// cannot hear.
     ///
-    /// `discovering` is never something the shell started: nothing here scans,
-    /// because a scan is a radio kept awake and the idle budget (#22 §5) is the
-    /// whole reason this cluster is event-driven. It is here because blueman or
-    /// bluetoothctl may have, and an adapter that is doing something should
-    /// look like it.
-    function icon(enabled: bool, connected: int, discovering: bool): string {
+    /// The searching glyph is for a scan *this shell is holding* — the control
+    /// centre's device list (#45), which turns the radio's scanner on for as
+    /// long as it is open. `ours` is what says so.
+    ///
+    /// #36 drew every discovering adapter, whoever started it, on the argument
+    /// that an adapter doing something should look like it. Measured on a real
+    /// session (#137, tools/idle-budget.sh), that is a bar that repaints on
+    /// somebody else's schedule: something on this machine discovers on a 60 s
+    /// cycle, and the glyph flipped six times in a 179 s idle window — twenty of
+    /// its thirty repaints, against a budget of one a minute (#22 §5).
+    ///
+    /// A background scan the user did not ask for is not something they can act
+    /// on, and it is not worth waking the bar for. The panel that *did* ask
+    /// still says so in words, off the adapter directly
+    /// (Surfaces/Drawers/DrillIn/BluetoothPanel.qml).
+    function icon(enabled: bool, connected: int, discovering: bool, ours: bool): string {
         if (!enabled)
             return "bluetooth-off";
         if (connected > 0)
             return "bluetooth-connected";
-        return discovering ? "bluetooth-searching" : "bluetooth";
+        return discovering && ours ? "bluetooth-searching" : "bluetooth";
     }
 
     function label(enabled: bool, connected: int): string {

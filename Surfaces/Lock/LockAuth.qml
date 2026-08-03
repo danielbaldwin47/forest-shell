@@ -215,7 +215,7 @@ Scope {
     /// Nothing in the shell calls this, and nothing it sets can let anyone in:
     /// `lockedOut` is presentation only (#30) and the rest is text. The pose is
     /// logged so a photographed lockout can never be read back as a real one.
-    function pose(fields) {
+    function pose(fields: var): void {
         if (fields.message !== undefined)
             priv.message = fields.message;
         if (fields.messageIsError !== undefined)

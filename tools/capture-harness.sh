@@ -389,6 +389,14 @@ LOG="$SCRATCH/shell.log"
 env "${CAPTURE_ENV[@]}" timeout 30 "$QS_RUNTIME" -p capture-harness.qml > "$LOG" 2>&1
 rc=$?
 
+# A --lock-state token the QML did not recognise poses nothing, and a quiet
+# lock filed as a picture of a lockout is worse than no picture at all.
+BAD_POSE=$(grep -a 'capture: unknown --lock-state token' "$LOG" || true)
+if [[ -n "$BAD_POSE" ]]; then
+    fail "${BAD_POSE#*capture: }"
+    exit 1
+fi
+
 SAVED=$(grep -a 'capture: saved=' "$LOG" || true)
 if [[ "$SAVED" == *"saved=true"* ]]; then
     pass "capture written: ${SAVED#*capture: }"

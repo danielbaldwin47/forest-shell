@@ -35,9 +35,9 @@ Lock the session as you normally would, then:
 
 1. Type a wrong password and press Enter.
 2. Watch for **all three**:
-   - the field **shakes** — four legs of ±8px (`Theme.space2`) over
-     `Theme.motionFast`, 140ms end to end, so watch for it — and the fog
-     pulses;
+   - the field **shakes** — four legs (−8px, +8px, −4px, back to 0; the swing
+     is `Theme.space2`) over `Theme.motionFast`, 140ms end to end, so watch for
+     it — and the fog pulses;
    - PAM's own message appears under the field, **verbatim** — on a stock Arch
      stack that is `Authentication failure`, in `Theme.textPrimary`;
    - the field clears, stays live, and **keeps asking** — no counter, no
@@ -109,8 +109,11 @@ least one. `system.lock.fingerprint` must also be on.
    text and the prompt re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
    times, `fingerprintRetryDelayMs` apart.
 4. Touch it with the right finger. It unlocks.
-5. Start typing instead: the prompt makes way — caps lock and a live reader are
-   never both in the strip (#8, one lamplight element at a time).
+5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint
+   context on a keystroke; it closes when PAM answers, when the retries run
+   out, or when the lock ends. Note whether both conversations on screen at
+   once read as one screen or as two competing ones. (They are deliberately on
+   separate lines: the prompt sits under the status strip, not in it.)
 
 **Where nothing is enrolled** (this machine, and every machine with no reader):
 

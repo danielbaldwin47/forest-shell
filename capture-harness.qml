@@ -156,13 +156,6 @@ ShellRoot {
         "fingerprint": "Place your finger on the reader"
     })
 
-    /// The text a posed token carries: what follows the colon, or the default
-    /// above when the token is bare.
-    function lockPosedFor(token, kind) {
-        const colon = token.indexOf(":");
-        return colon === -1 ? root.lockPosedText[kind] : token.slice(colon + 1);
-    }
-
     readonly property bool isSettings: root.surfaceName === "settings"
 
     /// One line describing what was rendered, appended to the saved= log line.
@@ -1093,50 +1086,62 @@ ShellRoot {
 
             Component.onCompleted: {
                 for (const token of root.lockState) {
-                    if (token === "summoned") {
+                    // Every token is `kind` or `kind:text`, split once here so
+                    // no branch has to say its own name twice.
+                    const colon = token.indexOf(":");
+                    const kind = colon === -1 ? token : token.slice(0, colon);
+                    const text = colon === -1 ? "" : token.slice(colon + 1);
+                    if (kind === "summoned") {
                         // What a keystroke does, minus the keyboard: a non-empty
                         // buffer is what `summoned` is derived from. Its
                         // *length* is the number of dots in the field, so a
                         // seven-character word is a seven-dot picture.
                         lockAuth.buffer = "hunter2";
-                    } else if (token === "caps") {
+                    } else if (kind === "caps") {
                         // Normally inferred from a keystroke — LockPolicy
                         // .capsFromKey — which there is no keyboard to press.
                         lockSurface.capsLock = true;
-                    } else if (token === "failed" || token.startsWith("failed:")) {
+                    } else if (kind === "failed") {
                         // A refusal, minus PAM: the message under the field is
                         // whatever the stack said, and this is the only seam
                         // that can photograph it. The shake is not here — an
                         // animation is not a still, and it stays with the
                         // real-session half of #96.
                         lockAuth.pose({
-                            message: root.lockPosedFor(token, "failed"),
+                            message: text || root.lockPosedText[kind],
                             messageIsError: true
                         });
-                    } else if (token === "lockout" || token.startsWith("lockout:")) {
+                    } else if (kind === "lockout") {
                         // faillock. `lockedOut` is presentation-only and never
                         // retreats (#30), which is exactly why it had never been
                         // seen: nothing on this machine could reach it.
                         lockAuth.pose({
-                            message: root.lockPosedFor(token, "lockout"),
+                            message: text || root.lockPosedText[kind],
                             messageIsError: true,
                             lockedOut: true
                         });
-                    } else if (token === "fingerprint" || token.startsWith("fingerprint:")) {
+                    } else if (kind === "fingerprint") {
                         // The parallel conversation, on a machine with no
                         // reader. `fingerprintActive` is the whole gate, so
                         // posing it is the branch drawing for the first time.
                         lockAuth.pose({
                             fingerprintActive: true,
-                            fingerprintMessage: root.lockPosedFor(token, "fingerprint")
+                            fingerprintMessage: text || root.lockPosedText[kind]
                         });
-                    } else if (token.startsWith("notify:")) {
+                    } else if (kind === "notify") {
                         // The bell is gated on the count *and* on the setting
                         // that allows it to be shown at all, so both are set:
                         // pinning one and photographing the other is how #73's
                         // strip came back empty the first time.
-                        SessionLock.notificationCount = parseInt(token.slice(7));
+                        SessionLock.notificationCount = parseInt(text);
                         Config.set("system.lock.notificationCount", true);
+                    } else if (kind !== "quiet") {
+                        // A typo used to pose nothing and still report PASS,
+                        // which is the failure this seam is least able to
+                        // afford: a picture of a quiet lock filed as a picture
+                        // of a lockout. The script fails the run on this line.
+                        console.warn("capture: unknown --lock-state token "
+                                     + JSON.stringify(token));
                     }
                 }
                 root.sceneDescription = "lock=" + root.lockState.join("+");

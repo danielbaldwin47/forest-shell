@@ -40,6 +40,27 @@ ShellRoot {
         Logger.log("harness", "services harness ready");
     }
 
+    /// The mixer rows, each with the node's real level and mute beside it.
+    ///
+    /// The row itself carries neither: `AudioPolicy.streams` publishes what a
+    /// slider needs to *draw*, and the level is bound live off the node by the
+    /// delegate. So the harness reads the node the same way, which is what
+    /// makes "the set reached PipeWire" a different claim from "the service
+    /// says it did".
+    function streamRows(): var {
+        const out = [];
+        for (const row of Audio.streams) {
+            const node = Audio.streamNodeFor(row.id);
+            out.push({
+                id: row.id,
+                name: row.name,
+                percent: node && node.audio ? Math.round(node.audio.volume * 100) : -1,
+                muted: node && node.audio ? node.audio.muted === true : false
+            });
+        }
+        return out;
+    }
+
     IpcHandler {
         target: "servicetest"
 
@@ -56,7 +77,12 @@ ShellRoot {
                     percent: Audio.percent,
                     muted: Audio.muted,
                     sourceMuted: Audio.sourceMuted,
-                    icon: Audio.icon
+                    icon: Audio.icon,
+                    // #141: the mixer's own rows, each with the level read
+                    // back off the PipeWire node rather than off the row — a
+                    // per-app volume that never reached PipeWire would read
+                    // back as the row the service published, not as the fact.
+                    streams: harness.streamRows()
                 },
                 network: {
                     available: Networking.available,
@@ -122,6 +148,32 @@ ShellRoot {
 
         function micMute(muted: bool): bool {
             Audio.setSourceMuted(muted);
+            return true;
+        }
+
+        /// One application's own level, as the mixer row's slider sets it
+        /// (#141). The surface's `controlcenter stream` handler is one call
+        /// into this, and the log line under test belongs to the service, so
+        /// this reaches the same code from a shell without a control centre.
+        function streamVolume(id: string, percent: int): bool {
+            Audio.setStreamVolume(id, percent / 100);
+            return true;
+        }
+
+        /// Toggle one application's mute, as the row's speaker button does.
+        function streamMute(id: string): bool {
+            Audio.toggleStreamMute(id);
+            return true;
+        }
+
+        /// Hold the Wi-Fi scanner the way the drill-in holds it while it is
+        /// open, and let go the way closing it does (#141: the scan's *result*
+        /// has to be as visible in the log as its start).
+        function wifiScan(on: bool): bool {
+            if (on)
+                Networking.beginScan();
+            else
+                Networking.endScan();
             return true;
         }
 

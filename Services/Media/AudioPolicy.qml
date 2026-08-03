@@ -231,6 +231,14 @@ QtObject {
         return "stream " + name + " " + policy.percent(percentValue / 100) + "%";
     }
 
+    /// A mixer row's mute, which is its own line and not a level of zero:
+    /// PipeWire keeps the volume under a mute and hands it back on unmute, so
+    /// "muted" and "0%" are different states and a log that spelled them the
+    /// same could not tell a mute from a slider dragged to the bottom (#141).
+    function streamMuted(name: string, muted: bool): string {
+        return "stream " + name + (muted ? " muted" : " unmuted");
+    }
+
     function streamRefused(id: string, reason: string): string {
         return "stream " + id + " unchanged — " + reason;
     }

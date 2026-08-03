@@ -254,7 +254,14 @@ Singleton {
             Logger.warn("audio", root.policy.streamRefused(id, "no such stream"));
             return;
         }
-        node.audio.volume = root.policy.clamp(volume);
+        // Logged here and not off a property change, the way the default sink's
+        // switch is: the mixer's levels are read straight off the nodes by the
+        // delegates and this service holds no `percent` for them to notify
+        // (#141 — every set reached PipeWire and none of them said so).
+        const level = root.policy.clamp(volume);
+        node.audio.volume = level;
+        Logger.log("audio", root.policy.streamMoved(root.policy.streamName(node),
+                                                    root.policy.percent(level)));
     }
 
     function setStreamMuted(id: string, muted: bool): void {
@@ -264,6 +271,7 @@ Singleton {
             return;
         }
         node.audio.muted = muted;
+        Logger.log("audio", root.policy.streamMuted(root.policy.streamName(node), muted));
     }
 
     function toggleStreamMute(id: string): void {

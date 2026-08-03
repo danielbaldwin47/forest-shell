@@ -132,7 +132,37 @@ Singleton {
     property var deviceRows: []
     property string deviceSignature: ""
 
+    /// What the log last said about each device, by address. Not a binding and
+    /// not notified: nothing reads it but the handler below, and its whole job
+    /// is to be the *previous* reading (#141).
+    property var deviceHistory: ({})
+
+    /// Say what BlueZ actually did, as opposed to what it was asked to do.
+    ///
+    /// A device seen for the first time is not a transition — an adapter coming
+    /// up with three paired headsets on it would otherwise announce all three
+    /// as having just paired.
+    function noteDeviceChanges(): void {
+        for (const row of root.deviceCandidates) {
+            const was = root.deviceHistory[row.address] ?? null;
+            root.deviceHistory[row.address] = {
+                paired: row.paired, connected: row.connected, pairing: row.pairing
+            };
+            if (was === null)
+                continue;
+            for (const line of root.policy.settled(row.name, was,
+                                                   root.deviceHistory[row.address]))
+                Logger.log("bluetooth", line);
+        }
+    }
+
     onDeviceCandidatesChanged: {
+        // Above the signature gate, and not folded into it: the gate decides
+        // whether the *panel* is worth rebuilding, and what the log says must
+        // not be a consequence of a repaint decision. Today the signature
+        // carries paired/connected/pairing and the two would agree; a field
+        // dropped from it for a drawing reason would silence this.
+        root.noteDeviceChanges();
         const rows = root.policy.deviceRows(root.deviceCandidates);
         const signature = root.policy.deviceSignature(rows);
         if (signature === root.deviceSignature)

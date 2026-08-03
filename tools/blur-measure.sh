@@ -2,10 +2,12 @@
 # Photograph the bar blurred and unblurred on a real session, and measure the
 # difference (#97).
 #
-#   tools/blur-measure.sh                  # run it, print the numbers, PASS/FAIL
-#   tools/blur-measure.sh --out DIR        # keep the captures somewhere named
+#   tools/blur-measure.sh                       # run it, print the numbers
+#   tools/blur-measure.sh --out DIR             # put the captures somewhere named
 #   tools/blur-measure.sh --size 8 --passes 3   # a stronger blur than configured
-#   tools/blur-measure.sh --keep           # leave the shell up afterwards
+#   tools/blur-measure.sh --keep                # leave the shell up afterwards
+#   tools/blur-measure.sh --text-color RRGGBB   # what the contrast is measured against
+#   tools/blur-measure.sh --max-kept PCT        # how much detail a blur may leave
 #
 # ## What this is for
 #
@@ -82,7 +84,7 @@ while (( $# )); do
         --passes) BLUR_PASSES="${2:?--passes needs a number}"; shift 2 ;;
         --text-color) TEXT_COLOR="${2:?--text-color needs RRGGBB}"; shift 2 ;;
         --max-kept) MAX_KEPT="${2:?--max-kept needs a percentage}"; shift 2 ;;
-        -h|--help) sed -n '2,60p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -124,11 +126,16 @@ resolve_hypr || { echo "no live Hyprland found — this measurement needs one" >
 
 QS_BIN=$(qs_runtime_resolve) || exit 1
 
-read -r MONITOR MON_W MON_H SCALE < <(hyprctl -j monitors | python3 -c '
+# `grim -o` grabs one output, while every coordinate hyprctl reports — layer
+# surfaces, window positions — is in the global layout. On a second monitor
+# those differ by the output's origin, so it is subtracted from everything
+# before a region is cut out of the capture. Getting this wrong does not look
+# like a bug: it looks like a blur that did nothing.
+read -r MONITOR MON_W MON_H SCALE MON_X MON_Y < <(hyprctl -j monitors | python3 -c '
 import json, sys
 mons = json.load(sys.stdin)
 m = next((m for m in mons if m["focused"]), mons[0])
-print(m["name"], m["width"], m["height"], format(m["scale"], "g"))')
+print(m["name"], m["width"], m["height"], format(m["scale"], "g"), m["x"], m["y"])')
 [[ -n "$MONITOR" ]] || { echo "no monitor reported by hyprctl" >&2; exit 1; }
 
 getopt_int() { hyprctl -j getoption "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["int"])'; }
@@ -143,6 +150,7 @@ WORK=$(mktemp -d /tmp/blur-measure.XXXXXX)
 mkdir -p "$OUT_DIR" "$WORK/config"
 SHELL_LOG="$WORK/shell.log"
 SHELL_PID=""
+FOREIGN_BARS=""
 
 cleanup() {
     if (( KEEP )) && [[ -n "$SHELL_PID" ]]; then
@@ -152,10 +160,16 @@ cleanup() {
         wait "$SHELL_PID" 2>/dev/null
     fi
     # Everything set with `hyprctl keyword` is runtime-only; a reload puts the
-    # session back on its own config file, blur included.
+    # session back on its own config file, blur included. It also drops every
+    # runtime layer rule — see the warning about a shell that was already
+    # running when this started.
     hyprctl reload >/dev/null 2>&1
     hyprctl dispatch workspace "$PREV_WS" >/dev/null 2>&1
-    (( KEEP )) || [[ "$OUT_DIR" != "$WORK/shots" ]] || rm -rf "$WORK"
+    # The captures are the point of the run and outlive it; the scratch config,
+    # state and cache are not. `--keep` holds on to the lot, log included.
+    (( KEEP )) || rm -rf "$WORK/config" "$WORK/state" "$WORK/cache"
+    printf '\ncaptures: %s\n' "$OUT_DIR"
+    [[ -z "$FOREIGN_BARS" ]] || note "the reload dropped every runtime layer rule, including the blur of the forest-shell that was already running — restart it to get that back"
 }
 trap cleanup EXIT
 
@@ -174,11 +188,14 @@ hyprctl keyword decoration:blur:passes "$BLUR_PASSES" >/dev/null
 ## Every forest-shell:bar surface currently mapped, one "x,y,w,h" per line.
 bar_surfaces() { hyprctl -j layers | python3 -c '
 import json, sys
-for out in json.load(sys.stdin).values():
+want = sys.argv[1]
+for name, out in json.load(sys.stdin).items():
+    if name != want:
+        continue
     for level in out.get("levels", {}).values():
         for s in level:
             if s.get("namespace") == "forest-shell:bar":
-                print("%d,%d,%d,%d" % (s["x"], s["y"], s["w"], s["h"]))'; }
+                print("%d,%d,%d,%d" % (s["x"], s["y"], s["w"], s["h"]))' "$MONITOR"; }
 
 # Taken before the shell under test exists, so its own bar can be told from
 # anyone else's afterwards. A forest-shell the caller is already running puts a
@@ -187,6 +204,21 @@ for out in json.load(sys.stdin).values():
 # looking at the picture, only by knowing what was there first.
 FOREIGN_BARS=$(bar_surfaces)
 [[ -z "$FOREIGN_BARS" ]] || note "another forest-shell is already running ($(wc -l <<<"$FOREIGN_BARS") bar surface(s)); its bar shares the namespace and will follow the same rules"
+
+# The bar is given no modules. The contrast figure at the end is only
+# comparable to the capture seam's if it is taken over the same thing, and
+# tools/capture-harness.sh's `--surface bar` is the fill over the wallpaper with
+# no content on it (its header: "the composite #79 measures"). A strip with
+# glyphs on it measures the text against the text colour and reports 1:1, which
+# is a fact about drawing letters rather than about blur.
+mkdir -p "$WORK/config/forest-shell"
+cat > "$WORK/config/forest-shell/settings.json" <<'JSON'
+{
+  "bar": {
+    "modules": { "left": [], "center": [], "right": [] }
+  }
+}
+JSON
 
 # The shell's own config dir: flipping bar.surface.blur below is a real write.
 # `setsid` because Quickshell forks — the process started here is not the one
@@ -223,12 +255,15 @@ sleep 1.5
 
 shoot() { grim -o "$MONITOR" "$1"; }
 
-## A region of the screen in *logical* px -> the capture's own pixels.
+## A region in the compositor's *logical layout* coordinates -> the capture's
+## own pixels: shifted to this output's origin, then scaled.
 region() { python3 -c '
 import sys
-s = float(sys.argv[1])
-x, y, w, h = (round(float(v) * s) for v in sys.argv[2:6])
-print(f"{x},{y},{w}x{h}")' "$SCALE" "$@"; }
+s, ox, oy = (float(v) for v in sys.argv[1:4])
+x, y, w, h = (float(v) for v in sys.argv[4:8])
+print("%d,%d,%dx%d" % (round((x - ox) * s), round((y - oy) * s),
+                       round(w * s), round(h * s)))' \
+    "$SCALE" "$MON_X" "$MON_Y" "$@"; }
 
 measure() {  # measure <label> <off.png> <on.png> <region> [extra args...]
     local label="$1" off="$2" on="$3" reg="$4"; shift 4
@@ -243,20 +278,26 @@ measure() {  # measure <label> <off.png> <on.png> <region> [extra args...]
 echo
 echo "1. an ordinary window, so 'no blur' cannot mean 'no blur support'"
 
+# Hard stop, not a note: every number below is about a rule this shell would
+# never have pushed, and reporting them anyway is how #78's ambiguity got in.
 if [[ "$(ipc measure available)" != "true" ]]; then
     fail "the shell's compositor facade is inert — it is not talking to this Hyprland"
+    exit 1
 fi
 
 ipc measure probeWindow true >/dev/null
 sleep 1.2
 read -r PX PY PW PH < <(hyprctl -j clients | python3 -c '
 import json, sys
+want = sys.argv[1]
 for c in json.load(sys.stdin):
-    if c.get("title") == "forest-shell blur probe":
-        print(*c["at"], *c["size"]); break')
+    if c.get("title") == "forest-shell blur probe" and c.get("monitor") is not None:
+        if c.get("workspace", {}).get("name") and c["at"] and c["size"]:
+            print(*c["at"], *c["size"]); break' "$MONITOR")
 
 if [[ -z "${PH:-}" ]]; then
     fail "the control window never mapped — cannot tell blur-off from blur-unsupported"
+    exit 1
 else
     # Inset well inside the frame: borders, rounding and the shadow are not the
     # window's own content and are not what is being measured.
@@ -334,11 +375,7 @@ CTRL_Y=$(( BY + BH + 40 ))
 CTRL_REGION=$(region "$((BX + 2))" "$CTRL_Y" "$((BW - 4))" 120)
 echo
 if measure "bare wallpaper below the bar" "$OUT_DIR/bar-blur-off.png" \
-           "$OUT_DIR/bar-blur-on.png" "$CTRL_REGION" | tee "$WORK/control.txt" \
-   && python3 -c '
-import re, sys
-kept = float(re.search(r"kept ([0-9.]+)%", open(sys.argv[1]).read()).group(1))
-sys.exit(0 if kept > 90 else 1)' "$WORK/control.txt"; then
+           "$OUT_DIR/bar-blur-on.png" "$CTRL_REGION" --min-kept 90; then
     pass "the wallpaper outside the bar is untouched — the collapse is the bar's rule"
 else
     fail "the wallpaper outside the bar changed too — the pair is not a clean A/B"
@@ -364,7 +401,7 @@ for shot in bar-blur-off bar-blur-on; do
 done
 
 echo
-note "fill opacity at measurement time: $(ipc measure fillOpacity)"
+note "bar.surface.opacity setting: $(ipc measure fillOpacity) — the legibility clamp (#79) can raise what was actually painted above it"
 if (( fail_count )); then
     red "$fail_count check(s) failed"
     exit 1

@@ -78,12 +78,18 @@
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
 # #79 measurement, bar surface only. Without compositor blur the composite here
 # is the *stricter* floor: blur only averages the wallpaper locally, so a
-# window that passes unblurred passes blurred. #97 put a number on how much
-# stricter, by measuring both ends over the same wallpaper on a real session:
-# blur bought the worst 100px window 3.98:1 -> 4.02:1 at Hyprland's default
-# strength and 4.08:1 at size 8/passes 3, and moved the worst *pixel* not at
-# all. So the gap this bound leaves is ~1-3% and the floor #79 chose does not
-# change — see tools/blur-measure.sh.
+# window that passes unblurred passes blurred. #97 measured both ends over the
+# same wallpaper on a real session (tools/blur-measure.sh, bar fill 0.86 over
+# assets/noise.png), and the two halves of the figure move very differently:
+#
+#   worst pixel        4.20:1 unblurred -> 5.13:1 blurred (5.33:1 at size 8/3)
+#   worst 100px window 5.58:1 unblurred -> 5.68:1 blurred (5.79:1 at size 8/3)
+#
+# Blur takes the single worst pixel away — it is the extreme of the wallpaper's
+# noise, and averaging is what a low-pass does to an extreme — but it barely
+# moves the window figure, which is the one a run of text actually sits on. So
+# the bound this seam gives is loose by ~20% where it is least load-bearing and
+# tight to ~2% where the #79 floor is decided.
 #
 # --bar-opacity sets the *setting*. What gets painted is that setting raised to
 # whatever the wallpaper behind it demands (#79) — the bar reads the strip under

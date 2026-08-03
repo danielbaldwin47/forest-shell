@@ -125,10 +125,13 @@ def main():
     base = noise_rows(W, H)
     blurred = box_blur(base)
 
-    # The pair the tool is built for: the same wallpaper, one capture with the
-    # compositor blurring it and one without, under an 85% bar fill.
+    # The pair the tool is built for, shaped the way a compositor makes it: a
+    # layer rule blurs what is *behind that surface only*, so the wallpaper
+    # under the bar is low-passed and the wallpaper below it is untouched. A
+    # fixture that blurred the whole frame would be a picture no layer rule can
+    # produce, and the untouched-region control below would have nothing to say.
     off = composite(base, 0, 20)
-    on = composite(blurred, 0, 20)
+    on = composite([blurred[y] if y < 20 else base[y] for y in range(H)], 0, 20)
     write_png(tmp / "off.png", off)
     write_png(tmp / "on.png", on)
     # A blur that never happened: byte-identical captures.
@@ -147,17 +150,19 @@ def main():
     check("the fill's mean stays put under blur",
           abs(m_on - m_off) < 1.5, f"off {m_off:.2f}, on {m_on:.2f}")
 
-    check("an identical pair keeps all its detail",
-          measure_blur.detail(off, (0, 0, W, 20)) == d_off)
-
     # A region the blur did not touch must not read as blurred. Here the strip
-    # below the bar: in a real capture that is bare wallpaper, and it is the
-    # control that says the collapse above came from the layer rule and not
-    # from the wallpaper having changed between shots.
+    # below the bar, taken from *both* captures of the pair: in a real capture
+    # that is bare wallpaper, and it is the control that says the collapse above
+    # came from the layer rule and not from the wallpaper having changed between
+    # the two shots. Comparing one capture with itself would pass no matter what
+    # the tool did, which is the mistake this comment exists to stop.
     d_below_off = measure_blur.detail(off, (0, 30, W, 25))
-    d_below_on = measure_blur.detail(off, (0, 30, W, 25))
-    check("an untouched region reads as unchanged",
-          abs(d_below_on - d_below_off) < 1e-9)
+    d_below_on = measure_blur.detail(on, (0, 30, W, 25))
+    check("an untouched region reads as unchanged across the pair",
+          abs(d_below_on - d_below_off) < 1e-9,
+          f"off {d_below_off:.3f}, on {d_below_on:.3f}")
+    check("and the untouched region has detail to lose",
+          d_below_off > 2.0, f"{d_below_off:.3f}")
 
     # --- the CLI -----------------------------------------------------------
     code, out = run(tmp / "off.png", tmp / "on.png", "--region", f"0,0,{W}x20")
@@ -183,6 +188,24 @@ def main():
                     "--region", f"0,0,{W}x20", "--max-mean-drift", "1.5")
     check("a blur that preserves the mean passes --max-mean-drift",
           code == 0, out.strip()[:160])
+
+    # A pair whose mean moved is two different pictures, not a blur. Built by
+    # brightening the fill in the second shot, which is what a wallpaper change
+    # or a stray window between the captures would look like from here.
+    write_png(tmp / "brighter.png", composite(blurred, 0, 20, fill=(90, 100, 96)))
+    code, out = run(tmp / "off.png", tmp / "brighter.png",
+                    "--region", f"0,0,{W}x20", "--max-mean-drift", "1.5")
+    check("a pair whose mean moved fails --max-mean-drift", code == 1,
+          out.strip()[:160])
+
+    # --min-kept is the other direction: a region the run says was untouched.
+    code, out = run(tmp / "off.png", tmp / "same.png",
+                    "--region", f"0,30,{W}x25", "--min-kept", "90")
+    check("an untouched region passes --min-kept 90", code == 0, out.strip()[:160])
+
+    code, out = run(tmp / "off.png", tmp / "on.png",
+                    "--region", f"0,0,{W}x20", "--min-kept", "90")
+    check("a blurred region fails --min-kept 90", code == 1, out.strip()[:160])
 
     code, out = run(tmp / "off.png", tmp / "on.png", "--region", f"0,0,{W}x999")
     check("a region outside the capture is refused", code != 0, out.strip()[:120])

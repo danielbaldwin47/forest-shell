@@ -107,7 +107,8 @@ ShellRoot {
         }
     }
 
-    Bar { id: realBar }
+    // The real bar, which pushes its own rule at the deferred stage.
+    Bar {}
 
     IpcHandler {
         target: "measure"
@@ -130,12 +131,6 @@ ShellRoot {
             const group = Object.assign({}, Config.get("bar.surface") ?? {});
             group.blur = on;
             return Config.set("bar.surface", group);
-        }
-
-        /// Push the bar's own rule by hand, on demand.
-        function push(): bool {
-            realBar.applyBlurRule();
-            return true;
         }
 
         /// Show or hide the ordinary-window control.

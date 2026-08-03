@@ -26,7 +26,7 @@ The mean is reported next to it as the control. A capture that lost its detail
 changed, wrong region, a window in the way), and the pair proves nothing.
 
     tools/measure-blur.py off.png on.png --region 0,0,1920x36 \
-        [--max-kept 40] [--max-mean-drift 4] [--label "bar strip"]
+        [--max-kept 40] [--min-kept 90] [--max-mean-drift 4] [--label "bar strip"]
 
 Exit 0 normally; 1 if a threshold given on the command line is missed.
 
@@ -114,6 +114,10 @@ def main():
                     help="the strip to measure, in capture pixels")
     ap.add_argument("--max-kept", type=float, metavar="PCT",
                     help="fail if the blurred capture keeps this much detail or more")
+    ap.add_argument("--min-kept", type=float, metavar="PCT",
+                    help="fail if it keeps less than this — for a region that is "
+                         "supposed to be untouched, which is what says a pair is a "
+                         "clean A/B rather than two different pictures")
     ap.add_argument("--max-mean-drift", type=float, metavar="LEVELS",
                     help="fail if the region's mean grey moved further than this")
     ap.add_argument("--label", default="", help="what this region is, for the report")
@@ -146,6 +150,10 @@ def main():
     if args.max_kept is not None and kept >= args.max_kept:
         print(f"FAIL kept {kept:.1f}% of the detail, wanted under {args.max_kept:.1f}% "
               "— this pair does not show a blur")
+        failed = True
+    if args.min_kept is not None and kept < args.min_kept:
+        print(f"FAIL kept only {kept:.1f}% of the detail, wanted at least "
+              f"{args.min_kept:.1f}% — this region was supposed to be untouched")
         failed = True
     if args.max_mean_drift is not None and abs(drift) > args.max_mean_drift:
         print(f"FAIL the mean moved {drift:+.2f} levels, over {args.max_mean_drift:.2f} "

@@ -64,8 +64,9 @@ Scope {
     // and #78 could only make the first — it ran on a machine with
     // `decoration:blur:enabled = 0`, where nothing blurs for any window. #97
     // photographed the second on a machine where blur renders: with this rule
-    // in force the wallpaper behind the bar keeps 34% of its detail and without
-    // it 100%, over the same shot (tools/blur-measure.sh).
+    // in force the wallpaper behind the bar keeps 16% of its detail, while the
+    // wallpaper beside the bar in the same pair of shots keeps 100%
+    // (tools/blur-measure.sh).
     Connections {
         target: Startup
         function onDeferredStage() { bar.applyBlurRule(); }

@@ -2,9 +2,10 @@
 
 ## Test seams
 
-Before writing code for a ticket, decide **which of the three seams verifies
-it**, and say so in the PR. A ticket whose acceptance criteria cannot be
-checked at any seam is not ready to build — that is the thing to resolve first.
+Before writing code for a ticket, decide **which seam verifies it** — one of
+the three below, or the real session at the end — and say so in the PR. A
+ticket whose acceptance criteria cannot be checked at any seam is not ready to
+build — that is the thing to resolve first.
 
 **1. `tests/` — pure QML, offscreen, run by `tests/run.sh`.**
 Everything that is a *decision* rather than a picture: policy, formatting,
@@ -26,6 +27,15 @@ focus, anything `Quickshell.*`. Drive it over IPC or with `nested_key`, and
 assert on the log. `tools/lock-harness.sh` and `tools/settings-harness.sh` are
 the worked examples; a harness that edits config sets `NESTED_ENV` to a scratch
 `XDG_CONFIG_HOME` so it does not touch the session running it.
+
+This seam is also the only place the shell is ever on more than one screen.
+`NESTED_MONITORS` declares the layout and `nested_output_add` /
+`nested_output_remove` plug one in and out mid-run, so per-screen geometry and
+hotplug are assertions rather than theory (#98,
+`tools/multi-monitor-harness.sh`). The outputs are headless and the backend's
+own window is dropped (`NESTED_HEADLESS_ONLY=1`): a second wayland-backend
+output is a second window on the *host*, so the host's tiling decides its size
+— measured, and fatal to any geometry assertion.
 
 Surfaces get a log line for each state change worth asserting on. #81 was a
 silent lifecycle: nothing logged, so a lock that could not be unlocked had two
@@ -79,6 +89,28 @@ the compositor while it ran, which **exits 2, inconclusive**. #95 measured 155
 idle frames where #73 measured 6, and the difference was another agent
 switching workspaces on the same session, not the shell. A performance number
 without its conditions next to it is a number that will be misread later.
+
+One piece of what no seam covers is now measurable rather than merely visible.
+`tools/blur-measure.sh` (#97) photographs the caller's own session with `grim`
+with `bar.surface.blur` on and off, and `tools/measure-blur.py` reads the
+difference: a blur is a low-pass, so the detail behind the surface collapses
+while its mean stays put. It borrows the session — empty workspace, `hyprctl
+keyword`, `hyprctl reload` on the way out — and gives it back, which is why it
+is a thing you do to a desktop deliberately rather than a seam to run alongside
+the others.
+
+Two habits from it are worth copying by anything else that needs a real
+session. The run opens with a **control**: an ordinary translucent window, no
+layer rule near it, and the run stops if that shows no blur. #78 spent a
+session unable to tell "the rule did nothing" from "this machine draws no
+blur", and the answer turned out to be `decoration:blur:enabled = 0` in the
+machine's own Hyprland config. And the **arithmetic stays at seam 1** — a
+stdlib script with its own unit tests (`tests/tst_measure_blur.py`), where a
+box blur applied in the test is the picture the compositor is supposed to
+produce. Only the photograph needs the desktop.
+
+Layer stacking is still uncovered; frame pacing is `tools/frame-budget.sh`'s
+job above, on the same borrowed-session terms.
 
 ### Why this is a rule
 

@@ -131,12 +131,30 @@ ShellRoot {
         Quickshell.env("CAPTURE_CLAUDE_TRANSCRIPT") ?? ""
 
     /// What the lock is showing, as a comma-separated set — `quiet` on its own,
-    /// or any of `summoned`, `caps`, `notify:N`. Every item in the lock's status
-    /// strip is gated on something about the machine (a discharging battery, a
-    /// caps-lock key, notifications waiting), so a capture that does not pin
-    /// them photographs whatever this laptop happened to be doing. #73's
-    /// criterion is about the icons, and an empty strip answers nothing.
+    /// or any of `summoned`, `caps`, `notify:N`, `failed`, `lockout`,
+    /// `fingerprint`. Every item in the lock's status strip is gated on
+    /// something about the machine (a discharging battery, a caps-lock key,
+    /// notifications waiting), so a capture that does not pin them photographs
+    /// whatever this laptop happened to be doing. #73's criterion is about the
+    /// icons, and an empty strip answers nothing.
+    ///
+    /// The last three are #96's half of the failure path: each is gated on a
+    /// PAM answer this seam cannot produce, so they are posed through
+    /// `LockAuth.pose`. The three of them take an optional `:text` suffix
+    /// (`failed:Permission denied`) — no commas in it, since commas separate
+    /// the tokens.
     readonly property var lockState: (Quickshell.env("CAPTURE_LOCK_STATE") || "quiet").split(",")
+
+    /// What a posed failure says when the caller did not say. Real sentences
+    /// from real stacks rather than placeholders, because the message is shown
+    /// *verbatim* and its width is the thing the picture is checking; the
+    /// lockout line is deliberately one `LockPolicy.isLockout` recognises, and
+    /// tests/tst_lockpolicy.qml holds it to that.
+    readonly property var lockPosedText: ({
+        "failed": "Authentication failure",
+        "lockout": "Account locked due to 3 failed logins",
+        "fingerprint": "Place your finger on the reader"
+    })
 
     readonly property bool isSettings: root.surfaceName === "settings"
 
@@ -1068,23 +1086,62 @@ ShellRoot {
 
             Component.onCompleted: {
                 for (const token of root.lockState) {
-                    if (token === "summoned") {
+                    // Every token is `kind` or `kind:text`, split once here so
+                    // no branch has to say its own name twice.
+                    const colon = token.indexOf(":");
+                    const kind = colon === -1 ? token : token.slice(0, colon);
+                    const text = colon === -1 ? "" : token.slice(colon + 1);
+                    if (kind === "summoned") {
                         // What a keystroke does, minus the keyboard: a non-empty
                         // buffer is what `summoned` is derived from. Its
                         // *length* is the number of dots in the field, so a
                         // seven-character word is a seven-dot picture.
                         lockAuth.buffer = "hunter2";
-                    } else if (token === "caps") {
+                    } else if (kind === "caps") {
                         // Normally inferred from a keystroke — LockPolicy
                         // .capsFromKey — which there is no keyboard to press.
                         lockSurface.capsLock = true;
-                    } else if (token.startsWith("notify:")) {
+                    } else if (kind === "failed") {
+                        // A refusal, minus PAM: the message under the field is
+                        // whatever the stack said, and this is the only seam
+                        // that can photograph it. The shake is not here — an
+                        // animation is not a still, and it stays with the
+                        // real-session half of #96.
+                        lockAuth.pose({
+                            message: text || root.lockPosedText[kind],
+                            messageIsError: true
+                        });
+                    } else if (kind === "lockout") {
+                        // faillock. `lockedOut` is presentation-only and never
+                        // retreats (#30), which is exactly why it had never been
+                        // seen: nothing on this machine could reach it.
+                        lockAuth.pose({
+                            message: text || root.lockPosedText[kind],
+                            messageIsError: true,
+                            lockedOut: true
+                        });
+                    } else if (kind === "fingerprint") {
+                        // The parallel conversation, on a machine with no
+                        // reader. `fingerprintActive` is the whole gate, so
+                        // posing it is the branch drawing for the first time.
+                        lockAuth.pose({
+                            fingerprintActive: true,
+                            fingerprintMessage: text || root.lockPosedText[kind]
+                        });
+                    } else if (kind === "notify") {
                         // The bell is gated on the count *and* on the setting
                         // that allows it to be shown at all, so both are set:
                         // pinning one and photographing the other is how #73's
                         // strip came back empty the first time.
-                        SessionLock.notificationCount = parseInt(token.slice(7));
+                        SessionLock.notificationCount = parseInt(text);
                         Config.set("system.lock.notificationCount", true);
+                    } else if (kind !== "quiet") {
+                        // A typo used to pose nothing and still report PASS,
+                        // which is the failure this seam is least able to
+                        // afford: a picture of a quiet lock filed as a picture
+                        // of a lockout. The script fails the run on this line.
+                        console.warn("capture: unknown --lock-state token "
+                                     + JSON.stringify(token));
                     }
                 }
                 root.sceneDescription = "lock=" + root.lockState.join("+");

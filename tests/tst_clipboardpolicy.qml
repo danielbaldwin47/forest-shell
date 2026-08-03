@@ -406,6 +406,36 @@ TestCase {
         verify(policy.autostart.every(line => line.indexOf("cliphist store") >= 0));
     }
 
+    function test_both_watchers_ship_in_an_installable_config() {
+        // #140: documented in three places and installed by none of them. A
+        // user who follows integration/README.md end to end got a `;` provider
+        // that is empty forever, with nothing on the machine to say why — the
+        // watcher lines existed only as prose in Services/README.md and as data
+        // here. So the assertion is not "the lines are written down somewhere"
+        // but "the file the integration guide tells you to source contains
+        // them, verbatim, uncommented".
+        const conf = testCase.readConf("../integration/hyprland/forest-autostart.conf");
+        verify(conf !== null, "no autostart config at integration/hyprland/forest-autostart.conf");
+
+        const live = conf.split("\n").map(line => line.trim())
+                         .filter(line => line.length > 0 && line[0] !== "#");
+        for (const line of policy.autostart)
+            verify(live.indexOf(line) >= 0, "not shipped: " + line);
+    }
+
+    /// The file at `path` relative to this test, or `null` when there is none.
+    /// Qt gates file:// reads behind QML_XHR_ALLOW_FILE_READ, which tests/run.sh
+    /// sets; a missing file comes back status 0 rather than 404.
+    function readConf(path: string): var {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", Qt.resolvedUrl(path), false);
+        xhr.send();
+        if (xhr.status !== 200 && xhr.status !== 0)
+            return null;
+        const text = String(xhr.responseText ?? "");
+        return text.length > 0 ? text : null;
+    }
+
     // --- what the log says ---------------------------------------------------
 
     function test_the_listing_logs_its_count() {

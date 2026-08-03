@@ -214,7 +214,18 @@ QtObject {
             // atomically rather than merging into last week's sample, and
             // `derived` so no preset ever carries it away from the machine that
             // sampled it (#56).
-            dynamic: { def: ({}), coerce: c.object, themed: true, derived: true }
+            dynamic: { def: ({}), coerce: c.object, themed: true, derived: true },
+            // Full-dynamic mode's one opt-in (#59). Off means matugen runs with
+            // `--dry-run` and only ever hands a palette back to the shell; on
+            // means it also renders the templates in the user's own
+            // `~/.config/matugen/config.toml`, reloads the apps those name and
+            // runs their post-hooks — every time the wallpaper changes.
+            //
+            // Not theme-flagged: what a preset carries is a look, and this is a
+            // decision about whether the shell is allowed to restyle *other
+            // people's* applications on this machine. Documented in
+            // Services/Theming/README.md.
+            matugenTemplates: { def: false, coerce: c.boolean }
         },
 
         // The fattest section, owned by Core/SettingsSchemaBar.qml and

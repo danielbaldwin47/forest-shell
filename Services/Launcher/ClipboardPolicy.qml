@@ -76,6 +76,10 @@ QtObject {
     /// sentence the launcher shows when the history is empty and the lines in
     /// Services/README.md cannot drift apart, and so a test can assert on them.
     ///
+    /// The file that actually installs them is
+    /// `integration/hyprland/forest-autostart.conf`; being data here is not the
+    /// same as being installed anywhere, which is the whole of #140.
+    ///
     /// Two lines and not one: `wl-paste --watch` serves a single MIME family per
     /// invocation, so a single untyped watcher stores text and silently drops
     /// every image — which would be a clipboard history that works until the

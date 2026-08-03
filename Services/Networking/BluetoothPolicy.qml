@@ -201,4 +201,43 @@ QtObject {
     function deviceRefused(name: string, reason: string): string {
         return "device " + name + " unchanged — " + reason;
     }
+
+    /// What changed about one device between two readings of BlueZ, as the
+    /// lines the log should carry — none, when nothing did (#141).
+    ///
+    /// `asked` above logs the *attempt*: "pair Zen Zone" is written the moment
+    /// the button is pressed and says nothing about what BlueZ then did. The
+    /// pass that filed this ticket had a device that never paired, and the log
+    /// held the same single line it would have held on success.
+    ///
+    /// A list rather than a string because one reading can carry two: a device
+    /// that pairs and connects in the same round trip did both, and a log that
+    /// picked one of them would be inventing an order BlueZ did not give.
+    ///
+    /// Pure, and given both readings, because the *transition* is the decision
+    /// here — "paired" is not news, "became paired" is.
+    function settled(name: string, was: var, now: var): var {
+        const lines = [];
+        if (was === null || was === undefined || now === null || now === undefined)
+            return lines;
+
+        // A pairing that started and stopped without the device becoming
+        // paired is the failure this exists for. BlueZ reports it as the flag
+        // going back down — there is no error on the property — so the
+        // transition is the only evidence there is.
+        if (was.pairing === true && now.pairing !== true && now.paired !== true)
+            lines.push(name + " pairing failed");
+
+        if (was.paired !== true && now.paired === true)
+            lines.push(name + " paired");
+        else if (was.paired === true && now.paired !== true)
+            lines.push(name + " no longer paired");
+
+        if (was.connected !== true && now.connected === true)
+            lines.push(name + " connected");
+        else if (was.connected === true && now.connected !== true)
+            lines.push(name + " disconnected");
+
+        return lines;
+    }
 }

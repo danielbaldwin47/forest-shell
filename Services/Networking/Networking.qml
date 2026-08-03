@@ -181,6 +181,11 @@ Singleton {
         root.scanHolders++;
         if (root.scanHolders === 1) {
             root.wifiDevice.scannerEnabled = true;
+            // Forgotten at the start of every scan, so the first list this scan
+            // produces is logged even when it holds the same number the last
+            // scan ended on. Otherwise the count is deduplicated across scans
+            // and a fresh scan says nothing at all (#141).
+            root.lastVisible = -1;
             Logger.log("network", root.wifi.scanning(true));
         }
     }
@@ -191,6 +196,11 @@ Singleton {
         root.scanHolders--;
         if (root.scanHolders === 0 && root.wifiDevice !== null) {
             root.wifiDevice.scannerEnabled = false;
+            // A scan during which nothing at all changed never reached the
+            // handler below, and "no networks visible" is exactly the answer
+            // #141 needed and the one silence used to stand for.
+            if (root.lastVisible < 0)
+                Logger.log("network", root.wifi.visible(root.wifiCandidates.length));
             Logger.log("network", root.wifi.scanning(false));
         }
     }
@@ -237,8 +247,21 @@ Singleton {
     property var wifiNetworks: []
     property string wifiSignature: ""
 
+    /// How many networks the log last said were visible. Deduplicated for the
+    /// reason the rows are: this handler runs every few seconds forever on a
+    /// machine sitting still, and a line per run would be a log nobody reads.
+    /// The count is the field that moves when something *happened*.
+    property int lastVisible: -1
+
     onWifiCandidatesChanged: {
         const rows = root.wifi.rows(root.wifiCandidates);
+        // Above the signature gate rather than below it: the gate returns early
+        // whenever the published rows would not change, and the count still
+        // needs saying on the first list a scan produces (#141).
+        if (rows.length !== root.lastVisible) {
+            root.lastVisible = rows.length;
+            Logger.log("network", root.wifi.visible(rows.length));
+        }
         const signature = root.wifi.signature(rows);
         if (signature === root.wifiSignature)
             return;

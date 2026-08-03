@@ -34,6 +34,14 @@
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
 #   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
+#   tools/capture-harness.sh out.png --contrast --palette generated.json  # a #59 palette
+#
+# --palette wears a role → colour map a theming mode produced, from a file, with
+# `appearance.mode` set to dynamic (#59). It is how a *generated* palette gets
+# measured as a picture rather than as arithmetic: the seventeen roles a
+# wallpaper earned are the ones the bar is drawn out of, and whether they still
+# hold the contrast floor over a photograph is not a number any table predicts.
+# `tools/matugen-harness.sh` passes the palette the running shell wrote.
 #
 # --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
 # ladder is either the compositor's (blur), a transition, or an effect no
@@ -49,12 +57,27 @@
 # knob now has draws its own state.)
 #
 # --lock-state poses the lock: `quiet`, or any comma-separated combination of
-# `summoned` (the field revealed), `caps` (the caps-lock warning) and
-# `notify:N`. Every item in the status strip is gated on something about the
-# machine, so a capture that does not pose them photographs whatever the laptop
-# happened to be doing — the battery item is the one that cannot be posed, and
-# the saved line reports what it was instead. --delay-ms buys settle time on a
-# loaded machine.
+# `summoned` (the field revealed), `caps` (the caps-lock warning), `notify:N`,
+# and #96's failure path — `failed` (PAM's message under the field, in the
+# error treatment), `lockout` (faillock's message, ember, the one state a user
+# cannot type past) and `fingerprint` (the prompt that only draws on a machine
+# with a finger enrolled). Those three take an optional `:text` suffix carrying
+# the message verbatim, with no commas in it:
+#
+#   tools/capture-harness.sh out.png --surface lock --lock-state failed
+#   tools/capture-harness.sh out.png --surface lock --lock-state lockout
+#   tools/capture-harness.sh out.png --surface lock --session \
+#       --lock-state 'summoned,failed:Permission denied'
+#
+# Every item in the status strip is gated on something about the machine, so a
+# capture that does not pose them photographs whatever the laptop happened to
+# be doing — the battery item is the one that cannot be posed, and the saved
+# line reports what it was instead. --delay-ms buys settle time on a loaded
+# machine.
+#
+# What --lock-state cannot pose, by construction: the shake. An animation is
+# not a still, and the nested seam cannot present one (#85), so the shake is
+# checked by locking a real session — tools/lock-failure-checklist.md.
 #
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module
@@ -78,7 +101,18 @@
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
 # #79 measurement, bar surface only. Without compositor blur the composite here
 # is the *stricter* floor: blur only averages the wallpaper locally, so a
-# window that passes unblurred passes blurred.
+# window that passes unblurred passes blurred. #97 measured both ends over the
+# same wallpaper on a real session (tools/blur-measure.sh, bar fill 0.86 over
+# assets/noise.png), and the two halves of the figure move very differently:
+#
+#   worst pixel        4.20:1 unblurred -> 5.13:1 blurred (5.33:1 at size 8/3)
+#   worst 100px window 5.58:1 unblurred -> 5.68:1 blurred (5.79:1 at size 8/3)
+#
+# Blur takes the single worst pixel away — it is the extreme of the wallpaper's
+# noise, and averaging is what a low-pass does to an extreme — but it barely
+# moves the window figure, which is the one a run of text actually sits on. So
+# the bound this seam gives is loose by ~20% where it is least load-bearing and
+# tight to ~2% where the #79 floor is decided.
 #
 # --bar-opacity sets the *setting*. What gets painted is that setting raised to
 # whatever the wallpaper behind it demands (#79) — the bar reads the strip under
@@ -105,7 +139,10 @@
 #
 # What neither mode judges: compositor composition — blur behind the bar, layer
 # stacking, frame pacing (#78). Those are the compositor's pixels, not the
-# client's.
+# client's, and no change here can reach them: the wallpaper behind the bar is
+# another surface entirely. Blur specifically now has a tool of its own,
+# tools/blur-measure.sh, which photographs a real session with grim; layer
+# stacking and frame pacing are still unmeasured.
 #
 # --clock writes `weatherTime.clock.format` into the scratch config: `auto`,
 # `12h` or `24h`. #93 was the bar and the lock reading the same minute two ways,
@@ -145,6 +182,7 @@ REDUCED=0
 LIGHT=0
 UNCLAMPED=0
 CLOCK=""
+PALETTE=""
 
 while (( $# )); do
     case "$1" in
@@ -168,6 +206,7 @@ while (( $# )); do
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --clock)       CLOCK="$2"; shift 2 ;;
+        --palette)     PALETTE="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
         --help|-h)     sed -n '2,117p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -313,10 +352,23 @@ CLOCK_JSON=""
 if [[ -n "$CLOCK" ]]; then
     CLOCK_JSON=$(printf ', "weatherTime": { "clock": { "format": "%s" } }' "$CLOCK")
 fi
-printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s }%s }\n' \
+# A palette a mode produced, worn for the capture (#59). The generated palette
+# is the least trustworthy input the contrast floor will ever see — nobody
+# authored it and nobody looked at it — and the roles it replaces are the ones
+# the bar is drawn out of, so "does this palette survive over a photograph"
+# is a picture and not arithmetic. `tools/matugen-harness.sh` hands the palette
+# the *shell* generated straight to this flag, so what is measured here is the
+# real output of the real mode rather than a re-derivation of it.
+PALETTE_JSON=""
+if [[ -n "$PALETTE" ]]; then
+    [[ -f "$PALETTE" ]] || { echo "no such palette: $PALETTE" >&2; exit 2; }
+    PALETTE_JSON=$(printf ', "mode": "dynamic", "dynamic": %s' "$(tr -d '\n' < "$PALETTE")")
+fi
+printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s%s }%s }\n' \
     "$WALLPAPER" "$WALLPAPER_FOLDER" \
     "$( ((REDUCED)) && echo true || echo false )" \
     "$( ((LIGHT)) && echo false || echo true )" \
+    "$PALETTE_JSON" \
     "$CLOCK_JSON" \
     > "$SCRATCH/config/forest-shell/settings.json"
 
@@ -373,6 +425,14 @@ QS_RUNTIME=$(qs_runtime_bin) || exit 1
 LOG="$SCRATCH/shell.log"
 env "${CAPTURE_ENV[@]}" timeout 30 "$QS_RUNTIME" -p capture-harness.qml > "$LOG" 2>&1
 rc=$?
+
+# A --lock-state token the QML did not recognise poses nothing, and a quiet
+# lock filed as a picture of a lockout is worse than no picture at all.
+BAD_POSE=$(grep -a 'capture: unknown --lock-state token' "$LOG" || true)
+if [[ -n "$BAD_POSE" ]]; then
+    fail "${BAD_POSE#*capture: }"
+    exit 1
+fi
 
 SAVED=$(grep -a 'capture: saved=' "$LOG" || true)
 if [[ "$SAVED" == *"saved=true"* ]]; then

@@ -394,9 +394,14 @@ Item {
 
             text: surface.auth.message
             visible: text !== ""
-            color: surface.auth.lockedOut ? Theme.accentEmber
-                 : surface.auth.messageIsError ? Theme.textPrimary
-                 : Theme.textSecondary
+            color: {
+                switch (policy.messageTone(surface.auth.lockedOut,
+                                           surface.auth.messageIsError)) {
+                case "lockout": return Theme.accentEmber;
+                case "error":   return Theme.textPrimary;
+                default:        return Theme.textSecondary;
+                }
+            }
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             font.family: Theme.fontUi
@@ -516,9 +521,11 @@ Item {
             tint: Power.low ? Theme.accentEmber : Theme.textMuted
         }
 
-        // The lamplight role: attention, exactly one element at a time (#8).
-        // Caps lock and a live fingerprint reader never both apply — the reader
-        // stops prompting the moment the user starts typing.
+        // The lamplight role: attention, exactly one element at a time (#8) —
+        // one element in *this strip*, which is why the fingerprint prompt
+        // below is not in it. The reader keeps prompting while the user types
+        // (nothing aborts that context until PAM answers or `end()` runs), so
+        // the two can be up together; they are just never up side by side.
         StatusItem {
             visible: surface.capsLock
             icon: "arrow-big-up"

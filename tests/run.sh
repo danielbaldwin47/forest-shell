@@ -15,6 +15,12 @@ cd "$(dirname "$0")"
 export QT_ASSUME_STDERR_HAS_CONSOLE=1
 export QT_QPA_PLATFORM=offscreen
 
+# A handful of checks read a checked-in config file rather than a QML object —
+# "does the file the integration guide tells you to source still contain the
+# lines the shell documents" is a decision, and it belongs at this seam (#140).
+# Qt refuses file:// XHR unless this is set.
+export QML_XHR_ALLOW_FILE_READ=1
+
 runner=$(command -v qmltestrunner || true)
 [[ -n "$runner" ]] || runner=/usr/lib/qt6/bin/qmltestrunner   # not on PATH on Arch
 [[ -x "$runner" ]] || { echo "qmltestrunner not found (tried PATH and $runner)" >&2; exit 1; }
@@ -32,6 +38,12 @@ python=$(command -v python3 || true)
 [[ -n "$python" ]] || { echo "python3 not found (needed for the asset checks)" >&2; exit 1; }
 "$python" ../tools/normalize-lucide.py --check
 "$python" ../tools/make-noise.py --check
+
+# The blur measurement's arithmetic (#97). The harness that takes the two
+# captures needs a real compositor, but "does this pair show a blur" is a
+# decision, and a box blur applied here is the picture the compositor is
+# supposed to produce — so the tool that reads it is checkable without one.
+"$python" tst_measure_blur.py
 
 # Same reason, different language: which quickshell binary may run the shell is
 # a decision (parse a version, compare against a floor), but it is bash, and

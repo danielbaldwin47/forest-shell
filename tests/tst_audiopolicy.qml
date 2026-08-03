@@ -243,6 +243,28 @@ TestCase {
             verify(!policy.playing(states, active));
     }
 
+    // --- what the mixer says it did (#141) -----------------------------------
+
+    function test_a_moved_stream_names_the_application_and_the_level() {
+        compare(policy.streamMoved("mpv", 35), "stream mpv 35%");
+    }
+
+    function test_a_muted_stream_is_a_different_line_from_a_quiet_one() {
+        // The pair the log has to keep apart: PipeWire holds the level under a
+        // mute and gives it back, so a mute is not a drag to the bottom, and
+        // one line for both would lose the difference #141 is about.
+        compare(policy.streamMuted("mpv", true), "stream mpv muted");
+        compare(policy.streamMuted("mpv", false), "stream mpv unmuted");
+        verify(policy.streamMuted("mpv", true) !== policy.streamMoved("mpv", 0));
+    }
+
+    function test_a_refused_stream_names_the_id_because_there_is_no_name() {
+        // The refusal is the one case with no application to name: the id did
+        // not resolve to a node, so the id is all there is to say.
+        compare(policy.streamRefused("77", "no such stream"),
+                "stream 77 unchanged — no such stream");
+    }
+
     function test_a_link_that_never_negotiated_is_not_playing() {
         // Everything before `Paused` is a link on its way up or a link that
         // failed. Neither is audio coming out of the machine — and neither is

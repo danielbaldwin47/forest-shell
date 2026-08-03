@@ -47,6 +47,8 @@
 #  24. `;` lists the clipboard, filters it, and Enter puts an entry back —
 #      text through the compositor's selection, an image through `wl-copy`,
 #      with a thumbnail decoded to disk       (needs cliphist + wl-clipboard)
+#      — including that the watcher lines in the *shipped* autostart config
+#      start, stay up, and fill the history from a plain copy (#140)
 #  25. nothing is fighting itself (no binding loops)
 #  26. a machine with no qalc and no cliphist says so about each, immediately,
 #      and only about the provider that owns the tool
@@ -615,6 +617,91 @@ else
         nested_fail "an empty history said \"$said\""
     fi
 
+    # The watchers, from the file a user actually installs (#140). Everything
+    # below this block seeds the store by hand, which proves the provider reads
+    # a history but never that anything fills one — the bug was a shell whose
+    # `;` was empty on every machine but the author's, with the two lines held
+    # as data and prose and shipped in no installable config.
+    #
+    # So: parse them out of the shipped conf and start them exactly as
+    # Hyprland's `exec-once` would, rather than writing the argv again here — a
+    # copy of the line cannot catch the line being wrong. Then stop them again
+    # before the rest of check 24 runs. A watcher left up would re-store every
+    # entry the checks below put on the selection and turn a deterministic
+    # history into a racing one.
+    CLIP_CONF="integration/hyprland/forest-autostart.conf"
+    CLIP_WATCHERS=()
+    nested_env_argv
+    while IFS= read -r clip_line; do
+        # Word-split deliberately: the line is an argv, not a shell command.
+        # `env … cmd &` is fork+exec, so $! is the watcher itself and not a
+        # subshell around it — killing a subshell would leave it running.
+        # shellcheck disable=SC2086
+        "${NESTED_ENV_ARGV[@]}" XDG_CACHE_HOME="$SCRATCH/cache" \
+            ${clip_line#exec-once = } >/dev/null 2>&1 &
+        CLIP_WATCHERS+=("$!")
+    done < <(grep '^exec-once = ' "$CLIP_CONF")
+
+    if (( ${#CLIP_WATCHERS[@]} == 2 )); then
+        nested_pass "$CLIP_CONF ships 2 watcher lines"
+    else
+        nested_fail "$CLIP_CONF ships ${#CLIP_WATCHERS[@]} watcher lines, not 2"
+    fi
+
+    # A wrong flag makes `wl-paste` exit at once, so "still alive" is the check
+    # that the shipped argv is one this wl-clipboard accepts.
+    sleep 0.5
+    clip_alive=0
+    for clip_pid in ${CLIP_WATCHERS[@]+"${CLIP_WATCHERS[@]}"}; do
+        kill -0 "$clip_pid" 2>/dev/null && (( clip_alive++ ))
+    done
+    # `clip_alive == count` is vacuously true at zero, which is exactly the
+    # state this check exists to catch — a conf that ships no lines at all.
+    if (( ${#CLIP_WATCHERS[@]} > 0 && clip_alive == ${#CLIP_WATCHERS[@]} )); then
+        nested_pass 'both watchers are still running after starting'
+    else
+        nested_fail "$clip_alive of ${#CLIP_WATCHERS[@]} watchers survived starting"
+    fi
+
+    # A fresh value per attempt rather than one copy and a long poll: `cliphist`
+    # stores selection *changes*, so a copy that lands before the watcher has
+    # registered is never stored and re-copying the same bytes would not be a
+    # change. Each attempt is a new selection, so the first one after the
+    # watcher is up gets stored — no sleep-and-hope.
+    MARKER=''
+    tries=40
+    while (( tries-- > 0 )); do
+        printf 'forest-shell watcher-marker-140 %s' "$tries" | nested_env wl-copy
+        if env XDG_CACHE_HOME="$SCRATCH/cache" cliphist list 2>/dev/null \
+                | grep -qa 'watcher-marker-140'; then
+            MARKER=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [[ -n "$MARKER" ]]; then
+        nested_pass 'a copy reaches the history with no manual store — the watchers fill it'
+    else
+        nested_fail 'nothing the watchers should have stored reached the history'
+    fi
+
+    # The half the user sees: the provider lists what the watchers stored.
+    clip_reenter
+    if [[ "$(reply title ';watcher-marker-140' 0)" == *watcher-marker-140* ]]; then
+        nested_pass 'the launcher lists the entry the watchers stored'
+    else
+        nested_fail "the launcher listed \"$(reply title ';watcher-marker-140' 0)\" for the stored entry"
+    fi
+
+    # Guarded on non-empty, and not for tidiness: bare `wait` waits for *every*
+    # background job, which here is the nested compositor and the shell under
+    # test — so an empty array turns a failing run into a hanging one. Measured:
+    # the run that proved these checks go red hung until its timeout killed it.
+    if (( ${#CLIP_WATCHERS[@]} > 0 )); then
+        kill "${CLIP_WATCHERS[@]}" 2>/dev/null
+        wait "${CLIP_WATCHERS[@]}" 2>/dev/null
+    fi
+
     TEXT='forest-shell harness — git push --force-with-lease'
     printf '%s' "$TEXT" | clip_store
     clip_store < assets/noise.png
@@ -656,6 +743,7 @@ else
     # preview is truncated, and copying it would paste a mangled prefix while
     # reporting success.
     Quickshell_before=$(reply clipboard)
+    copy_mark=$(wc -l < "$NESTED_SHELL_LOG")
     if [[ "$(reply activate ';force-with-lease' 0)" == "true" ]]; then
         tries=40
         while (( tries-- > 0 )); do
@@ -669,6 +757,17 @@ else
         fi
     else
         nested_fail 'Enter on a clipboard row was refused'
+    fi
+
+    # #141 reported this path as silent. It is not — `Clipboard.qml` logs the
+    # copy on both halves of the split — so the assertion is here to keep it
+    # that way rather than to fix anything: a copy that failed and a copy that
+    # worked must not read the same, which is the whole of the ticket.
+    if tail -n "+$((copy_mark + 1))" "$NESTED_SHELL_LOG" \
+            | grep -qaE 'launcher: clipboard entry [0-9]+ copied'; then
+        nested_pass 'a text copy says so in the log (#141)'
+    else
+        nested_fail 'a text copy reached the selection and logged nothing (#141)'
     fi
 
     # The image half. A row that says what it is, a thumbnail that decodes to a
@@ -699,6 +798,7 @@ else
         nested_fail 'the image entry has no id to decode'
     fi
 
+    copy_mark=$(wc -l < "$NESTED_SHELL_LOG")
     if [[ "$(reply activate ';image' 0)" == "true" ]]; then
         tries=40
         while (( tries-- > 0 )); do
@@ -712,6 +812,16 @@ else
         fi
     else
         nested_fail 'Enter on an image row was refused'
+    fi
+
+    # The image half separately, because it is a different process with a
+    # different exit condition: `wl-copy` forks and stays alive to serve the
+    # offer, and a `sh` that never exits would take the log line with it.
+    if tail -n "+$((copy_mark + 1))" "$NESTED_SHELL_LOG" \
+            | grep -qaE 'launcher: clipboard entry [0-9]+ copied'; then
+        nested_pass 'an image copy says so in the log (#141)'
+    else
+        nested_fail 'an image reached the selection and logged nothing (#141)'
     fi
 fi
 

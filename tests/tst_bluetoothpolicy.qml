@@ -180,4 +180,72 @@ TestCase {
         compare(policy.deviceIcon(""), "bluetooth");
         compare(policy.deviceIcon(null), "bluetooth");
     }
+
+    // --- what BlueZ actually did (#141) --------------------------------------
+
+    function state(extra) {
+        const facts = { paired: false, connected: false, pairing: false };
+        for (const key in extra ?? ({}))
+            facts[key] = extra[key];
+        return facts;
+    }
+
+    function test_nothing_changing_says_nothing() {
+        // The common case by far: this runs every time a headset reports one
+        // percent less battery, and a line each time would be a log nobody
+        // reads — which is the failure mode on the other side of #141.
+        const now = state({ paired: true, connected: true });
+        compare(policy.settled("Zen Zone", now, now).length, 0);
+    }
+
+    function test_a_pair_that_worked_says_so() {
+        compare(policy.settled("Zen Zone", state({}), state({ paired: true })),
+                ["Zen Zone paired"]);
+    }
+
+    function test_a_pair_that_failed_says_so() {
+        // The case that filed the ticket: `bluetooth: pair Zen Zone` was the
+        // only line, and BlueZ then reported Paired: no. There is no error to
+        // read — the flag going back down with the device still unpaired is
+        // the whole of the evidence.
+        compare(policy.settled("Zen Zone", state({ pairing: true }), state({})),
+                ["Zen Zone pairing failed"]);
+    }
+
+    function test_a_pairing_that_finished_is_not_a_failure() {
+        compare(policy.settled("Zen Zone", state({ pairing: true }),
+                               state({ paired: true })),
+                ["Zen Zone paired"]);
+    }
+
+    function test_connecting_and_disconnecting_are_different_lines() {
+        compare(policy.settled("Zen Zone", state({ paired: true }),
+                               state({ paired: true, connected: true })),
+                ["Zen Zone connected"]);
+        compare(policy.settled("Zen Zone", state({ paired: true, connected: true }),
+                               state({ paired: true })),
+                ["Zen Zone disconnected"]);
+    }
+
+    function test_a_device_that_pairs_and_connects_at_once_says_both() {
+        // One round trip can carry both, and the facade's own press does ask
+        // for both — `deviceAction` pairs and connects as one gesture.
+        compare(policy.settled("Zen Zone", state({}),
+                               state({ paired: true, connected: true })),
+                ["Zen Zone paired", "Zen Zone connected"]);
+    }
+
+    function test_a_forgotten_device_says_it_is_no_longer_paired() {
+        compare(policy.settled("Zen Zone", state({ paired: true, connected: true }),
+                               state({})),
+                ["Zen Zone no longer paired", "Zen Zone disconnected"]);
+    }
+
+    function test_a_device_with_no_previous_reading_is_not_a_transition() {
+        // An adapter coming up with three paired headsets on it must not
+        // announce all three as having just paired.
+        compare(policy.settled("Zen Zone", null, state({ paired: true })).length, 0);
+        compare(policy.settled("Zen Zone", undefined, state({ paired: true })).length, 0);
+        compare(policy.settled("Zen Zone", state({}), null).length, 0);
+    }
 }

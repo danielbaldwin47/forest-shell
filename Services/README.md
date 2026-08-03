@@ -15,7 +15,7 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Weather/` | The forecast behind the dashboard's weather card (#50) |
 | `Screenshot/` | The region picker's freeze, selection, save and handoff (#51) |
 | `Recorder/` | Screen recording over the two encoders, and the fallback between them (#52) |
-| `Theming/` | The three palette modes behind `Core/Theme.qml` — the constrained accent (#58) is built, the full dynamic one (#59) is not |
+| `Theming/` | The three palette modes behind `Core/Theme.qml` — fixed forest, the constrained accent (#58) and the full matugen palette (#59); see [Theming/README.md](Theming/README.md) |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
 Two rules that hold across all of them:
@@ -161,7 +161,12 @@ Nineteen of them exist so far:
   invocation, so a single untyped watcher stores text and silently drops every
   image — a clipboard history that works until the first screenshot. The lines
   live in `ClipboardPolicy.autostart` as data as well as here, so the sentence
-  the launcher shows on an empty history cannot drift from this block.
+  the launcher shows on an empty history cannot drift from this block. They also
+  ship in `integration/hyprland/forest-autostart.conf`, which is the file a user
+  actually sources — for a while they did not, and prose that names a setup line
+  no installable config contains is a provider that is empty on every machine
+  but the author's (#140). `tests/tst_clipboardpolicy.qml` reads that file and
+  fails if the two stop matching.
 
   It is in the deferred list for `Calculator`'s reason and one of its own. The
   one run at startup is both the probe for `cliphist` and the first read of the
@@ -257,6 +262,25 @@ Nineteen of them exist so far:
   It is therefore also the purest case for the `ServiceInit` rule: *nothing*
   references it, so without a line in the deferred list the mode would be
   selectable in the settings window and simply never run.
+
+- `Theming/Matugen.qml` (#59) — the optional dependency, and the only service
+  whose availability is a fact about the machine rather than about the session.
+  It probes `matugen --version` once at startup, runs one generation per
+  wallpaper (33 ms, measured), and publishes `available` for the settings window
+  to grey the mode out with.
+
+  Split from `Theming.qml` because the two answer to different things: that one
+  decides whether a wallpaper is allowed to say anything and writes the answer
+  down, this one owns the three failures a subprocess has and a pure function
+  does not — not installed, installed and exited non-zero, and answered after
+  the question changed. A non-zero exit is a failure and never an empty palette
+  (#78): what is on screen stays on screen and a line says why.
+
+  Everything about what the output *means* is in `Theming/MatugenPolicy.qml`,
+  including the legibility pass that holds a generated palette to the same
+  contrast floor `tests/tst_tokens.qml` holds the shipped rows to. The details,
+  and the external-template opt-in, are in
+  [Theming/README.md](Theming/README.md).
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

@@ -83,6 +83,24 @@ TestCase {
         compare(policy.pool(undefined, ["a"]), []);
     }
 
+    function test_the_pool_greys_what_the_renderer_cannot_draw() {
+        // #72: the vocabulary runs ahead of the registry on purpose, so the
+        // pool offers ids that would do nothing when added. The distinction
+        // comes from the renderer's own table — pass a registry map, get back
+        // the ids it has no entry for.
+        compare(policy.unsupported(["clock", "aquarium"], { clock: { file: "Clock.qml" } }),
+                ["aquarium"]);
+        compare(policy.unsupported(["clock"], { clock: { file: "Clock.qml" } }), []);
+    }
+
+    function test_nothing_is_greyed_before_the_registry_arrives() {
+        // Same frame-zero problem the pool has. Claiming every module is
+        // missing would grey the whole pool on the way in.
+        compare(policy.unsupported(["clock"], undefined), []);
+        compare(policy.unsupported(["clock"], null), []);
+        compare(policy.unsupported(undefined, {}), []);
+    }
+
     function test_options_take_the_list_from_the_schema_and_the_words_here() {
         const options = policy.options(["auto", "wf-recorder"],
                                        { auto: "Auto", "wf-recorder": "Software" });

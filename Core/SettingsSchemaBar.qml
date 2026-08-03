@@ -20,6 +20,13 @@ QtObject {
     /// listed in any cluster are simply off; there is no separate enable flag.
     /// `status` is one module and not four: #9 groups network, bluetooth, volume
     /// and mic into a single quiet icon cluster.
+    /// Which screen edge the bar sits on. A closed list rather than a literal
+    /// inside `oneOf` below, for the reason every other vocabulary in
+    /// Core/SettingsSchema.qml is one: the Bar tab's choice control offers this
+    /// exact array, so the control and the coercer cannot disagree about what
+    /// the key accepts.
+    readonly property var positions: ["top", "bottom"]
+
     readonly property var modules: [
         "launcher", "workspaces", "activeWindow",
         "clock", "media",
@@ -36,7 +43,7 @@ QtObject {
         // than accepted-and-ignored: the widgets are built axis-agnostic so
         // a vertical bar can land post-v1 without rewrites, but a position
         // the shell cannot actually lay out is a dead setting.
-        position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
+        position: { def: "top", coerce: c.oneOf(barSchema.positions) },
         // 32 logical px — 48 device px at the T480's 1.5 scale. 26 crowds
         // the icons, 36+ reads as a title bar (#10).
         height: { def: 32, coerce: c.integer(20, 64) },
@@ -93,9 +100,11 @@ QtObject {
         // uncapped one walks across the bar and pushes the clock off centre
         // (the #80 class of overflow). Both elide from the right.
         //
-        // JSON-only for now, which #9 allows for the long tail: they are
-        // two numbers in px that depend on a screen width the Bar tab has
-        // no preview of.
+        // They were JSON-only until #72, on the grounds that they are two
+        // numbers in px that depend on a screen width the Bar tab has no
+        // preview of. That is an argument for a hint, not for a key the
+        // GUI cannot reach: a bar key with no control was exactly the gap
+        // #72 closed, and the tab now says what the numbers mean instead.
         mediaMaxWidth: { def: 180, coerce: c.integer(60, 600) },
         windowMaxWidth: { def: 220, coerce: c.integer(60, 800) },
 

@@ -85,6 +85,7 @@ SHELL_PID=$!
 
 cleanup() {
     local exit_status=$?
+    load_window_stop
     if (( KEEP )); then
         printf '\nshell left up (pid %s), log: %s\n' "$SHELL_PID" "$LOG"
         return
@@ -199,24 +200,44 @@ screens=${screens:-1}
 (( screens )) || screens=1
 expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
 
+printf '\n'
 if (( compositor_events )); then
-    printf '\n'
     note "$compositor_events compositor event(s) inside the window — workspace switches or"
     note "active-window changes, so this session was in use while it was measured"
-    printf '\nthe numbers above are a shell being driven, not an idle one, and are not the\n'
-    printf 'criterion. Re-run when nothing else is on the compositor.\n'
-    exit 2
+    printf '\n'
 fi
 
-printf '\n'
+# What a driven window does and does not void. Input only ever *adds* work — a
+# workspace switch animates the ridgeline, a hover repaints a module — so a
+# reading that passes its budget under input passes it at rest too, and that
+# pass is real. A reading that fails one has no such argument: it might be the
+# shell, it might be whoever was driving. So the three criteria split by
+# direction rather than all going out together, and only the frame count, whose
+# budget the driving directly writes, is void either way.
+void_count=0
+void() { printf '  \033[33m????\033[0m  %s\n' "$1"; void_count=$((void_count + 1)); }
+driven=$(( compositor_events > 0 ))
+
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then
-    pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
+    if (( driven )); then
+        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5% — under input, so an upper bound"
+    else
+        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
+    fi
+elif (( driven )); then
+    void "idle CPU $(printf '%.3f' "$cpu_percent")% over budget, but the window was driven"
 else
     fail "idle CPU $(printf '%.3f' "$cpu_percent")% over the 0.5% budget"
 fi
 
 if python3 -c "import sys; sys.exit(0 if $switch_rate < 5 else 1)"; then
-    pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
+    if (( driven )); then
+        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s — under input, so an upper bound"
+    else
+        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
+    fi
+elif (( driven )); then
+    void "$(printf '%.2f' "$switch_rate") context switches/s over budget, but the window was driven"
 else
     fail "$(printf '%.2f' "$switch_rate") context switches/s over the 5/s budget"
 fi
@@ -224,11 +245,21 @@ fi
 # The clock is the one thing that may repaint at rest, once a minute on the
 # minute (Surfaces/Bar/Modules/Clock.qml). Anything much past that is an
 # animation that did not stop.
-if (( frame_count <= expected_frames )); then
+if (( driven )); then
+    void "$frame_count frames in ${SECONDS_WINDOW}s, but the window was driven — every"
+    note "     switch and hover in it is a repaint the criterion never asked about"
+elif (( frame_count <= expected_frames )); then
     pass "$frame_count frames in ${SECONDS_WINDOW}s — the clock, and nothing else"
 else
     fail "$frame_count frames in ${SECONDS_WINDOW}s, expected at most $expected_frames"
 fi
+
+# The count alone cannot say "on the minute", which is what #22 §5 actually
+# asks — #73 proved it with the list, `gaps (ms): [59999, 59999, 60000, …]`.
+# The threshold drops the sub-second pairs, which are the second window
+# rendering the same repaint moment rather than a repaint of their own.
+python3 "$(dirname "${BASH_SOURCE[0]}")/measure-frame-timing.py" "$LOG" \
+    --from-line "$start_lines" --list-gaps 1000 2>/dev/null | grep -a '^gaps' | sed 's/^/  ....  /'
 
 # --- the startup gates, from the same run ------------------------------------
 #
@@ -264,5 +295,12 @@ else
 fi
 
 printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+# A real failure outranks a void one: something measured and over budget is a
+# finding whatever else the window contained. Void alone is exit 2 — nothing
+# here is a verdict on the shell, so re-run rather than read it as one.
 (( fail_count )) && exit 1
+if (( void_count )); then
+    printf 'that is %d criterion/criteria this window could not judge — re-run when nothing\nelse is on the compositor\n' "$void_count"
+    exit 2
+fi
 exit 0

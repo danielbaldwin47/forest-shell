@@ -84,6 +84,7 @@ restore_session() {
 cleanup() {
     local exit_status=$?
     restore_session
+    load_window_stop
     if (( KEEP )); then
         printf '\nshell left up (pid %s), log: %s\n' "$SHELL_PID" "$LOG"
         return
@@ -117,12 +118,12 @@ sleep 10
 # Everything from here is the measured window. The parser is told to ignore
 # everything above it rather than the log being truncated, so a failed run
 # still has its startup in the file that gets kept.
-BASELINE_LINES=$(grep -ac '' "$LOG")
+start_lines=$(grep -ac '' "$LOG")
 load_window_start
 
 frames_so_far() {
     local counted
-    counted=$(tail -n +"$((BASELINE_LINES + 1))" "$LOG" | grep -ac 'frame rendered in')
+    counted=$(tail -n +"$((start_lines + 1))" "$LOG" | grep -ac 'frame rendered in')
     echo "${counted:-0}"
 }
 
@@ -177,17 +178,24 @@ load_window_report
 printf '\n'
 
 python3 tools/measure-frame-timing.py "$LOG" \
-    --from-line "$BASELINE_LINES" \
+    --from-line "$start_lines" \
     --budget-ms "$BUDGET_MS" \
     --min-frames "$TARGET_FRAMES"
 measured=$?
 
+# Three verdicts, the same three the idle harness has: met, blown, and never
+# measured. A run that hit DRIVE_CAP_SECONDS short of its frame target is the
+# third — the interaction failed to drive the shell, so the frames it did
+# collect are not a sample of anything, and reporting that as a blown budget is
+# the exact misreading #95 was filed to undo.
 printf '\n'
-if (( measured == 0 )); then
-    pass "render stayed inside the ${BUDGET_MS}ms budget over $collected interaction frames"
-else
-    fail "the frame budget is not met — see the report above"
-fi
+case "$measured" in
+    0) pass "render stayed inside the ${BUDGET_MS}ms budget over $collected interaction frames" ;;
+    2) printf '  \033[33m????\033[0m  the run never collected its frames — nothing here judges the budget\n'
+       printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+       exit 2 ;;
+    *) fail "render went over the ${BUDGET_MS}ms budget — see the report above" ;;
+esac
 
 printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
 (( fail_count )) && exit 1

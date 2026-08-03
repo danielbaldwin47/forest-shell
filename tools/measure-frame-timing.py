@@ -71,6 +71,9 @@ def main():
                         help="fail if the run collected fewer frames than this")
     parser.add_argument("--from-line", type=int, default=0,
                         help="skip this many leading lines (startup is not interaction)")
+    parser.add_argument("--list-gaps", type=int, metavar="MS",
+                        help="also list every gap at or over MS, in seconds — #22 §5 "
+                             "is judged on when the repaints fell, not just how many")
     args = parser.parse_args()
 
     if args.log:
@@ -99,26 +102,38 @@ def main():
         print(series("render", renders, args.budget_ms))
         print(series("swap", swaps, args.budget_ms))
     if gaps:
-        # fps off the median gap, not the mean: a run that drives an
-        # interaction, waits, and drives another has idle stretches between the
-        # animations. They are not dropped frames, and a mean would read them
-        # as a frame rate collapse. The dropped-frame question is answered by
-        # the over-20ms count next to it instead.
-        median = percentile(gaps, 0.5)
-        fps = 1000.0 / median if median else 0.0
+        # fps off the p50 gap, not the mean: a run that drives an interaction,
+        # waits, and drives another has idle stretches between the animations.
+        # They are not dropped frames, and a mean would read them as a frame
+        # rate collapse. The dropped-frame question is answered by the
+        # over-20ms count next to it instead. p50 rather than "median" because
+        # this is nearest-rank on an even count too — no averaging of the two
+        # middle samples, so every number printed is a gap that happened.
+        p50 = percentile(gaps, 0.5)
+        fps = 1000.0 / p50 if p50 else 0.0
         over = sum(1 for g in gaps if g > GAP_BUDGET_MS)
-        print("pacing  fps=%.1f median-gap=%dms max-gap=%dms over-%dms=%d/%d"
-              % (fps, median, max(gaps), GAP_BUDGET_MS, over, len(gaps)))
+        print("pacing  fps=%.1f p50-gap=%dms max-gap=%dms over-%dms=%d/%d"
+              % (fps, p50, max(gaps), GAP_BUDGET_MS, over, len(gaps)))
+        if args.list_gaps is not None:
+            # #22 §5 is "one repaint a minute, on the minute", and #73 proved it
+            # with the list rather than the count: [59999, 59999, 60000, …] says
+            # *the clock* in a way "6 frames" does not. Sub-threshold gaps are
+            # the second window rendering alongside the first, not a repaint.
+            listed = [g for g in gaps if g >= args.list_gaps]
+            print("gaps    %s" % ", ".join("%.1fs" % (g / 1000.0) for g in listed))
 
     if not totals:
         print("no frames in the log — the shell rendered nothing, or "
               "QSG_RENDER_TIMING was not set", file=sys.stderr)
         return 1
     if len(totals) < args.min_frames:
+        # Exit 2, not 1: this run did not measure the criterion, which is a
+        # different thing from measuring it and finding it blown. Same third
+        # verdict tools/idle-budget.sh uses for a window that was not idle.
         print("only %d frames, wanted %d — the interaction did not drive the "
               "shell, so the budget is unmeasured rather than met"
               % (len(totals), args.min_frames), file=sys.stderr)
-        return 1
+        return 2
     worst_render = max(renders)
     if worst_render > args.budget_ms:
         print("render peaked at %dms, over the %dms budget"

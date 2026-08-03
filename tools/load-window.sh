@@ -25,6 +25,17 @@ load_window_start() {
     LOAD_WINDOW_PID=$!
 }
 
+# Stops the sampler and drops its file without printing. For the cleanup paths:
+# `while :; do … sleep 5; done` in the background outlives a SIGTERM'd script
+# and keeps appending to a temp file nobody will read.
+load_window_stop() {
+    [[ -n "$LOAD_WINDOW_PID" ]] || return 0
+    kill "$LOAD_WINDOW_PID" 2>/dev/null
+    wait "$LOAD_WINDOW_PID" 2>/dev/null
+    rm -f "$LOAD_WINDOW_SAMPLES"
+    LOAD_WINDOW_PID=""
+}
+
 load_window_report() {
     [[ -n "$LOAD_WINDOW_PID" ]] || return 0
     kill "$LOAD_WINDOW_PID" 2>/dev/null

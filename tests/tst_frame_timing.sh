@@ -24,8 +24,11 @@ failures=0
 # rather than the whole report.
 check_line() {
     local desc=$1 log=$2 want=$3
-    local got rc=0
-    got=$(printf '%s\n' "$log" | python3 "$MEASURE" 2>&1) || rc=$?
+    shift 3
+    local got
+    # The status is asserted by check_rc, per case; here only the line matters,
+    # so the status is deliberately discarded rather than captured and ignored.
+    got=$(printf '%s\n' "$log" | python3 "$MEASURE" "$@" 2>&1 || true)
     if grep -qxF "$want" <<<"$got"; then
         printf 'PASS  %s\n' "$desc"
     else
@@ -84,7 +87,15 @@ check_line 'p95 is nearest-rank, not interpolated' "$twenty" 'render  max=12 mea
 # idle stretches between the animations: they are not dropped frames and must
 # not read as a frame rate collapse.
 paced=$(gap 16; gap 17; gap 16; gap 500; gap 16)
-check_line 'fps comes off the median gap' "$paced" 'pacing  fps=62.5 median-gap=16ms max-gap=500ms over-20ms=1/5'
+check_line 'fps comes off the p50 gap' "$paced" 'pacing  fps=62.5 p50-gap=16ms max-gap=500ms over-20ms=1/5'
+
+# #22 §5 is "one repaint a minute, **on the minute**", and a count cannot say
+# that — #73 proved it with the list, [59999, 59999, 60000, …]. The idle
+# harness asks for the gaps at or over a threshold so the second window's
+# same-moment render does not read as a second repaint.
+check_line 'the gaps themselves can be listed' \
+    "$(gap 16; gap 59999; gap 8; gap 60000)" \
+    'gaps    60.0s, 60.0s' --list-gaps 1000
 
 # --- the gate ---------------------------------------------------------------
 check_rc 'a clean run passes'                  "$(frame 4 2 1)"   0 --budget-ms 8
@@ -93,9 +104,19 @@ check_rc 'swap over the budget alone passes'   "$(frame 17 0 17)" 0 --budget-ms 
 check_rc 'a log with no frames fails'          "nothing here"     1 --budget-ms 8
 
 # A run that did not collect enough frames has not measured the criterion,
-# whatever its numbers say — the interaction failed to drive anything.
-check_rc 'too few frames fails'                "$(frame 0 0 0)"   1 --budget-ms 8 --min-frames 100
+# whatever its numbers say — the interaction failed to drive anything. That is
+# **rc 2, inconclusive**, not rc 1: "the budget is blown" and "there is no
+# measurement here" are different sentences, and #95 exists because the second
+# one was read as the first for eight tickets.
+check_rc 'too few frames is inconclusive, not a failure' \
+    "$(frame 0 0 0)"   2 --budget-ms 8 --min-frames 100
 check_rc 'enough frames passes'                "$(frame 0 0 0)"   0 --budget-ms 8 --min-frames 1
+
+# And the two verdicts do not mask each other: a run that is both short and
+# over budget is still inconclusive, because the frames it did collect are not
+# a sample of anything.
+check_rc 'short and over budget is still inconclusive' \
+    "$(frame 20 20 0)" 2 --budget-ms 8 --min-frames 100
 
 if (( failures )); then
     printf '\n%d frame-timing check(s) failed\n' "$failures" >&2

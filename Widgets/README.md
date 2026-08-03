@@ -7,6 +7,7 @@ The dumb reusable kit ([architecture #12](https://github.com/danielbaldwin47/for
 | `Icon.qml` | A Lucide glyph, addressed by name, recoloured live |
 | `DebouncedLoader.qml` | Content lifetime for windows that outlive their visibility |
 | `Ridgeline.qml` | A row of forms whose height and opacity encode state, read as receding strata |
+| `Sparkline.qml` | A minute of a fraction as a fixed-slot row, newest at the right |
 
 One rule, and it is the whole point of the directory:
 

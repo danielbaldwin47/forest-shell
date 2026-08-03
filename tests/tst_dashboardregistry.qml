@@ -109,12 +109,20 @@ TestCase {
         verify(!registry.same(null, ["calendar"]));
     }
 
-    function test_the_two_cards_this_ticket_ships_are_both_here() {
+    function test_the_four_cards_the_inventory_names_are_all_here() {
+        // #49 built the month and the player; #50 the two data cards, which
+        // were in the settings vocabulary a ticket before they were drawable.
         verify(registry.known("calendar"));
         verify(registry.known("media"));
-        // #50's two are vocabulary and not registry: a name the shell can keep
-        // in a config file, and cannot yet draw.
-        verify(!registry.known("weather"));
-        verify(!registry.known("systemMonitor"));
+        verify(registry.known("weather"));
+        verify(registry.known("systemMonitor"));
+    }
+
+    function test_the_default_dashboard_is_the_inventorys_four_cards() {
+        // #9's dashboard, in its order: the month, the weather, the machine,
+        // what is playing. The header is not among them — it is what the panel
+        // is rather than a card.
+        compare(store.defaults(settings.spec).dashboard.cards,
+                ["calendar", "weather", "systemMonitor", "media"]);
     }
 }

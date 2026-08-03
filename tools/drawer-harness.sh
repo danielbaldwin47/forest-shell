@@ -26,7 +26,10 @@
 #      another rather than taking the fog down between them
 #   8i. the dashboard is the fifth (#49): it registers, opens, stacks the cards
 #      the config named, builds its media card from the player on the bus, and
-#      seeks it to a point in the track
+#      seeks it to a point in the track. Since #50 it also carries the two data
+#      cards, and the sampler behind one of them is a *lifecycle*: nothing
+#      samples the machine at startup, the system-monitor card starts the
+#      sampler when it appears, and closing the dashboard stops it again
 #   8e. the four service facades #44 added come up and say so
 #   8f. every control-centre toggle is wired: each press logs what it asked for
 #      and the facade answers — working or refusing
@@ -478,6 +481,23 @@ else
     nested_fail 'there is no `dashboard` ipc target'
 fi
 
+# #50's first acceptance criterion, checked *before* the panel is ever opened:
+# no sampling and no network at startup. The weather service is on the deferred
+# list and the sampler is deliberately not (Core/ServiceInit.qml) — so at this
+# point in the session the weather has read its cache and said so, and nothing
+# has read /proc even once.
+if grep -qa 'sysmon: sampling every' "$NESTED_SHELL_LOG"; then
+    nested_fail 'the system monitor was sampling before anything opened the dashboard'
+else
+    nested_pass 'nothing sampled the machine at startup'
+fi
+
+if grep -qa 'weather: no place configured' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the weather service came up at the deferred stage without fetching'
+else
+    nested_fail 'the weather service never announced itself at the deferred stage'
+fi
+
 mark=$(log_lines)
 nested_ipc call dashboard toggle > /dev/null
 expect_since "$mark" 'drawers: dashboard opened on ' \
@@ -485,11 +505,32 @@ expect_since "$mark" 'drawers: dashboard opened on ' \
 
 # The panel's own line, and the reason it exists: it is the evidence that the
 # stack was assembled from `dashboard.cards` rather than drawn from a hardcoded
-# list. The two names are asserted, because unlike the control centre's tiles
-# they do not depend on this machine's hardware — the shipped default is the
-# calendar and the media card, in that order.
-expect_since "$mark" 'dashboard: 2 card\(s\): calendar, media' \
+# list. The four names are asserted, because unlike the control centre's tiles
+# they do not depend on this machine's hardware — the shipped default is #9's
+# inventory in its order.
+expect_since "$mark" 'dashboard: 4 card\(s\): calendar, weather, systemMonitor, media' \
     'the dashboard stacked the cards the config named, in the config order'
+
+# The weather card with nowhere configured, which is the state a fresh install
+# is in and the one the nested session runs in: it says so rather than sitting
+# blank, and — the point — it puts nothing on the wire. The auto mode is opt-in
+# (Core/SettingsSchema.qml at `weatherTime.weather.place`), so a shell nobody has
+# configured never asks a geolocation service anything.
+expect_since "$mark" 'dashboard: weather unset' \
+    'the weather card says it has not been told where it is'
+
+# The sampler, and the whole reason it is a subscription: it starts when the
+# card that needs it appears, and #50's acceptance criterion is that it stops
+# again. This is the first half.
+expect_since "$mark" 'sysmon: sampling every [0-9]+ms for 1 watcher\(s\)' \
+    'the system monitor card started the sampler when it appeared'
+
+# What the machine answered. The row count is not asserted: a machine with no
+# thermal sensor gets three rows and one with a sensor gets four, and both are
+# real answers (Services/System/SystemStatsPolicy.qml drops the row rather than
+# dashing it).
+expect_since "$mark" 'dashboard: system monitor [0-9]+ row\(s\)' \
+    'the system monitor card built its rows from the sampler'
 
 # The calendar's line names a real month rather than a placeholder. Which month
 # is not asserted — the nested session runs on today's date, whatever today is —
@@ -565,6 +606,14 @@ expect_since "$mark" 'drawers: dashboard → controlcenter' \
     'the dashboard and the control centre swap rather than stacking'
 expect_quiet_since "$mark" 'drawers: dashboard closed' \
     'the swap does not take the fog down on its way'
+
+# The second half of #50's subscription criterion, and the one that is a *cost*
+# rather than a feature: the dashboard going away destroys the card, the card
+# releases its subscription, and four file reads a second stop. A drawer swap is
+# the harder case than a plain close — the panel is replaced rather than
+# dismissed — so it is the one asserted.
+expect_since "$mark" 'sysmon: sampling stopped — nothing is watching' \
+    'the sampler stopped when the dashboard was replaced'
 
 mark=$(log_lines)
 nested_ipc call controlcenter toggle > /dev/null

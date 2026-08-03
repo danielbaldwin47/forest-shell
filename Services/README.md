@@ -11,7 +11,8 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Hardware/` | Battery, brightness, sensors, input devices |
 | `Networking/` | Wi-Fi, Bluetooth, VPN |
 | `Launcher/` | The launcher's providers and the dispatcher that routes to them |
-| `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47) |
+| `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47), `SystemStats` (#50) |
+| `Weather/` | The forecast behind the dashboard's weather card (#50) |
 | `Theming/` | The three palette modes behind `Core/Theme.qml` |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
@@ -37,7 +38,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Fourteen of them exist so far:
+Sixteen of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -159,6 +160,31 @@ Fourteen of them exist so far:
   surface. That is the thing to re-check before another import is added at
   either end: the invariant is that the arrows do not close, not that they
   never leave `Services/`.
+
+- `System/SystemStats.qml` and `Weather/Weather.qml` (#50) — the dashboard's two
+  data cards, and between them the two ends of the force-touch rule.
+
+  `Weather` is on the deferred list for what it does *not* do there: naming it
+  constructs it, and construction reads the cached forecast out of `state.json`
+  — a file read, no network. Without the line the cache would only be read the
+  first time a dashboard opened, so every session's first open would show an
+  empty card while a request was in flight. The request itself waits for a card
+  to appear over a stale reading, and the refresh timer runs only while one is
+  on screen; a shell nobody has opened the dashboard on makes no HTTP at all.
+  It is also the one service here that speaks to the network, and the one place
+  the shell uses `XMLHttpRequest` rather than a subprocess — there is no tool to
+  wrap, so there is no exit status to read and no missing binary to report.
+
+  `SystemStats` is deliberately **not** named in `Core/ServiceInit.qml`, and it
+  is the sharpest case for the rule cutting the other way. It is the one service
+  that costs something continuously — four file reads a second — so it samples
+  only while something holds a subscription (`watch()` / `release()`), which the
+  dashboard card takes while it is on screen and the optional bar module takes
+  for the session. Nothing to force-touch: there is no startup work, and a
+  singleton nobody has subscribed to has nothing to start. Both edges are
+  logged, because "sampling stopped when the drawer closed" is an acceptance
+  criterion and a lifecycle nothing logs has two candidate causes (#81);
+  `tools/drawer-harness.sh` reads those two lines.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

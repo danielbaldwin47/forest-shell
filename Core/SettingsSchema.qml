@@ -91,6 +91,12 @@ QtObject {
     /// does for the optional modules nobody has built.
     readonly property var dashboardCards: ["calendar", "media", "weather", "systemMonitor"]
 
+    /// What a temperature and a wind speed are measured in (#50). Two systems
+    /// and not four keys: nobody wants their temperature in Celsius and their
+    /// wind in miles per hour, and Open-Meteo takes the pair as two parameters
+    /// Services/Weather/WeatherPolicy.qml derives from this one word.
+    readonly property var weatherUnits: ["metric", "imperial"]
+
     /// Model aliases, not ids: the launcher passes these through to `--model`
     /// (#41). `opusplan` is a plan-mode alias and resolves to sonnet under
     /// `-p`, so it is deliberately not offered.
@@ -230,10 +236,35 @@ QtObject {
             // #50's weather and system-monitor cards survive a round trip
             // through this version.
             //
-            // The default is #9's dashboard minus the two cards that need #50:
-            // the month, and what is playing.
-            cards: { def: ["calendar", "media"],
+            // The default is #9's four-card dashboard: the month, the weather,
+            // the machine and what is playing. The header is not in the list —
+            // it is what the panel *is*, not a card.
+            cards: { def: ["calendar", "weather", "systemMonitor", "media"],
                      coerce: c.arrayOf(c.string, "dashboard.cards") },
+
+            // What the system-monitor card samples, and how often (#50).
+            //
+            // Here rather than under `system` because these are the *card's*
+            // knobs: the sampler exists for it, runs only while something is
+            // watching it (Services/System/SystemStats.qml), and a machine with
+            // the card off never reads a value at either of these settings.
+            systemMonitor: {
+                // Seconds between samples. One is the readable maximum — a
+                // sparkline updating faster than that is a shimmer rather than
+                // a reading — and ten is a monitor that has become a summary.
+                // The floor is not zero for the obvious reason: a zero-interval
+                // timer is a busy loop reading four files.
+                intervalSeconds: { def: 1, coerce: c.integer(1, 10),
+                                   label: "Seconds between system samples" },
+
+                // Which filesystem the disk row is about. One and not all of
+                // them: a machine with fifteen mounts would need the card to
+                // choose anyway, and the one that matters is where the user's
+                // files are. A path that is not a mount point drops the row
+                // with a warning rather than showing a wrong number.
+                diskPath: { def: "/", coerce: c.path,
+                            label: "The filesystem the disk row is about" }
+            },
 
             // The header, which is a person rather than a card: a name and a
             // face beside the date (#9).
@@ -298,7 +329,45 @@ QtObject {
         },
 
         weatherTime: {
-            // Location, units and clock format land with #50.
+            // The weather card (#50). Open-Meteo, keyless, and asked about one
+            // place — Services/Weather/WeatherPolicy.qml builds every URL these
+            // keys turn into.
+            weather: {
+                // A place name, geocoded once and then cached in `state.json`
+                // with the reading. `auto` is #9's optional IP-based mode.
+                //
+                // Empty is the default and it means **neither**: the card says
+                // it has not been told where it is, and no request is made.
+                // That is deliberately not the pattern `dashboard.profile.name`
+                // and `wallpaper.folder` use, where empty means "work it out" —
+                // working this one out means asking a geolocation service what
+                // this IP looks like, which is the one request this shell makes
+                // that tells a third party something rather than only asking it
+                // something. A shell does not make that request because nobody
+                // filled a field in; `auto` is how it is asked for.
+                place: { def: "", coerce: c.string,
+                         label: "The place the weather card is about" },
+
+                units: { def: "metric", coerce: c.oneOf(schema.weatherUnits),
+                         label: "Temperature and wind units" },
+
+                // How often a card left on screen re-fetches. Nothing polls
+                // behind a closed drawer at all (Services/Weather/Weather.qml),
+                // so this is the interval of an *open* dashboard — and the
+                // staleness threshold that decides whether opening one fetches.
+                // Thirty minutes is roughly how often the upstream model
+                // updates; the floor is five because a card refreshing faster
+                // than the forecast changes is a request that answers with the
+                // same numbers.
+                refreshMinutes: { def: 30, coerce: c.integer(5, 720),
+                                  label: "Minutes between weather refreshes" },
+
+                // Rows in the forecast strip, including today. Seven is the
+                // API's free ceiling; four is a strip that fits the 380px panel
+                // without the rows becoming columns of two characters.
+                days: { def: 4, coerce: c.integer(1, 7),
+                        label: "Days in the forecast strip" }
+            },
 
             // Night light (#44). Here rather than under `appearance` because
             // this is the section that will own sunset — the schedule #50

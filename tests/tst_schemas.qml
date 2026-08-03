@@ -189,9 +189,15 @@ TestCase {
     function test_the_dashboard_carries_its_cards_and_its_header() {
         // #49. The card list is one key and not one per card, because the order
         // is the whole of what it decides (Surfaces/Drawers/DashboardRegistry.qml).
+        //
+        // #50's two sampler knobs are here rather than under `system` because
+        // they are the *card's*: the sampler exists for it and runs only while
+        // something is watching it (Services/System/SystemStats.qml).
         compare(store.leafPathsUnder(settings.spec, "dashboard").sort(),
-                ["dashboard.cards", "dashboard.profile.avatar", "dashboard.profile.name"]);
-        compare(store.defaults(settings.spec).dashboard.cards, ["calendar", "media"]);
+                ["dashboard.cards", "dashboard.profile.avatar", "dashboard.profile.name",
+                 "dashboard.systemMonitor.diskPath", "dashboard.systemMonitor.intervalSeconds"]);
+        compare(store.defaults(settings.spec).dashboard.cards,
+                ["calendar", "weather", "systemMonitor", "media"]);
     }
 
     function test_the_osd_keys_live_under_the_control_centre() {
@@ -210,11 +216,47 @@ TestCase {
         // #44 puts them here rather than under `appearance` because this is the
         // section that will own sunset (#50) — the schedule needs a location,
         // and a warmth key three sections away from the times that drive it is
-        // a key nobody finds.
+        // a key nobody finds. #50 brought that location: the weather card's
+        // four keys are its neighbours here.
         compare(store.leafPathsUnder(settings.spec, "weatherTime").sort(),
                 ["weatherTime.nightLight.command",
                  "weatherTime.nightLight.offCommand",
-                 "weatherTime.nightLight.temperature"]);
+                 "weatherTime.nightLight.temperature",
+                 "weatherTime.weather.days",
+                 "weatherTime.weather.place",
+                 "weatherTime.weather.refreshMinutes",
+                 "weatherTime.weather.units"]);
+    }
+
+    function test_the_weather_card_is_not_configured_into_a_location_lookup() {
+        // The auto mode is opt-in: an empty place means "nowhere configured"
+        // and makes no request at all, rather than being read as permission to
+        // ask a geolocation service about this address
+        // (Services/Weather/WeatherPolicy.qml, `mode`).
+        compare(store.defaults(settings.spec).weatherTime.weather.place, "");
+    }
+
+    function test_a_hand_edited_refresh_cannot_hammer_the_forecast_service() {
+        // Clamped rather than refused, which is what `c.integer` does with a
+        // range: a hand-edited 1 becomes the floor rather than falling back to
+        // the default, so the file still says roughly what its author meant.
+        const weather = settings.spec.weatherTime.weather;
+        compare(weather.refreshMinutes.coerce(1), 5);
+        compare(weather.refreshMinutes.coerce(9999), 720);
+        compare(weather.refreshMinutes.coerce(5), 5);
+        // And a unit system this shell does not have falls back rather than
+        // being passed through to the API as a query parameter.
+        compare(weather.units.coerce("kelvin"), undefined);
+        compare(weather.units.coerce("imperial"), "imperial");
+    }
+
+    function test_a_hand_edited_sample_interval_cannot_become_a_busy_loop() {
+        // A zero-interval timer is four file reads in a tight loop; the floor
+        // is what a hand-edit lands on instead.
+        const monitor = settings.spec.dashboard.systemMonitor;
+        compare(monitor.intervalSeconds.coerce(0), 1);
+        compare(monitor.intervalSeconds.coerce(1), 1);
+        compare(monitor.intervalSeconds.coerce(11), 10);
     }
 
     function test_the_idle_ladder_lives_under_system() {

@@ -21,6 +21,7 @@ import qs.Services.Networking
 import qs.Services.Hardware
 import qs.Services.System
 import qs.Services.Launcher
+import qs.Services.Weather
 
 Singleton {
     id: root
@@ -115,6 +116,22 @@ Singleton {
         // silent in the worst possible way — a machine that never locks, and a
         // suspend that never waits for the lock it did not take.
         //
+        // Weather (#50) is here for what it does *not* do. Naming it constructs
+        // it, and construction reads the cached forecast out of `state.json` —
+        // a file read, no network. The first request waits for the card to
+        // appear over a stale reading, which is what keeps the shell's startup
+        // free of network cost and keeps a poll from running behind a closed
+        // drawer (#22 §5). Without a line here the cache would only be read the
+        // first time a dashboard opened, so the first open of every session
+        // would show an empty card while a fetch was in flight.
+        //
+        // Services/System/SystemStats.qml is deliberately *not* on this list,
+        // and it is the sharpest case for the rule cutting the other way: it is
+        // the one service in this shell that costs something continuously, it
+        // does nothing at all until a surface subscribes, and there is no
+        // startup work for a force-touch to bring forward. The dashboard card
+        // and the optional bar module construct it by using it.
+        //
         // Deferred rather than sync, because the first stage is minutes away and
         // the wallpaper is not: the only cost of arriving a frame late is a
         // ladder that starts counting a frame late.
@@ -122,7 +139,7 @@ Singleton {
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
                             PowerProfiles, NightLight, Vpn,
-                            LogindBridge, Idle]);
+                            LogindBridge, Idle, Weather]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

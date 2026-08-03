@@ -23,14 +23,15 @@ QtObject {
     /// name → `{ file, label }`. `file` is resolved against `Cards/` by the
     /// dashboard; `label` is what a settings GUI (#55) will call it.
     ///
-    /// Two entries, which is what #49 ships. The two data cards — weather and
-    /// the system monitor — are #50's, and they are deliberately *not* here
-    /// while they cannot be drawn: a registry entry naming a file nobody wrote
-    /// is a card that loads as a warning. They are in the settings vocabulary
-    /// instead (Core/SettingsSchema.qml), which is what keeps them in a config
-    /// file written against a newer shell.
+    /// The four cards #9 named. #49 built the month and the player, and #50
+    /// the two data cards — which were in the settings vocabulary before they
+    /// were here, deliberately: a name a config may carry is not the same thing
+    /// as a file this shell can draw, and a registry entry naming a file nobody
+    /// has written yet is a card that loads as a warning.
     readonly property var cards: ({
         calendar: { file: "CalendarCard.qml", label: "Calendar" },
+        weather: { file: "WeatherCard.qml", label: "Weather" },
+        systemMonitor: { file: "SystemMonitorCard.qml", label: "System monitor" },
         media: { file: "MediaCard.qml", label: "Media" }
     })
 

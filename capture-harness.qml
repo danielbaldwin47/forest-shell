@@ -718,6 +718,46 @@ ShellRoot {
                     now: new Date(2026, 7, 1, 19, 26),
                     profile: { name: "Daniel",
                                avatar: Config.values.wallpaper.path },
+                    // The weather (#50), posed for the same reason the calendar
+                    // is: the live card is a picture of the sky over whoever
+                    // ran the capture, on the day they ran it, and on a machine
+                    // with no network it is a line of small print. An overcast
+                    // afternoon with rain coming is the layout worth
+                    // photographing — four columns of two temperatures each
+                    // inside a 380px panel is the #80 shape.
+                    weather: {
+                        status: "ready",
+                        label: "Boston, Massachusetts, US",
+                        message: "",
+                        current: { temperature: 24.3, feelsLike: 25.1,
+                                   humidity: 61, wind: 12.4, code: 3, day: true },
+                        days: [
+                            { date: "2026-08-01", code: 3, high: 26.4, low: 18.2 },
+                            { date: "2026-08-02", code: 61, high: 22.1, low: 17.0 },
+                            { date: "2026-08-03", code: 0, high: 27.9, low: 19.4 },
+                            { date: "2026-08-04", code: 95, high: 24.6, low: 18.8 }
+                        ]
+                    },
+                    // The machine, posed as the sampler's own two values rather
+                    // than as finished rows — the card runs them through the
+                    // same policy the live one does, so a capture cannot pass
+                    // against row rules the shell does not use.
+                    system: {
+                        sample: { cpu: 0.42, memory: 0.61, disk: 0.53,
+                                  temperature: 62.5,
+                                  memoryUsedKb: 9993420, memoryTotalKb: 16384000,
+                                  diskUsedKb: 491470000, diskTotalKb: 982940000 },
+                        history: {
+                            cpu: root.wave(0.42, 0.30, 7),
+                            memory: root.wave(0.61, 0.05, 3),
+                            disk: root.wave(0.53, 0.00, 1),
+                            // A machine whose first samples are missing, which
+                            // is what every freshly-opened card looks like —
+                            // the gap at the left of the row is in the picture
+                            // on purpose.
+                            temperature: root.wave(0.50, 0.18, 5, 12)
+                        }
+                    },
                     media: {
                         showing: true,
                         // The longest thing this row ever carries, which is the
@@ -921,6 +961,23 @@ ShellRoot {
     /// desktop-entry scan streams in, so its height at `Component.onCompleted`
     /// is the height of an empty card.
     property var describeScene: null
+
+    /// A sparkline's worth of samples, generated rather than typed out: sixty
+    /// numbers written into the pose above would be sixty numbers to read past
+    /// (#50). Deterministic — a sine and not a random walk — because the whole
+    /// point of a posed capture is that the same picture is taken twice.
+    ///
+    /// `gap` leading samples come back as NaN, which is what a card that has
+    /// only just opened actually holds.
+    function wave(centre: real, swing: real, period: int, gap: int): var {
+        const out = [];
+        const missing = gap === undefined ? 0 : gap;
+        for (let i = 0; i < 60; i++)
+            out.push(i < missing
+                     ? NaN
+                     : Math.max(0, Math.min(1, centre + swing * Math.sin(i / period))));
+        return out;
+    }
 
     /// An item's bounds in the grabbed scene's coordinates, as `x,y,WxH` —
     /// the spelling tools/measure-contrast.py takes for `--region`.

@@ -225,14 +225,24 @@ ShellRoot {
             Loader {
                 id: legibility
                 active: root.clampLegibility
+                // The scene size, not the screen's: the Backdrop above draws the
+                // wallpaper into `scene`, so that is the item PreserveAspectCrop
+                // is resolved against and that is the crop this picture shows.
+                // Left to assume the screen, the clamp would solve for a
+                // different crop of the same file and the gate would be grading
+                // a mismatched pair.
                 Component.onCompleted: {
                     if (active)
                         setSource(Qt.resolvedUrl("Surfaces/Bar/BarLegibility.qml"),
-                                  { screen: root.screen });
+                                  { screen: root.screen,
+                                    viewWidth: root.sceneWidth,
+                                    viewHeight: root.sceneHeight });
                 }
             }
 
             BarSurface {
+                id: barFill
+
                 anchors {
                     top: parent.top
                     left: parent.left
@@ -256,8 +266,18 @@ ShellRoot {
                 // The clamp is a wallpaper read, so it lands after the first
                 // frame by construction. Grabbing before it does would
                 // photograph the unclamped fill and call it the shipped one.
+                //
+                // And waiting on the *decision* is not enough: the fill fades to
+                // it over `motionSlow`, so a grab taken the moment the floor is
+                // known catches the fade. Three runs on one wallpaper at one
+                // identical `painted` read 5.05:1, 4.76:1 and 4.45:1 that way —
+                // a gate that reports a different answer each time it is asked,
+                // which is worse than one that is merely wrong. Waiting for the
+                // fill to settle at the value it was told is what makes the
+                // measurement a measurement.
                 root.sceneReady = () => !root.clampLegibility
-                    || (legibility.item && legibility.item.ready);
+                    || (legibility.item && legibility.item.ready
+                        && Math.abs(barFill.paintedOpacity - barBackdrop.painted) < 0.002);
             }
         }
     }
@@ -273,6 +293,12 @@ ShellRoot {
         id: barFullScene
 
         Backdrop {
+            // This one is the real BarContent, so its clamp reads the *screen's*
+            // crop of the wallpaper while the Backdrop draws the scene's. The
+            // fill-only scene above is told the difference because it is the
+            // contrast gate; this scene is refused `--contrast` outright
+            // (tools/capture-harness.sh), so the floor it lands on only has to
+            // be a plausible one for the layout picture, not the measured one.
             BarContent {
                 id: fullBar
 
@@ -289,7 +315,7 @@ ShellRoot {
                 // Same wait as the fill-only scene: this is the real
                 // BarContent, so its fill is clamped too and grabbing early
                 // would photograph the unclamped one (#79).
-                root.sceneReady = () => fullBar.legibilityReady;
+                root.sceneReady = () => fullBar.legibilitySettled;
                 root.sceneDescription = "bar=" + Config.values.bar.height
                     + " modules=" + JSON.stringify(Config.values.bar.modules.left)
                     + "/" + JSON.stringify(Config.values.bar.modules.center)

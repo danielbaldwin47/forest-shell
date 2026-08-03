@@ -42,11 +42,21 @@ Item {
     /// a fill the shell does not ship (capture-harness.qml).
     readonly property bool legibilityReady: legibility.item ? legibility.item.ready : false
 
+    /// Whether the fill has finished fading to the floor as well as being told
+    /// it. The clamp arrives after the first frame and lands on the fog curve,
+    /// so `legibilityReady` is true for ~140ms before the bar looks the way it
+    /// is going to — long enough for a capture to come back with a colour the
+    /// shell never settles on (capture-harness.qml).
+    readonly property bool legibilitySettled: root.legibilityReady
+        && Math.abs(surface.paintedOpacity - surface.fillOpacity) < 0.002
+
     BarRegistry { id: registry }
 
     SurfaceOpacity { id: opacityPolicy }
 
     BarSurface {
+        id: surface
+
         anchors.fill: parent
         settings: root.settings.surface
         radius: root.settings.floating ? root.settings.floatRadius : 0

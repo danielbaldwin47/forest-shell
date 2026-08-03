@@ -74,17 +74,24 @@ TabPage {
 
     SectionNote {
         // #94: the sentence that used to be here quoted 7.12:1 at 0.86 and
-        // 4.44:1 at 0.60. Measured over the strip the bar covers, those are
-        // 4.85:1 and 2.48:1 — so the copy told the user their bar was readable
-        // at settings where it is not. Both numbers below come out of
-        // `tools/measure-strip-floor.py ~/Pictures/wallpaper`.
-        note: "Fill opacity is taste, not legibility. Over the brightest wallpaper here, "
-              + "secondary text on the bar measures 4.85:1 at 0.86 and 2.82:1 at 0.65, so "
-              + "the slider on its own cannot keep the bar readable — the lowest setting "
-              + "that would is 0.84. Instead the bar reads the strip of wallpaper behind "
-              + "it and paints more solid than you asked only where it has to, to hold the "
-              + "design system's 4.5:1 floor. Over a dark wallpaper you get exactly what "
-              + "you set."
+        // 4.44:1 at 0.60 — figures for the fill against nothing, which told the
+        // user their bar was readable at settings where it is not.
+        //
+        // Every number below is a line of `tools/measure-strip-floor.py
+        // ~/Pictures/wallpaper` over the 171 wallpapers on this machine: 4.73
+        // and 2.72 from "what a fixed setting leaves on the worst wallpaper
+        // here", 0.84 from p100 of the opacity each one needs. #94 asks that the
+        // copy be reproducible from a documented command, so the copy quotes
+        // what that command prints rather than a capture of one wallpaper —
+        // `capture-harness.sh --surface bar --contrast` puts italy.png at 4.85:1
+        // and 2.82:1, which is the same claim about a kinder image.
+        note: "Fill opacity is taste, not legibility. Over the least forgiving wallpaper "
+              + "here, secondary text on the bar measures 4.73:1 at 0.86 and 2.72:1 at "
+              + "0.65, so the slider on its own cannot keep the bar readable — the lowest "
+              + "setting that would is 0.84. Instead the bar reads the strip of wallpaper "
+              + "behind it and paints more solid than you asked only where it has to, to "
+              + "hold the design system's 4.5:1 floor. Over a dark wallpaper you get "
+              + "exactly what you set."
     }
 
     Repeater {

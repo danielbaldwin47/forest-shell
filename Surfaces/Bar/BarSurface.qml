@@ -47,6 +47,18 @@ Item {
     /// numbers, and only one of them belongs in settings.json.
     property real fillOpacity: settings.opacity
 
+    /// What the fill is painting *right now*, which is not `fillOpacity` while
+    /// the Behavior below is still running. The legibility floor (#79) arrives
+    /// after the first frame and fades in over `motionSlow`, so anything that
+    /// photographs the bar has to wait for this to reach `fillOpacity` rather
+    /// than for the floor to be decided — measured: three captures taken on the
+    /// decision alone read 5.05:1, 4.76:1 and 4.45:1 off one identical fill.
+    readonly property real paintedOpacity: fill.opacity
+
+    /// The band arithmetic, here only for the two constants the top-light
+    /// gradient below is drawn from — see `topLightStop`.
+    readonly property SurfaceOpacity band: SurfaceOpacity {}
+
     property real radius: 0
 
     /// Which edge the hairline sits on — the one facing the desktop, since it
@@ -105,8 +117,13 @@ Item {
         // captured: `Qt.lighter` takes a factor rather than a delta, so the
         // 0-0.4 setting is scaled by 4 to reach a useful range (0.05 → a 1.2
         // factor, which is the "barely perceptible" the brief asks for), and
-        // the stop at 0.55 puts the fade out just past halfway so the bottom
-        // half of the bar stays flat.
+        // the stop just past halfway leaves the bottom half of the bar flat.
+        //
+        // Both come from SurfaceOpacity rather than being written here, because
+        // that file predicts this gradient to decide the legibility floor (#79)
+        // and a stop the two disagree on is a floor calculated for a bar nobody
+        // draws — which fails as a passing number rather than as a wrong-looking
+        // bar.
         Rectangle {
             anchors.fill: parent
             radius: fill.radius
@@ -114,9 +131,10 @@ Item {
             gradient: Gradient {
                 GradientStop {
                     position: 0.0
-                    color: Qt.lighter(Theme.surface, 1.0 + root.settings.topLightAmount * 4)
+                    color: Qt.lighter(Theme.surface,
+                                      1.0 + root.settings.topLightAmount * band.topLightScale)
                 }
-                GradientStop { position: 0.55; color: "transparent" }
+                GradientStop { position: band.topLightStop; color: "transparent" }
             }
         }
     }

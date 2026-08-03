@@ -92,6 +92,10 @@ QtObject {
         // The hairline is not drawn on a floating bar — an island has no
         // horizon, it has a shape (Surfaces/Bar/BarSurface.qml).
         hairline: root.surface.hairline && !Config.values.bar.floating,
+        // The same expression BarContent hands BarSurface: a top-anchored bar
+        // draws its edge along the bottom, and a bottom-anchored one along the
+        // top.
+        hairlineAtBottom: Config.values.bar.position === "top",
         rows: Config.values.bar.height
     })
 
@@ -109,14 +113,30 @@ QtObject {
     property int imageWidth: 0
     property int imageHeight: 0
 
+    /// The area the wallpaper is painted into, which is what PreserveAspectCrop
+    /// resolves against and so what decides which pixels of the file are on
+    /// screen at all. The screen, in the shell — the wallpaper is one
+    /// full-screen item behind everything (Surfaces/Background/Wallpaper.qml).
+    /// Settable because the capture harness draws that same wallpaper into a
+    /// scene of its own size, and a clamp that assumed the screen there would
+    /// solve for a crop of the file that is not the one in the picture.
+    property int viewWidth: root.screen ? root.screen.width : 0
+    property int viewHeight: root.screen ? root.screen.height : 0
+
     /// The part of the file under the bar, in the file's own pixels. `null`
     /// until the intrinsic size has arrived, which is what keeps the quantizer
     /// from ever reading a rect that is a guess.
-    readonly property var strip: root.screen
-        ? policy.stripRect(root.imageWidth, root.imageHeight,
-                           root.screen.width, root.screen.height,
-                           Config.values.bar.height, Config.values.bar.position)
-        : null
+    ///
+    /// A floating bar is inset from the screen edge and reads the strip it
+    /// actually covers — the flush strip would miss the rows along its far edge
+    /// entirely, and missing rows are the failure that does not show up as a
+    /// wrong number (Surfaces/Bar/Bar.qml).
+    readonly property var strip: policy.stripRect(
+        root.imageWidth, root.imageHeight,
+        root.viewWidth, root.viewHeight,
+        Config.values.bar.height, Config.values.bar.position,
+        Config.values.bar.floating ? Config.values.bar.floatMarginH : 0,
+        Config.values.bar.floating ? Config.values.bar.floatMarginV : 0)
 
     /// How finely the strip is read: 64 cells across the screen, so a cell is
     /// 30px at 1920 and 60px at 3840 — either way narrower than the 100px

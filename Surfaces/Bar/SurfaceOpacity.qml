@@ -29,9 +29,16 @@ import QtQuick
 
 QtObject {
     /// Where the top-light gradient reaches transparent, as a fraction of the
-    /// bar's height. Mirrors the GradientStop in Surfaces/Bar/BarSurface.qml;
-    /// the two have to agree or this predicts a band the bar does not draw.
+    /// bar's height, and the factor the 0-0.4 `topLightAmount` setting is scaled
+    /// by to become a `Qt.lighter` factor.
+    ///
+    /// These are the gradient Surfaces/Bar/BarSurface.qml draws, and it reads
+    /// them from here rather than repeating them: this file predicts that
+    /// gradient in order to decide the legibility floor, so a value the two
+    /// disagree on yields a floor calculated for a bar nobody draws — a wrong
+    /// answer that arrives looking like a right one.
     readonly property real topLightStop: 0.55
+    readonly property real topLightScale: 4
 
     /// The mean colour of assets/noise.png (measured: 130.5/255 on every
     /// channel). The grain is a tiled monochrome texture, so as far as the
@@ -91,10 +98,11 @@ QtObject {
         if (look.topLight) {
             const through = ((row + 0.5) / rows) / topLightStop;
             if (through < 1) {
-                // Qt.lighter takes a factor, and the 0-0.4 setting is scaled by
-                // 4 to reach a useful range — the same arithmetic as the
-                // gradient stop in BarSurface.qml.
-                const lit = Qt.lighter(look.surface, 1.0 + look.topLightAmount * 4);
+                // Qt.lighter takes a factor rather than a delta — the same
+                // arithmetic, from the same constant, as the gradient in
+                // BarSurface.qml.
+                const lit = Qt.lighter(look.surface,
+                                       1.0 + look.topLightAmount * topLightScale);
                 c = blend(lit, fillOpacity * (1 - through), c);
             }
         }
@@ -102,9 +110,14 @@ QtObject {
         c = blend(look.fogWash, look.mistWash, c);
         c = blend(grainColor, look.grain, c);
 
-        // The hairline is the bar's bottom edge at full strength, so it owns
-        // its row outright.
-        if (look.hairline && row === rows - 1)
+        // The hairline is the bar's outer edge at full strength, so it owns its
+        // row outright — the bottom row on a top-anchored bar and the top row on
+        // a bottom-anchored one, which is what `hairlineAtBottom` decides in
+        // Surfaces/Bar/BarSurface.qml. One row in thirty-two, so it moves the
+        // mean by well under a tenth of a ratio point; it is here because a
+        // model that is right for one bar position and quietly wrong for the
+        // other is the kind of thing that gets believed.
+        if (look.hairline && row === (look.hairlineAtBottom === false ? 0 : rows - 1))
             c = look.hairlineColor;
 
         return c;
@@ -193,16 +206,35 @@ QtObject {
     /// Wallpaper.qml), so the file is scaled until it covers the screen and the
     /// overhang is trimmed evenly off both sides of whichever axis is long.
     ///
+    /// `marginH` and `marginV` are the bar's inset from the screen edge, in
+    /// screen pixels — zero for a flush bar, `floatMarginH`/`floatMarginV` for a
+    /// floating one (Surfaces/Bar/Bar.qml). They are not cosmetic here: a
+    /// floating bar reading the flush strip would read eight rows of wallpaper
+    /// it does not cover and miss eight rows it does, and the rows it misses are
+    /// the ones nothing else protects.
+    ///
+    /// `screenWidth`/`screenHeight` are the area the *wallpaper* is drawn into,
+    /// which is the screen in the shell and the scene in the capture harness —
+    /// PreserveAspectCrop is resolved against that item, so a caller that
+    /// passes the wrong one gets a rect from a different crop of the file.
+    ///
     /// Every rect this returns has to sit inside the file. An imageRect that
     /// overhangs is padded with black rather than clamped (measured), and black
     /// reads as "dark wallpaper, no clamp needed" — so an off-by-one here does
     /// not produce a slightly wrong floor, it produces no floor at all.
     function stripRect(imageWidth: int, imageHeight: int,
                        screenWidth: int, screenHeight: int,
-                       barHeight: int, position: string): var {
+                       barHeight: int, position: string,
+                       marginH: int, marginV: int): var {
         if (!(imageWidth > 0) || !(imageHeight > 0)
                 || !(screenWidth > 0) || !(screenHeight > 0))
             return null;
+
+        // A margin wider than the screen it insets is a config that cannot be
+        // drawn; clamped rather than rejected, because the answer still has to
+        // be a rect inside the file.
+        const insetH = Math.max(0, Math.min(marginH || 0, (screenWidth - 1) / 2));
+        const insetV = Math.max(0, Math.min(marginV || 0, screenHeight - 1));
 
         const scale = Math.max(screenWidth / imageWidth, screenHeight / imageHeight);
         const visibleWidth = Math.min(imageWidth, screenWidth / scale);
@@ -210,14 +242,19 @@ QtObject {
         const stripHeight = Math.max(1, Math.min(Math.floor(visibleHeight),
                                                  Math.round(barHeight / scale)));
 
-        const x = Math.max(0, Math.round((imageWidth - visibleWidth) / 2));
-        const top = Math.max(0, Math.round((imageHeight - visibleHeight) / 2));
-        const y = position === "bottom"
-            ? Math.min(imageHeight - stripHeight, Math.round(top + visibleHeight - stripHeight))
-            : Math.min(top, imageHeight - stripHeight);
+        const left = Math.max(0, (imageWidth - visibleWidth) / 2);
+        const top = Math.max(0, (imageHeight - visibleHeight) / 2);
 
-        return Qt.rect(x, Math.max(0, y),
-                       Math.max(1, Math.min(Math.round(visibleWidth), imageWidth - x)),
-                       stripHeight);
+        const x = Math.max(0, Math.min(imageWidth - 1,
+                                       Math.round(left + insetH / scale)));
+        const width = Math.max(1, Math.min(Math.round(visibleWidth - 2 * insetH / scale),
+                                           imageWidth - x));
+        const down = position === "bottom"
+            ? visibleHeight - insetV / scale - stripHeight
+            : insetV / scale;
+        const y = Math.max(0, Math.min(imageHeight - stripHeight,
+                                       Math.round(top + down)));
+
+        return Qt.rect(x, y, width, stripHeight);
     }
 }

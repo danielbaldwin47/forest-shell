@@ -196,6 +196,17 @@ def main():
     print(f"  fails at the 0.65 schema floor: {(truth > 0.65).sum()}/{len(truth)}")
     print(f"  fails at the 0.86 default:      {(truth > 0.86).sum()}/{len(truth)}")
 
+    # What a fixed setting is worth over the worst wallpaper in the folder.
+    # These are the numbers the settings copy quotes (#94 asks that the copy be
+    # reproducible from a documented command, and the percentiles above are not
+    # those numbers) — and they are the whole argument for the clamp: no setting
+    # inside the slider's range is safe on its own.
+    print("\nwhat a fixed setting leaves on the worst wallpaper here")
+    for alpha in (1.0, 0.86, 0.75, 0.65):
+        worst = min(worst_window(s, alpha) for s in strips)
+        print(f"  opacity {alpha:.2f}: {worst:.2f}:1"
+              f"{'' if worst >= TARGET else '   (under ' + str(TARGET) + ':1)'}")
+
     def run(cells, margin):
         picked = np.array([
             lowest_passing(lambda a, c=brightest_cell(s, cells): flat_contrast(c, a, rows),

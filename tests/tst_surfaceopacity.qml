@@ -71,6 +71,18 @@ TestCase {
         fuzzyCompare(middle.r * 255, 112, 4);
     }
 
+    // The hairline is the bar's outer edge, and which edge that is depends on
+    // where the bar is anchored. The top-light does not move with it — the
+    // gradient runs from the top of the band whichever way up the bar is.
+    function test_the_hairline_sits_on_whichever_edge_the_bar_shows() {
+        const bottomBar = Object.assign({}, look, { hairlineAtBottom: false });
+        compare(surface.bandColor(bottomBar, 0.65, white, 0), look.hairlineColor);
+        verify(surface.bandColor(bottomBar, 0.65, white, 31) !== look.hairlineColor);
+        // And the default — no `hairlineAtBottom` at all — is still the bottom,
+        // which is the top-anchored bar the shell ships.
+        compare(surface.bandColor(look, 0.65, white, 31), look.hairlineColor);
+    }
+
     function test_an_opaque_fill_does_not_admit_the_wallpaper() {
         const overWhite = surface.bandLuminance(look, 1.0, white);
         const overBlack = surface.bandLuminance(look, 1.0, black);
@@ -183,7 +195,7 @@ TestCase {
     function test_the_strip_rect_is_the_part_of_the_image_under_the_bar() {
         // A 16:9 image on a 16:9 screen: no crop, the bar covers the top
         // 32/1080 of the image.
-        const exact = surface.stripRect(1920, 1080, 1920, 1080, 32, "top");
+        const exact = surface.stripRect(1920, 1080, 1920, 1080, 32, "top", 0, 0);
         compare(exact.x, 0);
         compare(exact.y, 0);
         compare(exact.width, 1920);
@@ -191,7 +203,7 @@ TestCase {
 
         // A wider-than-16:9 image is cropped left and right, so the strip is
         // narrower than the file and starts inside it.
-        const wide = surface.stripRect(4000, 1000, 1920, 1080, 32, "top");
+        const wide = surface.stripRect(4000, 1000, 1920, 1080, 32, "top", 0, 0);
         verify(wide.width < 4000, "a 4:1 image should be cropped horizontally");
         compare(wide.y, 0);
         // Same shape as the bar, give or take the strip height rounding to a
@@ -200,14 +212,14 @@ TestCase {
 
         // A taller image is cropped top and bottom, so the strip starts below
         // the top of the file.
-        const tall = surface.stripRect(1000, 4000, 1920, 1080, 32, "top");
+        const tall = surface.stripRect(1000, 4000, 1920, 1080, 32, "top", 0, 0);
         compare(tall.x, 0);
         compare(tall.width, 1000);
         verify(tall.y > 0, "a 1:4 image should be cropped vertically, got y=" + tall.y);
     }
 
     function test_the_strip_rect_follows_the_bar_to_the_bottom_edge() {
-        const bottom = surface.stripRect(1920, 1080, 1920, 1080, 32, "bottom");
+        const bottom = surface.stripRect(1920, 1080, 1920, 1080, 32, "bottom", 0, 0);
         compare(bottom.y, 1048);
         compare(bottom.height, 32);
     }
@@ -218,21 +230,54 @@ TestCase {
         // Including sizes where the bar is taller than the whole file, or the
         // file is one pixel: an overhang here is padded with black, and black
         // is the reading that says "no clamp needed".
+        // Margins included, and absurd ones: a float margin wider than the
+        // screen is a config nobody can draw, and the answer still has to be a
+        // rect inside the file rather than a negative width.
         for (const size of [[800, 600], [3840, 1080], [1080, 3840], [1920, 1080],
                             [1, 1], [64, 64], [5000, 40], [40, 5000], [3, 2000]]) {
             for (const edge of ["top", "bottom"]) {
-                const r = surface.stripRect(size[0], size[1], 1920, 1080, 32, edge);
-                verify(r.x >= 0 && r.y >= 0, size + " " + edge + ": rect starts outside");
-                verify(r.x + r.width <= size[0], size + " " + edge + ": rect overhangs width");
-                verify(r.y + r.height <= size[1], size + " " + edge + ": rect overhangs height");
-                verify(r.width >= 1 && r.height >= 1, size + " " + edge + ": empty rect");
+                for (const margin of [[0, 0], [12, 8], [64, 64], [4000, 4000]]) {
+                    const what = size + " " + edge + " margin " + margin;
+                    const r = surface.stripRect(size[0], size[1], 1920, 1080, 32, edge,
+                                                margin[0], margin[1]);
+                    verify(r.x >= 0 && r.y >= 0, what + ": rect starts outside");
+                    verify(r.x + r.width <= size[0], what + ": rect overhangs width");
+                    verify(r.y + r.height <= size[1], what + ": rect overhangs height");
+                    verify(r.width >= 1 && r.height >= 1, what + ": empty rect");
+                }
             }
         }
+    }
+
+    // A floating bar is inset from the screen edge, and the strip has to follow
+    // it there. Reading the flush strip instead would miss the rows along the
+    // bar's far edge — and a row that is never read is never protected, which
+    // is the failure that shows up as a passing number.
+    function test_the_strip_rect_follows_a_floating_bar_off_the_edge() {
+        const flush = surface.stripRect(1920, 1080, 1920, 1080, 32, "top", 0, 0);
+        const floated = surface.stripRect(1920, 1080, 1920, 1080, 32, "top", 12, 8);
+        // 1:1 scale, so the margins land in the file's pixels unchanged.
+        compare(floated.x, 12);
+        compare(floated.y, 8);
+        compare(floated.width, 1920 - 24);
+        compare(floated.height, flush.height);
+
+        // From the bottom edge the inset goes the other way: the bar's last row
+        // is 8px up from the bottom of the screen.
+        const low = surface.stripRect(1920, 1080, 1920, 1080, 32, "bottom", 12, 8);
+        compare(low.y, 1080 - 8 - 32);
+        compare(low.x, 12);
+
+        // And it scales with the image, rather than being applied in screen
+        // pixels to a file that is a different size.
+        const big = surface.stripRect(3840, 2160, 1920, 1080, 32, "top", 12, 8);
+        compare(big.x, 24);
+        compare(big.y, 16);
     }
 
     function test_an_unreadable_image_has_no_strip() {
         // Size 0 means the intrinsic size has not arrived. There is no rect to
         // ask for, and guessing one would sample black.
-        compare(surface.stripRect(0, 0, 1920, 1080, 32, "top"), null);
+        compare(surface.stripRect(0, 0, 1920, 1080, 32, "top", 0, 0), null);
     }
 }

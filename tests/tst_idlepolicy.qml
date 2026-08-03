@@ -237,6 +237,16 @@ TestCase {
                     + "suspend off (no timeout on ac)");
     }
 
+    /// The line a rung logs when its timeout moved under the running shell
+    /// (#139). Pinned to the second, because a re-arm that reported the *old*
+    /// number would read exactly like the bug it exists to rule out — and
+    /// tools/idle-harness.sh greps it verbatim.
+    function test_a_rung_that_re_armed_says_at_what() {
+        compare(policy.armed("dpms", 6), "dpms armed at 6s");
+        compare(policy.armed("lock", policy.seconds(defaults, "lock", true)),
+                "lock armed at 300s");
+    }
+
     function test_a_frozen_ladder_says_which_stages_it_froze() {
         const line = policy.ladderLine(policy.ladder(defaults, true, true), true);
         compare(line.indexOf("dim off (keep awake)") >= 0, true, line);

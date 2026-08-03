@@ -50,4 +50,8 @@ python=$(command -v python3 || true)
 # qmltestrunner only loads QML. It rides along here (#57).
 bash tst_qs_runtime.sh
 
+# Same shape again (#95): the frame budget's arithmetic — parse, percentile,
+# gate — is a decision, but its input is a Qt log and its runner is bash.
+bash tst_frame_timing.sh
+
 exec "$runner" -input .

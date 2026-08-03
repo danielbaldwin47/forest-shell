@@ -26,7 +26,18 @@
 #
 # Idle means idle: do not touch the machine while it runs. A pointer crossing
 # the bar is a hover, a hover is a repaint, and a repaint is the thing being
-# counted.
+# counted. That is checked rather than trusted — a window with a workspace
+# switch or an active-window change in it **exits 2, inconclusive**, which is a
+# third verdict distinct from pass and fail: the shell was driven, so it was
+# never measured. The 1-minute load average over the window is reported next to
+# the numbers for the same reason (tools/load-window.sh).
+#
+# The one that is not obvious, and cost #95 three windows: **an animated window
+# title is input.** The bar tracks the focused window, a terminal running an
+# agent puts a spinner in its title, and the title changes about once a second
+# — so the shell repaints about once a second, correctly, for as long as that
+# window has focus. Measure with the focused window static, or from a workspace
+# with nothing on it at all.
 #
 # The shell pushes a Hyprland layerrule for its own namespace at startup (#78)
 # and there is no clearing verb in the 0.5x syntax, so the rule outlives the
@@ -37,6 +48,8 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # shellcheck source=qs-runtime.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
+# shellcheck source=load-window.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-window.sh"
 
 SECONDS_WINDOW=195
 ENTRY="shell.qml"
@@ -86,6 +99,7 @@ STAMP_PID=$!
 
 cleanup() {
     local exit_status=$?
+    load_window_stop
     pkill -P "$STAMP_PID" 2>/dev/null
     kill "$STAMP_PID" 2>/dev/null
     rm -f "$STAMPS"
@@ -134,7 +148,9 @@ frames()    { local count; count=$(grep -ac 'frame rendered in' "$1" 2>/dev/null
 start_ticks=$(cpu_ticks "$SHELL_PID")
 start_switches=$(switches "$SHELL_PID")
 start_frames=$(frames "$LOG")
+start_lines=$(grep -ac '' "$LOG")
 start_time=$(date +%s.%N)
+load_window_start
 
 note "measuring for ${SECONDS_WINDOW}s — do not touch the machine"
 sleep "$SECONDS_WINDOW"
@@ -143,11 +159,25 @@ end_ticks=$(cpu_ticks "$SHELL_PID")
 end_switches=$(switches "$SHELL_PID")
 end_frames=$(frames "$LOG")
 end_time=$(date +%s.%N)
+load_window_report
 
 if [[ -z "$end_ticks" ]]; then
     echo "the shell died during the window — see $LOG" >&2
     exit 1
 fi
+
+# Was the machine actually idle? Every number below is worthless if it was not,
+# and "do not touch the machine" is an instruction to a human that nothing
+# checks — #95 measured 155 frames in a 195 s window and the log said why:
+# something else on the session was switching workspaces, and each switch
+# animates the ridgeline (#75). That is not the shell failing the criterion,
+# it is the window not being an idle window, and the two must not report the
+# same way. So the shell's own compositor lines are the witness: a workspace
+# focus or an active-window change inside the window means there was input on
+# this session, from a human or from another agent driving hyprctl.
+compositor_events=$(tail -n +"$((start_lines + 1))" "$LOG" \
+    | grep -ac 'compositor: \(workspace .* focused\|focused window\)')
+compositor_events=${compositor_events:-0}
 
 printf '\n'
 python3 - "$start_ticks" "$end_ticks" "$start_switches" "$end_switches" \
@@ -214,14 +244,43 @@ screens=${screens:-1}
 expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
 
 printf '\n'
+if (( compositor_events )); then
+    note "$compositor_events compositor event(s) inside the window — workspace switches or"
+    note "active-window changes, so this session was in use while it was measured"
+    printf '\n'
+fi
+
+# What a driven window does and does not void. Input only ever *adds* work — a
+# workspace switch animates the ridgeline, a hover repaints a module — so a
+# reading that passes its budget under input passes it at rest too, and that
+# pass is real. A reading that fails one has no such argument: it might be the
+# shell, it might be whoever was driving. So the three criteria split by
+# direction rather than all going out together, and only the frame count, whose
+# budget the driving directly writes, is void either way.
+void_count=0
+void() { printf '  \033[33m????\033[0m  %s\n' "$1"; void_count=$((void_count + 1)); }
+driven=$(( compositor_events > 0 ))
+
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then
-    pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
+    if (( driven )); then
+        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5% — under input, so an upper bound"
+    else
+        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
+    fi
+elif (( driven )); then
+    void "idle CPU $(printf '%.3f' "$cpu_percent")% over budget, but the window was driven"
 else
     fail "idle CPU $(printf '%.3f' "$cpu_percent")% over the 0.5% budget"
 fi
 
 if python3 -c "import sys; sys.exit(0 if $switch_rate < 5 else 1)"; then
-    pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
+    if (( driven )); then
+        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s — under input, so an upper bound"
+    else
+        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
+    fi
+elif (( driven )); then
+    void "$(printf '%.2f' "$switch_rate") context switches/s over budget, but the window was driven"
 else
     fail "$(printf '%.2f' "$switch_rate") context switches/s over the 5/s budget"
 fi
@@ -229,11 +288,21 @@ fi
 # The clock is the one thing that may repaint at rest, once a minute on the
 # minute (Surfaces/Bar/Modules/Clock.qml). Anything much past that is an
 # animation that did not stop.
-if (( frame_count <= expected_frames )); then
+if (( driven )); then
+    void "$frame_count frames in ${SECONDS_WINDOW}s, but the window was driven — every"
+    note "     switch and hover in it is a repaint the criterion never asked about"
+elif (( frame_count <= expected_frames )); then
     pass "$frame_count frames in ${SECONDS_WINDOW}s — the clock, and nothing else"
 else
     fail "$frame_count frames in ${SECONDS_WINDOW}s, expected at most $expected_frames"
 fi
+
+# The count alone cannot say "on the minute", which is what #22 §5 actually
+# asks — #73 proved it with the list, `gaps (ms): [59999, 59999, 60000, …]`.
+# The threshold drops the sub-second pairs, which are the second window
+# rendering the same repaint moment rather than a repaint of their own.
+python3 "$(dirname "${BASH_SOURCE[0]}")/measure-frame-timing.py" "$LOG" \
+    --from-line "$start_lines" --list-gaps 1000 2>/dev/null | grep -a '^gaps' | sed 's/^/  ....  /'
 
 # --- the startup gates, from the same run ------------------------------------
 #
@@ -269,5 +338,12 @@ else
 fi
 
 printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+# A real failure outranks a void one: something measured and over budget is a
+# finding whatever else the window contained. Void alone is exit 2 — nothing
+# here is a verdict on the shell, so re-run rather than read it as one.
 (( fail_count )) && exit 1
+if (( void_count )); then
+    printf 'that is %d criterion/criteria this window could not judge — re-run when nothing\nelse is on the compositor\n' "$void_count"
+    exit 2
+fi
 exit 0

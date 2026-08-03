@@ -22,10 +22,16 @@
 #           on the first keypress; an un-corked PipeWire stream holds the suspend
 #           rung and nothing else; Keep Awake freezes every rung and releases
 #           them again; editing settings.json re-arms it under the running
-#           shell; and the lock rung really locks.
+#           shell — both a rung turned on and a rung whose number moved, which
+#           are different code paths and only the second one caught #139; and
+#           the lock rung really locks.
 #   run 2 — the bridge, on a session run 1 is not around to have locked. The
 #           delay inhibitor is held from startup, a sleep raises the lock first,
 #           and the inhibitor is released only after the compositor confirms.
+#   run 3 — the one timeout that moves without anybody editing anything: the
+#           dpms rung tightens to `lockedSeconds` while the session is locked
+#           (#30), and did not (#142). A fresh compositor again, because run 2
+#           ends locked for the same reason run 1 does.
 #
 # ## What is deliberately not driven, and why
 #
@@ -75,6 +81,22 @@ expect_since() {
     done
     nested_fail "$what — nothing matching /$pattern/ since the call"
     return 1
+}
+
+## The other half of expect_since, and it costs its whole window every time it
+## passes: a rung that must *not* fire can only be shown not to have fired by
+## outwaiting the timeout it would have fired on.
+refute_since() {
+    local mark="$1" pattern="$2" what="$3" ticks="${4:-60}"
+    for _ in $(seq 1 "$ticks"); do
+        if since "$mark" | grep -qaE "$pattern"; then
+            nested_fail "$what — /$pattern/ arrived anyway"
+            return 1
+        fi
+        sleep 0.1
+    done
+    nested_pass "$what"
+    return 0
 }
 
 expect_reply() {
@@ -132,8 +154,10 @@ SETTINGS="$SCRATCH/config/forest-shell/settings.json"
 ## Timeouts in minutes, as the schema takes them: 0.05 is three seconds. The dim
 ## rung is off — it would dim the host's panel — and both commands that would
 ## touch the machine are `true`. `$1` is whether the lock rung is armed, which
-## run 1 turns on halfway through and run 2 leaves off.
+## run 1 turns on halfway through and run 2 leaves off; `$2` is the dpms rung's
+## timeout, which check 5 changes without touching whether the rung is armed.
 write_settings() {
+    local dpms="${2:-0.05}"
     cat > "$SETTINGS" <<EOF
 {
   "system": {
@@ -141,7 +165,28 @@ write_settings() {
     "idle": {
       "dim": { "enabled": false },
       "lock": { "enabled": $1, "battery": 0.02, "ac": 0.02 },
-      "dpms": { "enabled": true, "battery": 0.05, "ac": 0.05,
+      "dpms": { "enabled": true, "battery": $dpms, "ac": $dpms,
+                "offCommand": "true", "onCommand": "true" },
+      "suspend": { "enabled": false, "battery": 0, "ac": 0 }
+    }
+  }
+}
+EOF
+}
+
+## Run 3's ladder: the dpms rung on its own, with an unlocked timeout far longer
+## than the locked one so that the swap is the only thing that can blank the
+## screen inside the window. `$1` is the unlocked timeout in minutes, `$2` the
+## locked one in seconds — `lockedSeconds`, which no other run sets.
+write_locked_dpms_settings() {
+    cat > "$SETTINGS" <<EOF
+{
+  "system": {
+    "session": { "commands": { "suspend": "true" } },
+    "idle": {
+      "dim": { "enabled": false },
+      "lock": { "enabled": false },
+      "dpms": { "enabled": true, "battery": $1, "ac": $1, "lockedSeconds": $2,
                 "offCommand": "true", "onCommand": "true" },
       "suspend": { "enabled": false, "battery": 0, "ac": 0 }
     }
@@ -274,24 +319,48 @@ expect_since "$mark" 'idle: idle: dpms — screen off' \
     'the ladder starts counting again the moment it is released' 120
 idle wake > /dev/null
 
-# --- 5. editing settings.json re-arms the ladder under the running shell -----
+# --- 5. a rung whose *timeout* changes re-arms on the new one (#139) ----------
+#
+# The rung stays armed across this edit; only its number moves. That is the case
+# #139 was: `IdleMonitor` re-registers with the compositor when `enabled` is
+# toggled and ignores a new `timeout` outright, so a rung that was already on
+# kept counting to its old value — which is every rung on the System tab (#55)
+# for anyone who tunes rather than turns on. Check 6 below flips a rung on and
+# passed all the way through the bug; only this one goes red on it.
+#
+# Read the other way round from the ticket's experiment, because a nested
+# session cannot be un-idled: the rung is *lengthened*, so a monitor that
+# re-armed goes un-idle, counts the new six seconds, and blanks again, while one
+# that ignored the change simply stays as it was and says nothing.
+
+mark=$(log_lines)
+write_settings false 0.1
+expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock off \(turned off\), dpms 6s' \
+    'the new timeout is read under the running shell' 120
+expect_since "$mark" 'idle: dpms armed at 6s' \
+    'a rung whose timeout changed says it re-armed' 120
+expect_since "$mark" 'idle: idle: dpms — screen off' \
+    'and it fires again on the new timeout rather than keeping the old one' 200
+idle wake > /dev/null
+
+# --- 6. turning a rung on under the running shell arms it --------------------
 #
 # "Timeout configurable" is only true if it is configurable *now*: a ladder that
 # had to be restarted into is one nobody would tune.
 
 mark=$(log_lines)
-write_settings true
-expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock 1s, dpms 3s' \
+write_settings true 0.1
+expect_since "$mark" 'idle: ladder on (ac|battery): dim off \(turned off\), lock 1s, dpms 6s' \
     'editing settings.json re-arms the ladder without a restart' 120
 
-# --- 6. and the lock rung really locks ---------------------------------------
+# --- 7. and the lock rung really locks ---------------------------------------
 
 expect_since "$mark" 'idle: idle: lock' 'the lock rung fires on its own timeout' 120
 expect_since "$mark" 'lock: locking \(idle\)' 'and the reason recorded on the lock is the ladder'
 expect_since "$mark" 'lock: compositor confirms all screens covered' \
     'the compositor confirms every screen is covered' 150
 
-# --- 7. run 2: the sleep hook, on a session nothing has locked ---------------
+# --- 8. run 2: the sleep hook, on a session nothing has locked ---------------
 #
 # The delay inhibitor is real — `systemd-inhibit --mode=delay` against the
 # caller's own logind — and so is the lock. What is simulated is only logind's
@@ -364,7 +433,7 @@ else
 $(grep -aiE 'wayland|fatal' "$NESTED_SHELL_LOG" | tail -2)"
 fi
 
-# --- 8. and it takes the lock again on the way back --------------------------
+# --- 9. and it takes the lock again on the way back --------------------------
 
 mark=$(log_lines)
 logind resume > /dev/null
@@ -373,7 +442,7 @@ expect_since "$mark" 'logind: sleep inhibitor held \(delay, what=sleep\)' \
     'resuming takes the delay inhibitor again — the second suspend of a session waits too'
 expect_reply "$(logind isInhibiting)" 'true' 'and it reports itself holding one again'
 
-# --- 8b. and the second sleep takes the fast path ----------------------------
+# --- 9b. and the second sleep takes the fast path ----------------------------
 #
 # The same hook with the lock already up and already confirmed: this is the
 # branch a real session takes on every suspend after the first, and it is the
@@ -388,7 +457,70 @@ expect_since "$mark" 'logind: lock confirmed after [0-9]+ms — releasing the sl
     'and lets the inhibitor go on the confirmation it already has'
 logind resume > /dev/null
 
-# --- 9. nothing is fighting itself -------------------------------------------
+# --- 10. run 3: the dpms rung tightens when the lock goes up (#142) -----------
+#
+# Check 5 moves a timeout by editing settings.json. This one moves the only
+# timeout in the ladder that moves *on its own*: the dpms rung tightens to
+# `lockedSeconds` while the session is locked (#30), by rebinding the same
+# `seconds` #139 proved a bare monitor ignores. So it is the same defect reached
+# through a different door, and it stayed open after #139 was measured — hence a
+# ticket of its own. On real hardware (#142) a locked laptop held its panel on
+# for the *unlocked* timeout: six or twelve minutes rather than thirty seconds,
+# and silently, which is why it survived a release.
+#
+# The shape of the check is what makes it one: sixty seconds unlocked, five
+# locked, and nothing but the swap can blank this screen inside the window.
+#
+# The way back out is not driven here. There is no `unlock` IPC and there will
+# not be one — PAM is the only way off the lock surface (Surfaces/Lock/Lock.qml)
+# — so "and the longer timeout comes back" is checked through the other door
+# onto the same code path: a timeout widened under the running, locked shell.
+
+restart_session || exit 1
+SCRATCH="$NESTED_WORK/xdg"
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+write_locked_dpms_settings 1 5
+nested_shell shell.qml 'idle: ladder armed' || exit 1
+
+# Settled before the lock goes up, for the reason run 2 explains.
+nested_await "$NESTED_SHELL_LOG" 'startup: stage interactive' 20 \
+    || nested_note 'the shell never said it was interactive'
+sleep 2
+
+if grep -qaE 'idle: ladder armed .* dpms 60s' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the dpms rung starts on its unlocked timeout of sixty seconds'
+else
+    nested_fail "the unlocked dpms timeout is not sixty seconds: \
+$(grep -a 'ladder armed' "$NESTED_SHELL_LOG" | tail -1)"
+fi
+
+mark=$(log_lines)
+nested_ipc call lock lock > /dev/null
+expect_since "$mark" 'lock: locking \(ipc\)' 'the session locks'
+expect_since "$mark" 'idle: dpms armed at 5s' \
+    'the lock going up re-arms the dpms rung on lockedSeconds' 120
+expect_since "$mark" 'idle: idle: dpms — screen off' \
+    'and it really blanks on the tighter clock, well inside the unlocked sixty seconds' 200
+expect_reply "$(idle isBlanked)" 'true' 'and the shell knows the locked screen is off'
+
+# And back up again, which is the unlock direction reached through the door that
+# exists. Thirty seconds locked now — longer than the window below, so the only
+# thing that can fire in it is a rung still stuck on the tighter clock.
+mark=$(log_lines)
+idle wake > /dev/null
+write_locked_dpms_settings 0.5 300
+expect_since "$mark" 'idle: activity: dpms — screen on \(ipc\)' \
+    'the screen comes back under the lock'
+expect_since "$mark" 'idle: dpms armed at 30s' \
+    'and widening the timeouts re-arms the rung on the longer one' 120
+
+mark=$(log_lines)
+refute_since "$mark" 'idle: idle: dpms — screen off' \
+    'a widened timeout really widens — the rung is not stuck on the tighter clock' 150
+
+# --- 11. nothing is fighting itself -------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"

@@ -103,6 +103,23 @@ QtObject {
                 verb: ""
             },
             {
+                id: "screenshot.region",
+                title: "Take a screenshot",
+                subtitle: "Select a region or click a window",
+                icon: "crop",
+                keywords: ["screenshot", "screen", "shot", "capture", "grab",
+                           "region", "snip", "crop", "print"],
+                // Not `surface`, and for the reason `session.lock` is not
+                // either: the bus is the door for *panels* a bar button opens,
+                // and every verb it dispatches is `toggle()`. Asking a picker
+                // to toggle mid-drag would throw the drag away, so this goes
+                // straight to the service the same way the lock row does.
+                kind: "screenshot",
+                arg: "",
+                target: "screenshot",
+                verb: "open"
+            },
+            {
                 id: "session.menu",
                 title: "Session menu",
                 // Names what is behind it, because the four verbs that are not

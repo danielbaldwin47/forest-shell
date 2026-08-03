@@ -57,6 +57,7 @@ import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
+import qs.Surfaces.Screenshot
 import qs.Services.Launcher
 import qs.Services.Notifications
 import qs.Services.System
@@ -79,6 +80,14 @@ ShellRoot {
     /// fact here is: a capture driven by the real services is a picture of
     /// whatever this laptop's volume happened to be.
     readonly property var osdState: (Quickshell.env("CAPTURE_OSD") || "volume:45").split(":")
+
+    /// What the region picker is doing (#51): `region` is a drawn selection
+    /// with its readout, `window` is the hover state a click would take. Posed
+    /// rather than driven, for the reason everything else here is — a capture
+    /// that ran the real picker would photograph whatever this laptop's desktop
+    /// happened to be, and could not run offscreen at all, since the freeze is
+    /// a `grim` capture of a session this mode does not have.
+    readonly property string pickState: Quickshell.env("CAPTURE_PICK") || "region"
 
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
@@ -161,6 +170,7 @@ ShellRoot {
                     case "controlcenter": return controlCenterScene;
                     case "dashboard": return dashboardScene;
                     case "osd":      return osdScene;
+                    case "screenshot": return screenshotScene;
                     default:         return barScene;
                     }
                 }
@@ -883,6 +893,74 @@ ShellRoot {
             Component.onCompleted: root.sceneDescription =
                 "osd=" + osdBackdrop.channel + ":" + osdBackdrop.percent
                 + (osdBackdrop.muted ? ":muted" : "") + " at=" + Osd.position
+        }
+    }
+
+    /// #51: the region picker over a frozen screen — the veil, the marquee and
+    /// its readout, or the window highlight a click would take.
+    ///
+    /// The wallpaper stands in for the freeze, which is the honest substitution
+    /// rather than a convenient one: on a real session the freeze is a PNG of
+    /// the whole output and the overlay stretches it edge to edge, which is
+    /// exactly what `Backdrop`'s `Wallpaper` does here. What is being judged is
+    /// the picker's own chrome against a photograph — whether the veil is dark
+    /// enough to read the selection out of, and whether the readout stays
+    /// legible over an arbitrary picture.
+    ///
+    /// Every part of it is Rectangle, Image and Text, so this is one of the
+    /// surfaces the default offscreen mode judges completely — there is no
+    /// glyph in the picker to lose.
+    Component {
+        id: screenshotScene
+
+        Backdrop {
+            id: pickBackdrop
+
+            // A posed desktop, in the same logical coordinates the real picker
+            // works in. Two windows, one inside the other, so the hover state
+            // shows the smallest-wins rule rather than a single obvious box.
+            readonly property var posedWindows: [
+                { x: 40, y: 60, width: 620, height: 460, title: "kitty", appId: "kitty" },
+                { x: 700, y: 60, width: 540, height: 680, title: "Firefox", appId: "firefox" },
+                { x: 160, y: 180, width: 300, height: 200, title: "Preferences", appId: "kitty" }
+            ]
+
+            readonly property bool hovering: root.pickState === "window"
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            PickerOverlay {
+                id: picker
+                anchors.fill: parent
+
+                // Not `freezeSource`: the wallpaper behind this item is already
+                // standing in for the freeze, and pointing the overlay at it a
+                // second time would composite the picture over itself.
+                freezeSource: ""
+
+                windows: pickBackdrop.posedWindows
+                outputScale: 1.5
+
+                selection: pickBackdrop.hovering
+                    ? Qt.rect(0, 0, 0, 0)
+                    : Qt.rect(160, 180, 500, 340)
+                hovered: pickBackdrop.hovering ? pickBackdrop.posedWindows[2] : null
+            }
+
+            Component.onCompleted: root.sceneDescription =
+                "pick=" + root.pickState
+                + " selection=" + picker.selection.width + "x" + picker.selection.height
+                + " windows=" + pickBackdrop.posedWindows.length
         }
     }
 

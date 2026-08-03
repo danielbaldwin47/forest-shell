@@ -25,6 +25,7 @@ import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
+import qs.Surfaces.Screenshot
 
 ShellRoot {
     id: shell
@@ -76,6 +77,18 @@ ShellRoot {
         component: OsdWindow {}
     }
 
+    // The region picker's windows (#51) — one per screen, mapped only while a
+    // selection is being made, so an idle shell has no surface here either.
+    // Deferred for the same reason the three above are.
+    //
+    // The state behind it is the `Screenshot` singleton, constructed in the
+    // deferred stage below; that is what registers `qs ipc call screenshot …`,
+    // and it is what this window binds to.
+    LazyLoader {
+        id: pickerWindows
+        component: PickerWindow {}
+    }
+
     Connections {
         target: Startup
         function onDeferredStage() {
@@ -88,6 +101,7 @@ ShellRoot {
             notificationPopups.active = true;
             drawerWindows.active = true;
             osdWindows.active = true;
+            pickerWindows.active = true;
         }
     }
 

@@ -26,6 +26,8 @@
 #   tools/capture-harness.sh out.png --surface dashboard --session # the dashboard
 #   tools/capture-harness.sh out.png --surface osd --session      # the OSD pill
 #   tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
+#   tools/capture-harness.sh out.png --surface screenshot           # the region picker
+#   tools/capture-harness.sh out.png --surface screenshot --pick window
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
@@ -63,6 +65,10 @@
 # channel[:percent[:muted]]`; its glyph needs `--session` too. `dashboard` is
 # #49's panel under the clock, posed with a fixed day and a fixed player so the
 # same picture is taken twice — its glyphs need `--session` as well.
+# `screenshot` is #51's region picker over a frozen screen, posed with `--pick
+# region` (a drawn selection and its readout) or `--pick window` (the highlight
+# a click would take). It is the one surface with no glyph in it at all, so the
+# default offscreen mode judges it completely and `--session` buys nothing.
 #
 # --contrast runs tools/measure-contrast.py over the strip the bar occupies
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
@@ -108,6 +114,7 @@ CLAUDE_TRANSCRIPT=""
 DRILL=""
 OSD_STATE="volume:45"
 OSD_SET=0
+PICK=""
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -128,6 +135,8 @@ while (( $# )); do
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --drill)       DRILL="$2"; shift 2 ;;
+        --pick)
+            PICK="${2:-}"; shift 2 ;;
         --osd)         OSD_STATE="$2"; OSD_SET=1; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
@@ -172,9 +181,21 @@ case "${OSD_STATE%%:*}" in
     *) echo "unknown OSD channel: ${OSD_STATE%%:*} (volume, mic, brightness)" >&2; exit 2 ;;
 esac
 
+# `--pick` only means anything on the picker, and it names a state the overlay
+# can actually be in: a silently ignored flag is a capture of the wrong thing
+# that looks right.
+if [[ -n "$PICK" ]]; then
+    [[ "$SURFACE" == screenshot ]] || {
+        echo "--pick only applies to --surface screenshot" >&2; exit 2; }
+    case "$PICK" in
+        region|window) ;;
+        *) echo "unknown pick state: $PICK (region, window)" >&2; exit 2 ;;
+    esac
+fi
+
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd)" \
+    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd|screenshot) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd, screenshot)" \
            >&2; exit 2 ;;
 esac
 
@@ -270,7 +291,7 @@ CAPTURE_ENV=(
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
     CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
-    CAPTURE_OSD="$OSD_STATE"
+    CAPTURE_OSD="$OSD_STATE" CAPTURE_PICK="$PICK"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.

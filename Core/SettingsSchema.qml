@@ -428,6 +428,55 @@ QtObject {
         },
 
         system: {
+            // The region picker (#51).
+            //
+            // **Here, and not in a tenth section.** #21 fixes the section list
+            // at nine and `tests/tst_settingstabs.qml` holds every section to a
+            // tab, so a top-level `screenshot` would be a section the GUI
+            // cannot reach — the constraint the OSD hit above, resolved the
+            // same way. This tab already owns the session's commands, the night
+            // light and the lock; a screenshot is the same kind of thing, a
+            // system-level action the shell performs rather than a surface it
+            // draws.
+            //
+            // JSON-only for now, which #9 permits for the long tail: the four
+            // keys below have no control on the System tab yet.
+            screenshot: {
+
+                // Where shots land. Empty means `~/Pictures/Screenshots`, worked
+                // out at use rather than baked in here: the default has to be
+                // relative to the running user's home, and a literal path in the
+                // schema would be written into every settings.json that ever
+                // travelled between machines.
+                //
+                // `~` is expanded by Services/Screenshot/ScreenshotPolicy.qml and
+                // not by a shell — nothing on this path goes through one — so a
+                // value with a space in it is safe and a value with a `~` in it
+                // works.
+                directory: { def: "", coerce: c.path },
+
+                // Whether the shot goes on the Wayland selection as well as to
+                // disk. On, because it is the thing most screenshots are for.
+                //
+                // Quickshell owns the selection for *text* with no subprocess, but
+                // 0.3.0 has no image equivalent, so this needs `wl-copy`. When it
+                // is absent the shell puts the file's *path* on the clipboard and
+                // says so in the log — a degraded answer rather than a silent one.
+                copyToClipboard: { def: true, coerce: c.boolean },
+
+                // The optional edit handoff. A tool name and not a boolean, because
+                // `satty` and `swappy` take the same `-f <file>` and choosing
+                // between them should not need a new key. Empty turns it off, which
+                // is a different outcome from "configured and not installed" and
+                // gets a different log line.
+                editor: { def: "swappy", coerce: c.string },
+
+                // Whether a drag's edges are pulled onto nearby window edges.
+                // On: it is the difference between a screenshot of a window and a
+                // screenshot of a window with four pixels of desktop down one side.
+                snapToWindows: { def: true, coerce: c.boolean }
+            },
+
             // The session drawer's four system actions (#38), next to the lock
             // below because they are the same menu: lock, log out, suspend,
             // restart, shut down.

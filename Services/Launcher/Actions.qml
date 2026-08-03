@@ -37,6 +37,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import qs.Core
+import qs.Services.Screenshot
 import qs.Services.System
 import qs.Surfaces.Settings
 
@@ -85,6 +86,15 @@ Singleton {
         case "lock":
             Logger.log("launcher", root.policy.ran(id, "the shell's own lock"));
             SessionLock.lock("launcher action");
+            return true;
+        case "screenshot":
+            // Held back by the drawer's own close duration, because the freeze
+            // is a photograph of the screen and the launcher is still on it:
+            // opened immediately, the shot contains the surface that asked for
+            // it, half-faded. The number is the drawer's, which is why it is
+            // passed from here rather than assumed over there.
+            Logger.log("launcher", root.policy.ran(id, "the region picker"));
+            Screenshot.openAfter("launcher action", Theme.motionFast);
             return true;
         case "surface":
             // Through the bus, not through `Drawers` directly: the bus is what

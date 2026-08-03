@@ -238,6 +238,21 @@ nested_key() {
     nested_hyprctl dispatch sendshortcut ", $1, activewindow" > /dev/null
 }
 
+## The same, for a key aimed at whatever holds keyboard focus rather than at a
+## toplevel — which is what you want when the surface under test is a *layer*
+## surface (the screenshot picker, #51; a lock; a drawer with an exclusive
+## keyboard grab).
+##
+## The distinction is not cosmetic and fails confusingly: `activewindow`
+## resolves only to toplevels, so against a session whose focus is held by a
+## layer surface it answers `sendshortcut: window not found` and the keystroke
+## is simply dropped — which looks exactly like a surface that ignored the key.
+## An empty window target sends to the focused surface instead, and is the only
+## form that reaches a layer shell (measured on Hyprland 0.56.1).
+nested_key_focused() {
+    nested_hyprctl dispatch sendshortcut ", $1, " > /dev/null
+}
+
 ## Run a shell entry point inside the nested session, and wait for it to say it
 ## is up. The ready pattern is the caller's, because only the caller knows what
 ## its entry point logs — shell.qml's staged startup (#32) ends with a line, and

@@ -92,6 +92,28 @@ QtObject {
     /// bar's vocabulary still does for the optional modules nobody has built.
     readonly property var dashboardCards: ["calendar", "media", "weather", "systemMonitor"]
 
+    /// The screen recorder's encoders (#52), plus `auto` for "whichever of
+    /// them this machine has". Naming one is a *preference* and not a demand:
+    /// Services/Recorder/RecorderPolicy.qml falls through to the other when the
+    /// named one is missing, because a machine that cannot record is a worse
+    /// answer than a machine that records in software.
+    readonly property var recordingEngines: ["auto", "gpu-screen-recorder", "wf-recorder"]
+
+    /// gpu-screen-recorder's own preset words, passed through to `-q` rather
+    /// than translated. `wf-recorder` has no equivalent and ignores this.
+    readonly property var recordingQualities: ["medium", "high", "very_high", "ultra"]
+
+    /// The container, which is also the file extension. Two, because these are
+    /// the two both encoders mux natively: mp4 for anything that has to be
+    /// uploaded, mkv for a long capture that might be interrupted.
+    readonly property var recordingContainers: ["mp4", "mkv"]
+
+    /// Which sound goes in. `wf-recorder` has one audio switch and records the
+    /// default device, so it honours `desktop` and `none` exactly and narrows
+    /// the other two — the shell logs a line when that happens rather than
+    /// approximating in silence.
+    readonly property var recordingAudio: ["none", "desktop", "mic", "both"]
+
     /// What a temperature and a wind speed are measured in (#50). Two systems
     /// and not four keys: nobody wants their temperature in Celsius and their
     /// wind in miles per hour, and Open-Meteo takes the pair as two parameters
@@ -475,6 +497,51 @@ QtObject {
                 // On: it is the difference between a screenshot of a window and a
                 // screenshot of a window with four pixels of desktop down one side.
                 snapToWindows: { def: true, coerce: c.boolean }
+            },
+
+            // Screen recording (#52), beside the screenshot for the reason the
+            // note above gives — the same kind of thing, and there is no tenth
+            // section to put it in. It shares the picker with the screenshot
+            // too: a recorded region is the same drag.
+            //
+            // JSON-only for now, like the screenshot keys next door, which #9
+            // permits for the long tail.
+            recording: {
+
+                // Where recordings land. Empty means `~/Videos/Recordings`,
+                // worked out at use for the reason the screenshot's directory
+                // is: a literal home path in the schema would be written into
+                // every settings.json that ever travelled between machines.
+                directory: { def: "", coerce: c.path },
+
+                // Which encoder. `auto` prefers the GPU one, which is the whole
+                // point of the ticket — a 60fps capture that costs a few
+                // percent of one core rather than a whole one.
+                //
+                // Naming an engine explicitly is a preference and not a demand:
+                // an engine that is missing falls through to the other and the
+                // shell says so, because the alternative is a machine that
+                // silently cannot record.
+                engine: { def: "auto", coerce: c.oneOf(schema.recordingEngines) },
+
+                // Frames per second. 60 rather than 30: the thing most screen
+                // recordings are of is a UI, and a UI at 30fps looks like the
+                // UI is stuttering rather than like the recording is.
+                framerate: { def: 60, coerce: c.integer(1, 240) },
+
+                // Desktop audio by default, which is what a recording of the
+                // shell wants. `both` is the commentary case and gets two
+                // tracks on the GPU encoder, so an editor can mute one.
+                audio: { def: "desktop", coerce: c.oneOf(schema.recordingAudio) },
+
+                // gpu-screen-recorder's preset, passed through untranslated.
+                // `very_high` is its own recommendation for screen content,
+                // where flat colour and sharp text punish a low bitrate far
+                // more visibly than camera footage does.
+                quality: { def: "very_high", coerce: c.oneOf(schema.recordingQualities) },
+
+                // The container, and therefore the file extension.
+                container: { def: "mp4", coerce: c.oneOf(schema.recordingContainers) }
             },
 
             // The session drawer's four system actions (#38), next to the lock

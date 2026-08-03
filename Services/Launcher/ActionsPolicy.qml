@@ -126,6 +126,38 @@ QtObject {
                 verb: ""
             },
             {
+                id: "recording.toggle",
+                // One row and not two. "Start recording" and "Stop recording"
+                // as separate rows would put the wrong one in front of the user
+                // most of the time — the launcher's list is built before the
+                // query is typed and does not know the recorder's state — and a
+                // toggle is what the tile and the keybind do anyway.
+                title: "Record the screen",
+                subtitle: "Start or stop a full-screen recording",
+                icon: "video",
+                keywords: ["record", "recording", "screen", "capture", "video",
+                           "screencast", "cast", "stop"],
+                // Direct to the service, like `screenshot.region` and
+                // `session.lock` above: the bus dispatches `toggle()` to
+                // *panels*, and this is not one.
+                kind: "recording",
+                arg: "screen",
+                target: "",
+                verb: ""
+            },
+            {
+                id: "recording.region",
+                title: "Record a region",
+                subtitle: "Select a region, then record it",
+                icon: "video",
+                keywords: ["record", "recording", "region", "area", "crop",
+                           "video", "screencast", "part"],
+                kind: "recording",
+                arg: "region",
+                target: "",
+                verb: ""
+            },
+            {
                 id: "session.menu",
                 title: "Session menu",
                 // Names what is behind it, because the four verbs that are not

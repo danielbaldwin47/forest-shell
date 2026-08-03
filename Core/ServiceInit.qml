@@ -22,6 +22,7 @@ import qs.Services.Hardware
 import qs.Services.System
 import qs.Services.Launcher
 import qs.Services.Screenshot
+import qs.Services.Recorder
 import qs.Services.Weather
 
 Singleton {
@@ -141,11 +142,16 @@ Singleton {
         // screenshot …` and probes for `wl-copy`. A keybind aimed at a target
         // that was never constructed is the #81 shape — a key that does
         // nothing, with no line in the log saying why.
+        //
+        // Recorder (#52) is here for that reason and one more: naming it is
+        // what runs the two encoder probes, so the control centre can say
+        // whether this machine records on the GPU or in software before
+        // anybody presses the tile.
         report("deferred", [ShellState, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
                             PowerProfiles, NightLight, Vpn,
-                            LogindBridge, Idle, Weather, Screenshot]);
+                            LogindBridge, Idle, Weather, Screenshot, Recorder]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

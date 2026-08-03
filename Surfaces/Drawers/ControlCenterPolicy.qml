@@ -33,11 +33,18 @@ QtObject {
     /// the two halves disagreeing in the one way the user can see.
     readonly property DrillInPolicy drill: DrillInPolicy {}
 
-    /// The grid, in the order it is drawn. Nine on a full laptop, which is the
-    /// 3×3 the ticket asks for; fewer on a machine missing the hardware.
+    /// The grid, in the order it is drawn. Ten on a full laptop; fewer on a
+    /// machine missing the hardware.
+    ///
+    /// The tenth is #52's recorder, and it makes the grid 3×3 plus one rather
+    /// than the 3×3 #44 asked for. Deliberate: `rows()` already leaves a short
+    /// last row short, the recorder is the ticket's own "start/stop from the
+    /// control center", and a machine without either encoder installed drops it
+    /// and is back to nine. Last in the order because it is the one tile whose
+    /// press produces a file.
     readonly property var tileOrder: [
         "wifi", "bluetooth", "dnd", "nightlight", "keepawake",
-        "mode", "powerprofile", "vpn", "wallpaper"
+        "mode", "powerprofile", "vpn", "wallpaper", "recording"
     ]
 
     readonly property int columns: 3
@@ -81,6 +88,7 @@ QtObject {
         case "powerprofile": return policy.powerProfileTile(facts.powerprofile ?? ({}));
         case "vpn":          return policy.vpnTile(facts.vpn ?? ({}));
         case "wallpaper":    return policy.wallpaperTile();
+        case "recording":    return policy.recordingTile(facts.recording ?? ({}));
         }
         return null;
     }
@@ -221,6 +229,28 @@ QtObject {
     /// `makeTile`, which is why nothing is overridden here any more.
     function wallpaperTile(): var {
         return policy.makeTile("wallpaper", false, "wallpaper", "Wallpaper", "");
+    }
+
+    /// Screen recording (#52). Absent on a machine with neither encoder
+    /// installed, which is the same rule the hardware tiles follow: a control
+    /// that cannot do the thing is worse than no control.
+    ///
+    /// The glyph changes and the label does not. "Recording" reading "Stop"
+    /// mid-recording would be a tile whose label describes the *press* while
+    /// every other tile's describes the *subject* — and the square is already
+    /// the universal stop.
+    ///
+    /// `detail` is where the tile earns its place before anything is recorded:
+    /// it says whether this machine would encode on the GPU or in software,
+    /// which is a question nothing else in the shell can answer and the whole
+    /// difference between a recording that costs 3% of a core and one that
+    /// costs a whole one.
+    function recordingTile(recording: var): var {
+        if (recording.available !== true)
+            return null;
+        const on = recording.on === true;
+        return policy.makeTile("recording", on, on ? "square" : "circle-dot",
+                               "Recording", String(recording.detail ?? ""));
     }
 
     function stateWord(on: bool): string {

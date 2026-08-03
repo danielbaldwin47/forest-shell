@@ -84,6 +84,16 @@ Singleton {
     /// committed selection; the surface answers with `saved()`.
     signal saveRequested(rect region, string file, var raster)
 
+    /// A rectangle handed to somebody else instead of being photographed —
+    /// see `pickRegion()`. The scale goes with it because a consumer that
+    /// wants pixels rather than layout coordinates cannot recover it.
+    signal regionPicked(rect region, string screen, real scale)
+
+    /// The same request, dismissed. A consumer that is waiting on a rectangle
+    /// needs to know it is not coming; without this it would sit armed until
+    /// the next unrelated pick answered it.
+    signal regionCancelled()
+
     // --- opening -------------------------------------------------------------
 
     /// Put the picker up: freeze the screen, gather the windows, show it.
@@ -107,6 +117,24 @@ Singleton {
     ///
     /// Zero for the keybind and IPC paths, which have nothing to wait for and
     /// should not pay for someone else's fade.
+    /// The same drag, for somebody who wants the rectangle rather than a
+    /// photograph of it (#52's recorder is the only consumer).
+    ///
+    /// A mode on this picker and not a second selection surface: the freeze,
+    /// the window snapping, the keyboard grab and Escape are all already here,
+    /// and `slurp` would be a second overlay with different keys and no
+    /// snapping. The only difference downstream is `commit()`, which emits
+    /// `regionPicked` instead of `saveRequested` and writes no file.
+    /// Set *after* the open rather than before it: `openAfter` clears the flag
+    /// as part of resetting the run, so a pick that is refused for a picker
+    /// already up leaves the picker's existing mode alone.
+    function pickRegion(reason: string, settleMs: int): bool {
+        const opened = root.openAfter(reason, settleMs);
+        if (opened)
+            root.handingOver = true;
+        return opened;
+    }
+
     function openAfter(reason: string, settleMs: int): bool {
         if (root.busy) {
             Logger.log("screenshot", root.policy.alreadyOpen());
@@ -127,6 +155,7 @@ Singleton {
         Compositor.refreshWindowGeometry();
 
         root.cancelled = false;
+        root.handingOver = false;
         root.freezeEpoch++;
         root.freeze = "";
 
@@ -165,6 +194,14 @@ Singleton {
         root.pendingRegion = null;
         root.cancelled = true;
         Logger.log("screenshot", root.policy.cancelled(reason));
+
+        // Told last, and only when somebody was waiting: a consumer holding
+        // out for a rectangle would otherwise stay armed until an unrelated
+        // pick answered it.
+        if (root.handingOver) {
+            root.handingOver = false;
+            root.regionCancelled();
+        }
     }
 
     /// Whether anything is in flight. One predicate rather than the same four
@@ -191,11 +228,25 @@ Singleton {
             return false;
         }
 
+        Logger.log("screenshot", root.policy.selected(wanted, how));
+
+        // The handover path writes nothing: the picker comes down and the
+        // rectangle goes to whoever asked for it. Logged, because a "selected"
+        // line with no "saved" line after it otherwise reads as a save that
+        // failed silently.
+        if (root.handingOver) {
+            root.handingOver = false;
+            root.active = false;
+            Logger.log("screenshot", root.policy.handedRegion(wanted));
+            root.regionPicked(Qt.rect(wanted.x, wanted.y, wanted.width, wanted.height),
+                              root.screen, root.scale);
+            return true;
+        }
+
         const dir = root.policy.directory(root.settings.directory, Paths.home);
         const file = root.policy.path(dir, root.policy.filename(new Date()));
         const raster = root.policy.nativeSize(wanted, root.scale);
 
-        Logger.log("screenshot", root.policy.selected(wanted, how));
         root.lastFile = file;
         root.saveRequested(Qt.rect(wanted.x, wanted.y, wanted.width, wanted.height), file, raster);
         return true;
@@ -284,6 +335,11 @@ Singleton {
 
     property string lastFile: ""
     property var pendingRegion: null
+
+    /// Whether this run is a `pickRegion()` — a rectangle for somebody else
+    /// rather than a screenshot. Cleared by every `openAfter`, so it cannot
+    /// leak from one run into the next.
+    property bool handingOver: false
 
     /// Whether `wl-copy` and the configured editor are on PATH. Probed rather
     /// than assumed, and probed the only way that works: a `Process` whose

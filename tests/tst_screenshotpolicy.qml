@@ -451,4 +451,13 @@ TestCase {
                 "saved 600x450 to /tmp/a.png");
         compare(policy.saveFailed("/tmp/a.png"), "could not write /tmp/a.png");
     }
+
+    /// #52: a drag handed to another service rather than saved.
+    function test_a_handed_region_says_no_file_was_written() {
+        const line = policy.handedRegion({ x: 10, y: 20, width: 640, height: 480 });
+        verify(line.indexOf("640x480") >= 0);
+        verify(line.indexOf("10,20") >= 0);
+        verify(line.indexOf("no file written") >= 0);
+        verify(line !== policy.saved("/tmp/a.png", { width: 640, height: 480 }));
+    }
 }

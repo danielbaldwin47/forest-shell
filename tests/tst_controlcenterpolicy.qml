@@ -29,7 +29,8 @@ TestCase {
             vpn: { available: true, on: false, name: "" },
             volume: { available: true, percent: 45, muted: false },
             mic: { available: true, percent: 80, muted: false },
-            brightness: { available: true, percent: 60 }
+            brightness: { available: true, percent: 60 },
+            recording: { available: true, on: false, detail: "GPU" }
         };
     }
 
@@ -43,13 +44,17 @@ TestCase {
 
     // --- the grid ------------------------------------------------------------
 
-    function test_the_grid_is_nine_tiles_in_a_fixed_order() {
+    function test_the_grid_is_ten_tiles_in_a_fixed_order() {
         // Fixed, because grid position is muscle memory: the tile you reach for
         // without looking must not move because a radio came up.
+        //
+        // Ten since #52, which is 3x3 plus one rather than the 3x3 #44 asked
+        // for. The tenth is last for that reason — it lands in a short row of
+        // its own instead of pushing anything sideways.
         compare(policy.columns, 3);
         compare(ids(policy.tiles(fullFacts())),
                 ["wifi", "bluetooth", "dnd", "nightlight", "keepawake",
-                 "mode", "powerprofile", "vpn", "wallpaper"]);
+                 "mode", "powerprofile", "vpn", "wallpaper", "recording"]);
     }
 
     function test_hardware_that_is_not_there_has_no_tile() {
@@ -62,6 +67,7 @@ TestCase {
         facts.vpn.available = false;
         facts.nightlight.available = false;
         facts.powerprofile.available = false;
+        facts.recording.available = false;
 
         compare(ids(policy.tiles(facts)),
                 ["wifi", "dnd", "keepawake", "mode", "wallpaper"]);
@@ -77,14 +83,24 @@ TestCase {
     }
 
     function test_the_grid_reflows_rather_than_leaving_a_hole() {
-        // Nine tiles is three rows; eight is 3-3-2 and not 3-3-1-with-a-gap.
+        // Ten tiles is 3-3-3-1, and the 1 is a short row rather than a row with
+        // two invisible pressable holes in it. Nine is three full rows, which
+        // is what a machine without an encoder gets back.
         const rows = policy.rows(policy.tiles(fullFacts()));
-        compare(rows.length, 3);
+        compare(rows.length, 4);
         compare(rows[0].length, 3);
         compare(rows[2].length, 3);
+        compare(rows[3].length, 1);
 
+        const noEncoder = fullFacts();
+        noEncoder.recording.available = false;
+        compare(policy.rows(policy.tiles(noEncoder)).length, 3);
+
+        // Eight is 3-3-2 and not 3-3-1-with-a-gap: the layout left-aligns a
+        // short row rather than padding it with pressable holes.
         const facts = fullFacts();
         facts.bluetooth.present = false;
+        facts.recording.available = false;
         const short = policy.rows(policy.tiles(facts));
         compare(short.length, 3);
         compare(short[2].length, 2);
@@ -210,6 +226,48 @@ TestCase {
         facts.keepawake.on = true;
         compare(byId(policy.tiles(facts), "keepawake").on, true);
         compare(byId(policy.tiles(facts), "keepawake").detail, "On");
+    }
+
+    // --- recording (#52) -----------------------------------------------------
+
+    /// The same rule the hardware tiles follow: a control that cannot do the
+    /// thing is worse than no control. Here it means a machine with neither
+    /// encoder installed is back to the nine tiles it had before #52.
+    function test_the_recording_tile_is_absent_without_an_encoder() {
+        const facts = fullFacts();
+        facts.recording.available = false;
+        compare(byId(policy.tiles(facts), "recording"), null);
+        verify(ids(policy.tiles(fullFacts())).indexOf("recording") >= 0);
+    }
+
+    /// The detail line is the tile's whole argument for existing before you
+    /// press it: it says whether this machine encodes on the GPU or in
+    /// software, which nothing else in the shell can answer.
+    function test_the_idle_recording_tile_names_the_engine() {
+        const tile = byId(policy.tiles(fullFacts()), "recording");
+        compare(tile.on, false);
+        compare(tile.detail, "GPU");
+        compare(tile.icon, "circle-dot");
+        compare(tile.label, "Recording");
+    }
+
+    /// The glyph changes and the label does not — "Recording" reading "Stop"
+    /// would describe the press where every other tile describes the subject.
+    function test_a_running_recording_lights_the_tile_and_shows_a_stop_glyph() {
+        const facts = fullFacts();
+        facts.recording.on = true;
+        facts.recording.detail = "0:12";
+        const tile = byId(policy.tiles(facts), "recording");
+        compare(tile.on, true);
+        compare(tile.icon, "square");
+        compare(tile.label, "Recording");
+        compare(tile.detail, "0:12");
+    }
+
+    /// Last, so the short row it creates is at the bottom — see `tileOrder`.
+    function test_the_recording_tile_is_last_in_the_grid() {
+        const list = ids(policy.tiles(fullFacts()));
+        compare(list[list.length - 1], "recording");
     }
 
     function test_the_wallpaper_tile_is_a_door_and_never_lit() {

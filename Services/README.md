@@ -13,6 +13,8 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Launcher/` | The launcher's providers and the dispatcher that routes to them |
 | `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47), `SystemStats` (#50) |
 | `Weather/` | The forecast behind the dashboard's weather card (#50) |
+| `Screenshot/` | The region picker's freeze, selection, save and handoff (#51) |
+| `Recorder/` | Screen recording over the two encoders, and the fallback between them (#52) |
 | `Theming/` | The three palette modes behind `Core/Theme.qml` |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
@@ -38,7 +40,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Sixteen of them exist so far:
+Eighteen of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -185,6 +187,33 @@ Sixteen of them exist so far:
   logged, because "sampling stopped when the drawer closed" is an acceptance
   criterion and a lifecycle nothing logs has two candidate causes (#81);
   `tools/drawer-harness.sh` reads those two lines.
+
+- `Screenshot/Screenshot.qml` (#51) and `Recorder/Recorder.qml` (#52) — the two
+  services that own a rectangle, and the one place a service hands work to
+  another one.
+
+  The picker grew a mode rather than the recorder growing a second selection
+  UI: `Screenshot.pickRegion()` runs the same freeze, the same window snapping
+  and the same Escape, and `commit()` emits `regionPicked` instead of writing a
+  file. `slurp` would have been a second overlay with different keys and no
+  snapping. `regionCancelled` exists for the same reason both edges of
+  `SystemStats`' subscription are logged: a consumer waiting on a rectangle has
+  to be told when one is not coming, or it stays armed until an unrelated pick
+  answers it.
+
+  The recorder is the sharpest case in the shell for the CLI-wrapper rule below.
+  Its preferred encoder can be *absent* and it can be *present and unable to
+  initialise* — `gpu-screen-recorder` needs a working VA-API driver underneath
+  it, and that is a separate package. The first has no exit code to read at all
+  (a `Process` whose binary is missing emits no `exited`, only `running` going
+  false — #40); the second exits non-zero in about 200ms. `RecorderPolicy.
+  shouldFallback` takes both facts and answers once, and the fallback is exactly
+  one hop to `wf-recorder`, because a machine that records in software is a
+  better outcome than one that does not record.
+
+  Stopping is `SIGINT` and never `SIGTERM`: both tools flush the muxer and write
+  the container index on the former and neither does on the latter, so a
+  `SIGTERM` leaves an mp4 that exists, is the right size, and will not play.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

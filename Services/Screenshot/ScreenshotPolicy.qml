@@ -440,6 +440,14 @@ QtObject {
             + " is under " + policy.minSide + "px — nothing under the pointer to fall back to";
     }
 
+    /// A drag that went to another service instead of to a file (#52's
+    /// recorder, via `pickRegion()`). Named, because "selected 640x480" with
+    /// no "saved" line after it is otherwise a save that failed in silence.
+    function handedRegion(rect: var): string {
+        return "handed " + rect.width + "x" + rect.height + " at "
+            + rect.x + "," + rect.y + " to the caller — no file written";
+    }
+
     function saved(file: string, size: var): string {
         return "saved " + size.width + "x" + size.height + " to " + file;
     }

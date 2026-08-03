@@ -77,6 +77,7 @@ import qs.Services.Media
 import qs.Services.Hardware
 import qs.Services.Networking
 import qs.Services.Notifications
+import qs.Services.Recorder
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers.DrillIn
 
@@ -157,6 +158,12 @@ FocusScope {
         powerprofile: { available: PowerProfiles.available,
                         profile: PowerProfiles.profile },
         vpn: { available: Vpn.available, on: Vpn.on, name: Vpn.name },
+        recording: { available: Recorder.canRecord,
+                     on: Recorder.active,
+                     detail: Recorder.policy.tileDetail(Recorder.active,
+                                                        Recorder.elapsedMs,
+                                                        Recorder.engine,
+                                                        Recorder.canRecord) },
         volume: { available: Audio.hasSink,
                   percent: root.policy.percent(Audio.volume),
                   muted: Audio.muted },

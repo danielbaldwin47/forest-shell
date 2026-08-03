@@ -202,6 +202,74 @@ else
     nested_pass 'no handler raised while every bind was exercised'
 fi
 
+# --- 7. the bar's other door: the global shortcut ----------------------------
+#
+# The bar (#70) is reachable two ways, and only one of them is a line in the
+# file this harness parses. `bind = …, global, forest-shell:bar-toggle` costs no
+# `qs` subprocess per press, and is offered over
+# hyprland-global-shortcuts-v1 — so the compositor's own list is the evidence,
+# the same way tools/drawer-harness.sh checks the launcher's. The binding in the
+# user's hyprland.conf is their half and is not something this seam can write.
+
+if nested_hyprctl globalshortcuts | grep -qa 'forest-shell:bar-toggle'; then
+    nested_pass 'the compositor has the bar-toggle global shortcut'
+else
+    nested_fail 'hyprland was never offered a bar-toggle global shortcut'
+fi
+
+# The bar's other verbs, which no bind names. #70's acceptance criterion is
+# that hide and show work against a *running* shell, and only `toggle` is in
+# the bind file — so the rest would ship with no live evidence at all. The list
+# is read out of the policy rather than typed here, which is also what
+# reconciles that hand-written list against the real IpcHandler: rename a
+# handler function and this stops finding it.
+
+BAR_VERBS=$(sed -n '/readonly property var verbs:/,/]/p' \
+    Surfaces/Bar/BarVisibilityPolicy.qml | grep -oE '"[a-zA-Z]+"' | tr -d '"')
+[[ -n "$BAR_VERBS" ]] || nested_fail 'could not read the bar verb list out of BarVisibilityPolicy.qml'
+
+for fn in $BAR_VERBS; do
+    if ! sed -n "/^target bar\$/,/^target /p" <<< "$SURFACE" | grep -qa "function $fn("; then
+        nested_fail "the shell exposes no bar.$fn(), but the policy advertises it"
+        continue
+    fi
+    if nested_ipc call bar "$fn" > /dev/null 2>&1; then
+        nested_pass "bar.$fn() is on the IPC surface and exits 0 on a live shell"
+    else
+        nested_fail "bar.$fn() is advertised but exited non-zero on a live shell"
+    fi
+done
+
+# `show` is the verb #70 asked for by name, and the one the CLI eats (#77). It
+# must not be reachable, or the bar would ship the dead door closed PR #67
+# would have.
+if sed -n "/^target bar\$/,/^target /p" <<< "$SURFACE" | grep -qa 'function show('; then
+    nested_fail 'the bar advertises show(), which the qs client parses as its own subcommand'
+else
+    nested_pass 'the bar advertises no show() — the door nobody could open (#77)'
+fi
+
+# Back to where the binds found it, so the down-case below is not run against a
+# bar somebody left hidden.
+nested_ipc call bar auto > /dev/null 2>&1 || true
+
+# And that the bar says which reason decided it. #81 was a lifecycle with no log
+# line, and one bug then had two candidate causes for a week; with auto-hide,
+# fullscreen and an explicit override all landing on one property, "the bar is
+# not there" has to name the one that did it.
+#
+# Anchored on the trailing `(reason)` and not merely on the words: every line
+# already carries the *source* in the same shape, so an alternation that could
+# match either half would pass on a describe() that returned nothing at all.
+
+bar_line=$(tail -n "+$((mark + 1))" "$NESTED_SHELL_LOG" 2>/dev/null \
+    | grep -aE 'bar: [a-z]+ \([a-z]+\): (shown|hidden) \([a-z]+\)$' | head -1)
+if [[ -n "$bar_line" ]]; then
+    nested_pass "the bar named its state and its reason: ${bar_line#*bar: }"
+else
+    nested_fail 'the bar moved without logging its state and the reason for it'
+fi
+
 # --- 4. and the fallback path, with the shell gone ---------------------------
 #
 # Deliberately the *same* nested session with its shell killed, rather than a

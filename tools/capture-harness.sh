@@ -34,6 +34,14 @@
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
 #   tools/capture-harness.sh out.png --reduced             # appearance.reducedEffects on
+#   tools/capture-harness.sh out.png --contrast --palette generated.json  # a #59 palette
+#
+# --palette wears a role → colour map a theming mode produced, from a file, with
+# `appearance.mode` set to dynamic (#59). It is how a *generated* palette gets
+# measured as a picture rather than as arithmetic: the seventeen roles a
+# wallpaper earned are the ones the bar is drawn out of, and whether they still
+# hold the contrast floor over a photograph is not a number any table predicts.
+# `tools/matugen-harness.sh` passes the palette the running shell wrote.
 #
 # --reduced renders with the degrade knob on (#22 §7, #69). Every rung of that
 # ladder is either the compositor's (blur), a transition, or an effect no
@@ -145,6 +153,7 @@ REDUCED=0
 LIGHT=0
 UNCLAMPED=0
 CLOCK=""
+PALETTE=""
 
 while (( $# )); do
     case "$1" in
@@ -168,6 +177,7 @@ while (( $# )); do
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --clock)       CLOCK="$2"; shift 2 ;;
+        --palette)     PALETTE="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
         --help|-h)     sed -n '2,117p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -313,10 +323,23 @@ CLOCK_JSON=""
 if [[ -n "$CLOCK" ]]; then
     CLOCK_JSON=$(printf ', "weatherTime": { "clock": { "format": "%s" } }' "$CLOCK")
 fi
-printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s }%s }\n' \
+# A palette a mode produced, worn for the capture (#59). The generated palette
+# is the least trustworthy input the contrast floor will ever see — nobody
+# authored it and nobody looked at it — and the roles it replaces are the ones
+# the bar is drawn out of, so "does this palette survive over a photograph"
+# is a picture and not arithmetic. `tools/matugen-harness.sh` hands the palette
+# the *shell* generated straight to this flag, so what is measured here is the
+# real output of the real mode rather than a re-derivation of it.
+PALETTE_JSON=""
+if [[ -n "$PALETTE" ]]; then
+    [[ -f "$PALETTE" ]] || { echo "no such palette: $PALETTE" >&2; exit 2; }
+    PALETTE_JSON=$(printf ', "mode": "dynamic", "dynamic": %s' "$(tr -d '\n' < "$PALETTE")")
+fi
+printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s%s }%s }\n' \
     "$WALLPAPER" "$WALLPAPER_FOLDER" \
     "$( ((REDUCED)) && echo true || echo false )" \
     "$( ((LIGHT)) && echo false || echo true )" \
+    "$PALETTE_JSON" \
     "$CLOCK_JSON" \
     > "$SCRATCH/config/forest-shell/settings.json"
 

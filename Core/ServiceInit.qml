@@ -173,7 +173,14 @@ Singleton {
         // last session; quantizing the wallpaper to confirm it is not worth a
         // frame, and doing it before the wallpaper would delay the thing it is
         // reading.
-        report("deferred", [ShellState, Themes, Theming, Notifications, Compositor,
+        // Matugen (#59) is Calculator's argument, for the same reason and about
+        // a different binary: it probes once for `matugen`, and a probe that
+        // only ran when the Appearance tab was first opened would grey the
+        // full-dynamic mode out for as long as the probe took — a mode that
+        // looks unavailable on a machine that has it. Theming constructs it
+        // today by listening to it, but a service that probes at startup has to
+        // be named here whether or not something else happens to touch it.
+        report("deferred", [ShellState, Themes, Theming, Matugen, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude, Clipboard,
                             PowerProfiles, NightLight, Vpn,

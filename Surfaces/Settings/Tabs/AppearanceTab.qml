@@ -1,12 +1,12 @@
 // Appearance — theming mode, dark/light, reduced effects, palette overrides
 // (#54).
 //
-// Two of the three theming modes are selectable: fixed forest is what the shell
-// has always done, the constrained accent arrived with Services/Theming/ (#58),
-// and the full matugen palette (#59) is still ticketed. Listing the unbuilt one
-// greyed is the honest shape — the key is in the file, a hand-edit can set it,
-// and the mode will start working when its service lands rather than appearing
-// in the window from nowhere.
+// All three theming modes are here: fixed forest is what the shell has always
+// done, the constrained accent arrived with Services/Theming/ (#58), and the
+// full matugen palette (#59) is selectable on a machine that has matugen and
+// greyed with a hint on one that does not. Greyed rather than hidden is the
+// honest shape — the key is in the file, a hand-edit can set it, and a control
+// that vanished would make an optional dependency look like a missing feature.
 //
 // Palette overrides are the one open map in the config: role → colour, applied
 // on top of whichever palette the mode produced (Core/Tokens.qml). The role list
@@ -17,6 +17,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Core
+import qs.Services.Theming
 import qs.Surfaces.Settings.Controls
 
 TabPage {
@@ -34,7 +35,9 @@ TabPage {
         hint: "Fixed forest is the shipped palette. Constrained accent lets the wallpaper "
               + "slide the teal between sage and lake blue and changes nothing else — the "
               + "backgrounds, the warm accents and every text colour stay put. Full "
-              + "dynamic arrives with its service and is inert until then."
+              + "dynamic hands the wallpaper to matugen and wears the whole palette it "
+              + "generates, measured back up to the same contrast floor the shipped one "
+              + "holds."
         binding: modeBinding
 
         ConfigBinding { id: modeBinding; path: "appearance.mode" }
@@ -44,9 +47,43 @@ TabPage {
             options: [
                 { value: "forest", label: "Fixed forest" },
                 { value: "accent", label: "Constrained accent" },
-                { value: "dynamic", label: "Full dynamic", enabled: false }
+                // The one control in the window whose availability is a fact
+                // about the machine. matugen is optional and the mode cannot
+                // run without it, so the choice is greyed rather than hidden:
+                // the key stays hand-editable, the hint below says what to
+                // install, and a click that quietly did nothing never happens.
+                { value: "dynamic", label: "Full dynamic", enabled: Matugen.available }
             ]
         }
+    }
+
+    Text {
+        Layout.fillWidth: true
+        visible: Matugen.probed && !Matugen.available
+        text: "Full dynamic needs matugen, which is not installed. Install it and reopen "
+              + "the shell — nothing else changes, and the other two modes never needed it."
+        color: Theme.textMuted
+        font.family: Theme.fontUi
+        font.pointSize: Theme.pt(11.5)
+        lineHeight: Theme.lineHeightBody
+        lineHeightMode: Text.ProportionalHeight
+        wrapMode: Text.WordWrap
+    }
+
+    SettingRow {
+        // Only where it means something: with any other mode selected this is a
+        // switch that governs a subprocess nobody is running.
+        visible: modeBinding.value === "dynamic" && Matugen.available
+        label: "Restyle other apps"
+        hint: "Off, matugen only ever answers the shell. On, it also renders the templates "
+              + "in your own ~/.config/matugen/config.toml — every wallpaper change writes "
+              + "those files, reloads the apps they name and runs their post-hooks. Nothing "
+              + "happens until you have written some; see Services/Theming/README.md."
+        binding: templatesBinding
+
+        ConfigBinding { id: templatesBinding; path: "appearance.matugenTemplates" }
+
+        SettingSwitch { binding: templatesBinding }
     }
 
     SettingRow {

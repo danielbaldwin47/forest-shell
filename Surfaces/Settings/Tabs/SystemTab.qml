@@ -31,6 +31,8 @@ TabPage {
     blurb: "What the shell does to the machine rather than draws on it: captures, the idle "
            + "ladder, the lock, and the commands that end a session."
 
+    FieldPolicy { id: fields }
+
     // --- screenshots ---------------------------------------------------------
 
     SectionHeader { text: "Screenshots" }
@@ -47,7 +49,7 @@ TabPage {
         SettingText {
             binding: shotDirectoryBinding
             placeholder: "~/Pictures/Screenshots"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 
@@ -108,7 +110,7 @@ TabPage {
         SettingText {
             binding: recordDirectoryBinding
             placeholder: "~/Videos/Recordings"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 
@@ -122,11 +124,12 @@ TabPage {
 
         SettingChoice {
             binding: engineBinding
-            options: [
-                { value: "auto", label: "Auto" },
-                { value: "gpu-screen-recorder", label: "GPU" },
-                { value: "wf-recorder", label: "Software" }
-            ]
+            // The list is the schema's; only the wording is this window's.
+            options: fields.options(Config.schema.recordingEngines, {
+                "auto": "Auto",
+                "gpu-screen-recorder": "GPU",
+                "wf-recorder": "Software"
+            })
         }
     }
 
@@ -152,12 +155,10 @@ TabPage {
 
         SettingChoice {
             binding: audioBinding
-            options: [
-                { value: "none", label: "None" },
-                { value: "desktop", label: "Desktop" },
-                { value: "mic", label: "Microphone" },
-                { value: "both", label: "Both" }
-            ]
+            options: fields.options(Config.schema.recordingAudio, {
+                "none": "None", "desktop": "Desktop",
+                "mic": "Microphone", "both": "Both"
+            })
         }
     }
 
@@ -172,12 +173,10 @@ TabPage {
 
         SettingChoice {
             binding: qualityBinding
-            options: [
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High" },
-                { value: "very_high", label: "Very high" },
-                { value: "ultra", label: "Ultra" }
-            ]
+            options: fields.options(Config.schema.recordingQualities, {
+                "medium": "Medium", "high": "High",
+                "very_high": "Very high", "ultra": "Ultra"
+            })
         }
     }
 
@@ -191,7 +190,8 @@ TabPage {
 
         SettingChoice {
             binding: containerBinding
-            options: Config.schema.recordingContainers.map(value => ({ value: value }))
+            // No labels: `mp4` and `mkv` are what the files are called.
+            options: fields.options(Config.schema.recordingContainers, {})
         }
     }
 
@@ -380,7 +380,7 @@ TabPage {
             SettingText {
                 binding: timeBinding
                 placeholder: scheduleRow.modelData.placeholder
-                validate: text => /^([01]\d|2[0-3]):[0-5]\d$/.test(text)
+                validate: text => fields.isClockTime(text)
             }
         }
     }

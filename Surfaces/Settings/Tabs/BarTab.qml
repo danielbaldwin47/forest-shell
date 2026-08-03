@@ -27,6 +27,8 @@ TabPage {
     blurb: "The strip along the top of the screen. Every value below was a live slider "
            + "in the prototype these defaults came from."
 
+    FieldPolicy { id: fields }
+
     SectionHeader { text: "Geometry" }
 
     SettingRow {
@@ -133,7 +135,7 @@ TabPage {
     /// every pool at once.
     readonly property var pool: {
         const modules = Config.values.bar.modules;
-        const placed = [].concat(modules.left, modules.center, modules.right);
-        return Config.schema.barModules.filter(id => placed.indexOf(id) < 0);
+        return fields.pool(Config.schema.barModules,
+                           [].concat(modules.left, modules.center, modules.right));
     }
 }

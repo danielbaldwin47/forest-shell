@@ -26,6 +26,8 @@ TabPage {
     blurb: "The panel behind the bar's chevron: a row of sliders, a grid of toggles, and "
            + "the pill that pops up when a volume or brightness key is pressed."
 
+    FieldPolicy { id: fields }
+
     SectionHeader { text: "Toggle grid" }
 
     SectionNote {
@@ -154,13 +156,9 @@ TabPage {
     })
 
     /// Every tile the shell can draw that is not currently in the grid.
-    readonly property var tilePool: {
-        const placed = Config.values.controlCenter.tiles;
-        return Config.schema.controlCenterTiles.filter(id => placed.indexOf(id) < 0);
-    }
+    readonly property var tilePool: fields.pool(Config.schema.controlCenterTiles,
+                                               Config.values.controlCenter.tiles)
 
-    readonly property var sliderPool: {
-        const placed = Config.values.controlCenter.sliders;
-        return Config.schema.controlCenterSliders.filter(id => placed.indexOf(id) < 0);
-    }
+    readonly property var sliderPool: fields.pool(Config.schema.controlCenterSliders,
+                                                  Config.values.controlCenter.sliders)
 }

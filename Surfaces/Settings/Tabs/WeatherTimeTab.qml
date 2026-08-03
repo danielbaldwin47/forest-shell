@@ -24,6 +24,8 @@ TabPage {
     blurb: "The weather card's location and units, the clock's format, and the night "
            + "light's warmth — the settings about where and when this machine is."
 
+    FieldPolicy { id: fields }
+
     SectionHeader { text: "Weather" }
 
     SectionNote {
@@ -55,10 +57,8 @@ TabPage {
 
         SettingChoice {
             binding: unitsBinding
-            options: [
-                { value: "metric", label: "Metric" },
-                { value: "imperial", label: "Imperial" }
-            ]
+            options: fields.options(Config.schema.weatherUnits,
+                                    { "metric": "Metric", "imperial": "Imperial" })
         }
     }
 

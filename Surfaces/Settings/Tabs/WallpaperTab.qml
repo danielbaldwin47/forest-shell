@@ -29,6 +29,8 @@ TabPage {
     blurb: "The image behind everything. The control centre's wallpaper tile opens a "
            + "picker with thumbnails; this is the same two keys behind it."
 
+    FieldPolicy { id: fields }
+
     SectionHeader { text: "Where to look" }
 
     SettingRow {
@@ -43,7 +45,7 @@ TabPage {
         SettingText {
             binding: folderBinding
             placeholder: "~/Pictures/Wallpapers"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 
@@ -68,7 +70,7 @@ TabPage {
         SettingText {
             binding: pathBinding
             placeholder: "none"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 

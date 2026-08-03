@@ -31,6 +31,8 @@ TabPage {
               + "in the pool below. The header is not a card — it is what the panel is."
     }
 
+    FieldPolicy { id: fields }
+
     OrderedList {
         path: "dashboard.cards"
         pool: page.pool
@@ -70,7 +72,7 @@ TabPage {
         SettingText {
             binding: diskBinding
             placeholder: "/"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 
@@ -103,7 +105,7 @@ TabPage {
         SettingText {
             binding: avatarBinding
             placeholder: "~/.face"
-            validate: text => text === "" || text.startsWith("/") || text.startsWith("~")
+            validate: text => fields.looksLikePath(text)
         }
     }
 
@@ -116,8 +118,6 @@ TabPage {
     /// differ in one direction and have: a name may be offered here before the
     /// file that draws it exists, which is how #50's two data cards survived a
     /// version that could not render them.
-    readonly property var pool: {
-        const placed = Config.values.dashboard.cards;
-        return Config.schema.dashboardCards.filter(id => placed.indexOf(id) < 0);
-    }
+    readonly property var pool: fields.pool(Config.schema.dashboardCards,
+                                           Config.values.dashboard.cards)
 }

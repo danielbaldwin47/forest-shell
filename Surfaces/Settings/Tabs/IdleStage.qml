@@ -38,6 +38,8 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: Theme.space5
 
+    FieldPolicy { id: fields }
+
     ConfigBinding {
         id: enabledBinding
         path: "system.idle." + root.stage + ".enabled"
@@ -78,10 +80,7 @@ ColumnLayout {
                 // The coercer clamps to 0–600 and falls back to the default on
                 // anything unreadable, so what this refuses is the value that
                 // would silently become something else.
-                validate: text => {
-                    const value = Number(text);
-                    return text.trim() !== "" && isFinite(value) && value >= 0 && value <= 600;
-                }
+                validate: text => fields.isMinutes(text)
                 submit: text => timeoutBinding.commit(Number(text))
             }
         }

@@ -120,7 +120,10 @@ TestCase {
         compare(bar.surface.opacity, 0.86);
         compare(bar.surface.hairline, true);
         compare(bar.surface.grain, 0.03);
-        compare(bar.surface.adaptiveOpacity, false);
+        // No `adaptiveOpacity`: the legibility floor is always on and is not a
+        // setting (#79). A build that still offered the knob would be offering
+        // a switch that changes nothing.
+        compare(bar.surface.adaptiveOpacity, undefined);
         compare(bar.ridgeline.unitWidth, 14);
         compare(bar.ridgeline.gap, 4);
         compare(bar.ridgeline.activeHeight, 14);
@@ -322,9 +325,13 @@ TestCase {
         compare(out.bar.surface.opacity, undefined);
     }
 
-    function test_bar_opacity_cannot_be_set_below_the_contrast_floor() {
-        // Not taste: secondary text over the brightest wallpaper measures
-        // 4.44:1 at 0.60, under the design system's 4.5:1 body floor (#10).
+    function test_bar_opacity_stays_inside_its_range() {
+        // Taste, since #79: the 4.5:1 floor is enforced on the rendered band
+        // (Surfaces/Bar/BarLegibility.qml), not here. The range is still a
+        // range — a fill at 0.2 is a bar that has stopped being a bar — but it
+        // is no longer load-bearing for legibility, and the old rationale
+        // ("0.60 measures 4.44:1") was measured against an averaged wallpaper
+        // and does not survive a capture.
         const raw = { bar: { surface: { opacity: 0.2 } } };
         compare(store.resolve(settings.spec, raw).values.bar.surface.opacity, 0.65);
     }
@@ -400,6 +407,48 @@ TestCase {
 
     function test_the_two_files_use_different_version_keys() {
         verify(settings.versionKey !== state.versionKey);
+    }
+
+    // --- settings v3: the legibility floor stops being a setting (#79) -------
+
+    function test_adaptive_opacity_is_dropped_from_a_file_that_has_it() {
+        const raw = {
+            settingsVersion: 2,
+            bar: { height: 40, surface: { opacity: 0.7, adaptiveOpacity: true } }
+        };
+        const result = migrations.run(raw, settings.migrations,
+                                      settings.versionKey, settings.version);
+        verify(result.ok, result.error);
+        compare(result.raw.bar.surface.adaptiveOpacity, undefined);
+        // Everything the user did set is still theirs.
+        compare(result.raw.bar.surface.opacity, 0.7);
+        compare(result.raw.bar.height, 40);
+        compare(result.raw.settingsVersion, settings.version);
+    }
+
+    function test_dropping_it_takes_an_emptied_surface_section_with_it() {
+        // A file whose only bar.surface key was the knob should not be left
+        // carrying an empty object — the sparse write would never have made one.
+        const result = migrations.run({
+            settingsVersion: 2, bar: { surface: { adaptiveOpacity: false } }
+        }, settings.migrations, settings.versionKey, settings.version);
+        verify(result.ok, result.error);
+        compare(result.raw.bar.surface, undefined);
+    }
+
+    function test_a_file_without_the_knob_is_left_alone() {
+        for (const raw of [{ settingsVersion: 2 },
+                           { settingsVersion: 2, bar: {} },
+                           { settingsVersion: 2, bar: { surface: { opacity: 0.9 } } },
+                           // Shapes a hand-edited file can be in: the migration
+                           // must not throw on any of them (#21 — never blocks
+                           // startup).
+                           { settingsVersion: 2, bar: "nonsense" },
+                           { settingsVersion: 2, bar: { surface: [1, 2] } }]) {
+            const result = migrations.run(raw, settings.migrations,
+                                          settings.versionKey, settings.version);
+            verify(result.ok, JSON.stringify(raw) + ": " + result.error);
+        }
     }
 
     function test_history_written_before_row_keys_is_migrated_rather_than_dropped() {

@@ -15,6 +15,12 @@ cd "$(dirname "$0")"
 export QT_ASSUME_STDERR_HAS_CONSOLE=1
 export QT_QPA_PLATFORM=offscreen
 
+# A handful of checks read a checked-in config file rather than a QML object —
+# "does the file the integration guide tells you to source still contain the
+# lines the shell documents" is a decision, and it belongs at this seam (#140).
+# Qt refuses file:// XHR unless this is set.
+export QML_XHR_ALLOW_FILE_READ=1
+
 runner=$(command -v qmltestrunner || true)
 [[ -n "$runner" ]] || runner=/usr/lib/qt6/bin/qmltestrunner   # not on PATH on Arch
 [[ -x "$runner" ]] || { echo "qmltestrunner not found (tried PATH and $runner)" >&2; exit 1; }

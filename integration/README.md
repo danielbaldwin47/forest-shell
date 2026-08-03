@@ -127,6 +127,9 @@ lazily.
 
 ### Autostart
 
+Autostart of *the shell* is what this is about; the clipboard watchers the
+launcher needs are a separate line and are in §3 below.
+
 There is nothing separate to wire. Autostart *is* the switch: `shell-switch`
 regenerates `~/.config/hypr/shell-switcher-startup.conf` from its template
 before it switches, so picking "Forest Shell" leaves that file holding
@@ -153,13 +156,27 @@ kill it) so the compile is warm, then switch.
 
 ---
 
-## 3. Wire the keybinds
+## 3. Wire the keybinds and the clipboard watchers
 
-Add one line to `~/.config/hypr/hyprland.conf`:
+Add two lines to `~/.config/hypr/hyprland.conf`:
 
 ```
 source = ~/repos/forest-shell/integration/hyprland/forest-binds.conf
+source = ~/repos/forest-shell/integration/hyprland/forest-autostart.conf
 ```
+
+The second one is not optional if you want the launcher's `;` page, and its
+absence is invisible: `forest-autostart.conf` starts the two `wl-paste --watch`
+processes that fill `cliphist`, and Wayland keeps no clipboard history without
+them. With no watcher running the history is empty forever and looks exactly
+like a history nobody has copied into yet — which is how #140 was found on the
+T480, with the shell running and both binaries installed. It also needs
+
+```bash
+pacman -S cliphist wl-clipboard
+```
+
+The rest of this section is the binds.
 
 Do not put these in `~/.config/hypr/shell-switcher-binds.conf`. That file is
 regenerated wholesale from a template on every switch, despite the comment in it

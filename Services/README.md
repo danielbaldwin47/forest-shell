@@ -161,7 +161,12 @@ Nineteen of them exist so far:
   invocation, so a single untyped watcher stores text and silently drops every
   image — a clipboard history that works until the first screenshot. The lines
   live in `ClipboardPolicy.autostart` as data as well as here, so the sentence
-  the launcher shows on an empty history cannot drift from this block.
+  the launcher shows on an empty history cannot drift from this block. They also
+  ship in `integration/hyprland/forest-autostart.conf`, which is the file a user
+  actually sources — for a while they did not, and prose that names a setup line
+  no installable config contains is a provider that is empty on every machine
+  but the author's (#140). `tests/tst_clipboardpolicy.qml` reads that file and
+  fails if the two stop matching.
 
   It is in the deferred list for `Calculator`'s reason and one of its own. The
   one run at startup is both the probe for `cliphist` and the first read of the

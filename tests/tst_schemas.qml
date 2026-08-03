@@ -58,6 +58,16 @@ TestCase {
         }
     }
 
+    function test_the_mode_choice_travels_and_its_output_does_not() {
+        // #56 draws this line: a preset carries the *choice* of theming mode,
+        // and never what a wallpaper-coupled mode sampled on the machine it was
+        // saved on. Both flags are read by Core/ThemePolicy.qml and by nothing
+        // else, so losing one would be silent everywhere but here.
+        compare(store.leafAt(settings.spec, "appearance.mode").themed, true);
+        compare(store.leafAt(settings.spec, "appearance.mode").derived, undefined);
+        compare(store.leafAt(settings.spec, "appearance.dynamic").derived, true);
+    }
+
     function test_intent_lives_in_settings() {
         // Toggled often, but still setup: these travel with the config (#21).
         verify(store.leafAt(settings.spec, "appearance.darkMode") !== null);

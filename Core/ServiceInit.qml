@@ -147,7 +147,12 @@ Singleton {
         // what runs the two encoder probes, so the control centre can say
         // whether this machine records on the GPU or in software before
         // anybody presses the tile.
-        report("deferred", [ShellState, Notifications, Compositor,
+        // Themes (#56) is Screenshot's argument in Core: nothing in the shell
+        // reads it until the Appearance tab is opened, and naming it is what
+        // registers `qs ipc call theme …` — the door a keybind that swaps skins
+        // goes through, and the one tools/theme-harness.sh drives. It reads the
+        // undo slot on construction, which is a file read and no more.
+        report("deferred", [ShellState, Themes, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
                             PowerProfiles, NightLight, Vpn,

@@ -13,9 +13,13 @@ built the other six, so all ten are live).
 | `Controls/` | The config-bound form kit, shared by every tab |
 | `Tabs/` | The implemented tabs, plus the parts only one tab uses |
 
-`NotificationRuleRow.qml` and `IdleStage.qml` live in `Tabs/` rather than
-`Controls/` on purpose: each is one tab's editor for one key group, not a form
-control anything else could hold. A second caller is what moves a file up to
+`NotificationRuleRow.qml`, `IdleStage.qml` and `ThemeSection.qml` live in
+`Tabs/` rather than `Controls/` on purpose: each is one tab's editor for one key
+group, not a form control anything else could hold. `ThemeSection.qml` is the
+theme list ([#56](https://github.com/danielbaldwin47/forest-shell/issues/56)) —
+it holds the window's one free-text field that is not a config key, since a
+theme name is not in `settings.json` at all, and every file it touches belongs
+to `Core/Themes.qml`. A second caller is what moves a file up to
 `Controls/`, and that is exactly what happened to `OrderedList.qml`: it was the
 Bar tab's `BarModuleCluster.qml` until #55 gave it two more callers — the
 dashboard's cards and the control centre's grid are the same shape, an ordered

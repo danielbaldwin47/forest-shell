@@ -58,6 +58,18 @@ TabPage {
         SettingSwitch { binding: darkBinding }
     }
 
+    SectionHeader { text: "Themes" }
+
+    SectionNote {
+        note: "A theme is a skin and never a layout: the palette overrides below, the "
+              + "bar's surface and ridgeline styling, and the theming mode. Bar geometry, "
+              + "module lists and every service setting stay on this machine. Applying one "
+              + "copies its keys into settings.json — there is no live link afterwards, so "
+              + "editing a knob is editing your settings and not the theme."
+    }
+
+    ThemeSection {}
+
     SectionHeader { text: "Effects" }
 
     SettingRow {

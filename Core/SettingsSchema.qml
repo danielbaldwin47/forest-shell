@@ -15,9 +15,14 @@
 //     `set()`. It is for effects that can be expressed *here*, in a file with no
 //     Quickshell imports; anything needing a service connects to
 //     `Config.keyChanged` instead;
-//   - `themed: true` marks a whole sub-object that a theme preset replaces
-//     atomically (#56). Those are leaves, not sections, so a preset never
-//     half-merges into keys a user left behind.
+//   - `themed: true` marks a key a theme preset carries (#56) — the shell's
+//     *skin*, never its layout. A themed **group** is a whole sub-object, and
+//     therefore a leaf rather than a section, so a preset replaces it
+//     atomically and never half-merges into keys a user left behind;
+//   - `derived: true` is that flag's exception: a themed group that is a mode's
+//     *output* rather than anyone's choice. Core/ThemePolicy.qml leaves those
+//     out of a saved theme — a preset carrying one would pin the machine it was
+//     saved on into the palette of the machine it is applied to.
 //
 // What is deliberately *not* here: DND, last-open tab, session ids, caches.
 // Intent lives in config even when it is toggled often — dark mode, the current
@@ -174,7 +179,11 @@ QtObject {
             // Fixed forest until #58/#59 land the other two; the key exists now
             // because the control does (#54), and a mode the shell cannot serve
             // yet is disabled in the GUI rather than missing from the file.
-            mode: { def: "forest", coerce: c.oneOf(schema.themingModes) },
+            //
+            // Theme-flagged and not a group: a preset carries the *choice* of
+            // mode (#56) even though what a wallpaper-coupled mode then
+            // produces is `dynamic` below, which it never carries.
+            mode: { def: "forest", coerce: c.oneOf(schema.themingModes), themed: true },
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
@@ -187,7 +196,12 @@ QtObject {
             // an unparseable colour is dropped with a warning rather than
             // painted, because this arrives hand-edited.
             paletteOverrides: { def: ({}), coerce: c.object, themed: true },
-            dynamic: { def: ({}), coerce: c.object, themed: true }
+            // What a wallpaper-coupled mode produced here, on this machine, from
+            // this wallpaper (#58, #59). Theme-flagged so a preset *replaces* it
+            // atomically rather than merging into last week's sample, and
+            // `derived` so no preset ever carries it away from the machine that
+            // sampled it (#56).
+            dynamic: { def: ({}), coerce: c.object, themed: true, derived: true }
         },
 
         // The fattest section, owned by Core/SettingsSchemaBar.qml and

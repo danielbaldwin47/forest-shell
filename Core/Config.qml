@@ -46,6 +46,12 @@ Singleton {
     readonly property alias ready: settings.ready
     readonly property alias values: settings.values
 
+    // The file as it is on disk — sparse, and carrying every key this build does
+    // not know. Read by exactly one caller (Core/Themes.qml): saving a theme has
+    // to capture what the user *set*, and `values` cannot tell a key that is in
+    // the file from a key that is merely at its default (#56).
+    readonly property alias raw: settings.raw
+
     // Emitted once when the first read settles, and after every reload that
     // actually changed something.
     signal reloaded()

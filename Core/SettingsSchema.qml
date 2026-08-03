@@ -89,6 +89,10 @@ QtObject {
     /// here so the Bar tab and the registry keep one address for it.
     readonly property var barModules: barSchema.modules
 
+    /// The screen edges the bar can sit on, same arrangement: owned by the
+    /// section file, read by the Bar tab's choice control.
+    readonly property var barPositions: barSchema.positions
+
     /// The dashboard's card inventory (#49), the same kind of pool as
     /// `barModules`: what a settings GUI offers to add, and what
     /// Surfaces/Drawers/DashboardRegistry.qml resolves the result against.

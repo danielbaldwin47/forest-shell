@@ -37,6 +37,17 @@ ColumnLayout {
     /// and only the tab can see all of them.
     required property var pool
 
+    /// Ids the vocabulary offers that whatever renders this list cannot draw
+    /// yet — greyed and inert here rather than hidden (#72). Computed by the
+    /// tab from the *renderer's* table (`FieldPolicy.unsupported`), never
+    /// written out as a list of its own.
+    ///
+    /// Greyed rather than absent because the two states are different facts
+    /// and the user is entitled to both: "there is no such module" and "there
+    /// is one, this build cannot draw it". Hiding them would make a name the
+    /// file legally holds look like a typo.
+    property var unsupported: []
+
     /// id → what to call it on screen. The identity by default, which is right
     /// for the bar's modules: those ids *are* the vocabulary the user
     /// hand-edits. A dashboard card has a name of its own and passes one.
@@ -58,6 +69,13 @@ ColumnLayout {
     ConfigBinding {
         id: binding
         path: root.path
+    }
+
+    /// Whether this build can actually draw `id`. Array-safe: a tab whose
+    /// registry has not arrived yet passes `undefined`, and the honest answer
+    /// then is "nothing is known to be missing" rather than a greyed pool.
+    function drawable(id: string): bool {
+        return !Array.isArray(root.unsupported) || root.unsupported.indexOf(id) < 0;
     }
 
     function move(index: int, delta: int): void {
@@ -136,7 +154,12 @@ ColumnLayout {
                 Text {
                     Layout.fillWidth: true
                     text: root.labelFor(entryRow.modelData)
-                    color: Theme.textPrimary
+                    // A name the file holds that this build cannot draw reads
+                    // muted here too, not only in the pool: it is already
+                    // placed, so the pool never gets the chance to say so, and
+                    // "in a cluster and drawing nothing" is exactly the state
+                    // #72 says a user should not have to guess at.
+                    color: root.drawable(entryRow.modelData) ? Theme.textPrimary : Theme.textMuted
                     font.family: root.mono ? Theme.fontMono : Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     elide: Text.ElideRight
@@ -186,12 +209,19 @@ ColumnLayout {
 
                 required property string modelData
 
+                /// Whether tapping this chip would produce anything.
+                readonly property bool addable: root.drawable(poolChip.modelData)
+
                 implicitWidth: poolRow.implicitWidth + Theme.space3 * 2
                 implicitHeight: 24
                 radius: Theme.radiusSm
                 color: poolHover.hovered ? Theme.surfaceOverlay : "transparent"
                 border.width: Theme.hairline
                 border.color: Theme.borderSubtle
+                // The same greying a row with no feature behind it gets
+                // (`SettingRow`): inert and still legible, so the id remains
+                // readable as something this shell will grow.
+                opacity: poolChip.addable ? 1 : Theme.opacityInert
 
                 RowLayout {
                     id: poolRow
@@ -200,7 +230,17 @@ ColumnLayout {
                     spacing: Theme.space1
 
                     Icon {
-                        name: "plus"
+                        // Not a plus, because there is nothing to add. An
+                        // hourglass and not a clock: `clock` is itself a bar
+                        // module id, and a chip reading "clock" next to a clock
+                        // glyph is a sentence about the wrong thing.
+                        //
+                        // The glyph is the second carrier, not the first. It is
+                        // a `MultiEffect` and draws nothing on the offscreen
+                        // scenegraph (CLAUDE.md, seam 3), so what the capture
+                        // proves is the opacity — which is deliberately the one
+                        // that has to work on its own.
+                        name: poolChip.addable ? "plus" : "hourglass"
                         size: 11
                         color: Theme.textMuted
                     }
@@ -213,8 +253,16 @@ ColumnLayout {
                     }
                 }
 
-                HoverHandler { id: poolHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: root.add(poolChip.modelData) }
+                HoverHandler {
+                    id: poolHover
+                    enabled: poolChip.addable
+                    cursorShape: Qt.PointingHandCursor
+                }
+
+                TapHandler {
+                    enabled: poolChip.addable
+                    onTapped: root.add(poolChip.modelData)
+                }
             }
         }
     }

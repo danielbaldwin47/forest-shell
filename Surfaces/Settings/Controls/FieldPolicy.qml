@@ -59,6 +59,38 @@ QtObject {
             .filter(id => taken.indexOf(id) < 0);
     }
 
+    /// Which of a vocabulary's ids the thing that renders them cannot draw.
+    ///
+    /// The schema's vocabulary is deliberately ahead of the registry — a name
+    /// the shell cannot render yet is dropped with a warning rather than
+    /// refused (Surfaces/Bar/BarRegistry.qml), so a file written by a newer
+    /// shell keeps its modules under an older one. The cost of that is a pool
+    /// offering ids that do nothing when added, which is what #72 is about.
+    ///
+    /// `known` is the *renderer's own* table — `BarRegistry.modules`, an
+    /// `id → { file, label }` map — and not a second list of unavailable ids.
+    /// A list like that would have to be edited every time a module lands, and
+    /// the failure mode of forgetting is the greying staying on a module that
+    /// now works. Passing the registry's map means the greying goes away by
+    /// itself the moment the registry grows an entry.
+    /// No table at all greys nothing, rather than everything. This is a warning
+    /// like the rest of this file and the permissive direction is the same one:
+    /// an id wrongly greyed is one the user cannot add, while an id wrongly
+    /// offered costs a console warning from the registry.
+    ///
+    /// An own-property check and not `known[id] === undefined`, because a
+    /// vocabulary is a list of ids a user can hand-edit: `constructor` and
+    /// `toString` are legal strings in `settings.json` and would otherwise
+    /// inherit an answer from `Object.prototype` and read as drawable.
+    /// `hasOwnProperty` through `call` rather than `Object.hasOwn`, which this
+    /// QML engine does not have (measured — the suite throws on it).
+    function unsupported(vocabulary: var, known: var): var {
+        if (known === undefined || known === null)
+            return [];
+        return (Array.isArray(vocabulary) ? vocabulary : [])
+            .filter(id => !Object.prototype.hasOwnProperty.call(known, id));
+    }
+
     /// A closed list as `SettingChoice` options, with the display names this
     /// window uses for them.
     ///

@@ -4,6 +4,7 @@
 import QtQuick
 import QtTest
 import "../Surfaces/Bar"
+import "../Surfaces/Settings/Controls"
 import "../Core"
 
 TestCase {
@@ -12,6 +13,7 @@ TestCase {
     BarRegistry { id: registry }
     SettingsSchema { id: settings }
     SpecStore { id: store }
+    FieldPolicy { id: fields }
 
     function test_the_default_layout_only_names_modules_that_exist() {
         // The shipped default has to survive its own registry — a default
@@ -82,6 +84,22 @@ TestCase {
         for (const name in registry.modules)
             verify(settings.barModules.indexOf(name) >= 0,
                    name + " is in the registry but not in the settings vocabulary");
+    }
+
+    function test_the_pool_greys_exactly_what_the_registry_cannot_draw() {
+        // The other way round, and the reason the Bar tab can offer the whole
+        // vocabulary without lying about it (#72): what the pool greys is
+        // computed from `registry.modules` at the point of use, so a module
+        // landing in the registry un-greys its chip with no second list to
+        // edit. This asserts the wiring, not a count — the set will shrink to
+        // empty as #36, #37 and #52 register their modules, and that is the
+        // shape of it working.
+        const greyed = fields.unsupported(settings.barModules, registry.modules);
+
+        for (const name of greyed)
+            verify(!registry.known(name), name + " is greyed but the registry can draw it");
+        for (const name in registry.modules)
+            verify(greyed.indexOf(name) < 0, name + " is drawable but greyed");
     }
 
     function test_every_registered_module_names_a_file_and_a_label() {

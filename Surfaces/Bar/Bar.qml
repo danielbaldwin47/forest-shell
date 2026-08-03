@@ -50,33 +50,44 @@ Scope {
     // press puts it back.
     property string override: "auto"
 
-    onOverrideChanged: Logger.log("bar", "override: " + bar.override)
+    /// How many of the bar's windows the pointer is currently holding open.
+    /// Kept here rather than read off a window because the override is
+    /// shell-wide and `toggle` has to know what is actually on screen: a bar
+    /// revealed by the pointer and then toggled must hide, not be set to
+    /// "shown" and appear to ignore the key. Uniform per screen (#22 §1), so
+    /// any window counting is the answer for all of them.
+    property int pointerRevealed: 0
 
     function toggle(source: string): bool {
-        // Decided against the focused screen's window, which is the one the
-        // user is looking at when they press the key. With one monitor — both
+        // Decided against the focused screen, which is the one the user is
+        // looking at when they press the key. With one monitor — both
         // calibration machines — there is nothing to choose between.
-        const ctx = bar.decisionContext();
-        bar.override = visibility.next(ctx);
-        Logger.log("bar", "toggle (" + source + "): "
-                   + visibility.describe(bar.decisionContext()));
-        return true;
+        bar.override = visibility.next(bar.decisionContext());
+        return bar.announce("toggle", source);
     }
 
     function setOverride(value: string, source: string): bool {
-        bar.override = value;
-        Logger.log("bar", value + " (" + source + "): "
+        // A string off the wire: anything that is not one of the three would
+        // read as `auto` further down and make the door look broken.
+        bar.override = visibility.normalize(value);
+        return bar.announce(bar.override, source);
+    }
+
+    /// The one log line per press. #81 was a lifecycle with no line at all;
+    /// two lines saying the same thing is the other way to make a log
+    /// unreadable, so the state and what decided it go out together.
+    function announce(verb: string, source: string): bool {
+        Logger.log("bar", verb + " (" + source + "): "
                    + visibility.describe(bar.decisionContext()));
         return true;
     }
 
-    /// The context as the focused screen sees it, for the decisions that are
-    /// taken once for the whole shell rather than per window. Hover is not in
-    /// it: a toggle is about what the bar does when the pointer is not there.
+    /// The context as the focused screen sees it, for the decisions taken once
+    /// for the whole shell rather than per window.
     function decisionContext(): var {
-        return visibility.context(bar.settings.autoHide, false, false,
-                                  bar.override, Compositor.focusedFullscreen,
-                                  true);
+        return visibility.context(bar.settings.autoHide,
+                                  bar.pointerRevealed > 0, false, bar.override,
+                                  Compositor.focusedFullscreen, true);
     }
 
     // No `show` on this target: the `qs ipc` client parses it as its own
@@ -259,7 +270,19 @@ Scope {
             // header of Core/FocusGrabWindows.qml). Announced rather than
             // reached for, because these are created and destroyed by hotplug.
             Component.onCompleted: FocusGrabWindows.keep(window)
-            Component.onDestruction: FocusGrabWindows.release(window)
+            Component.onDestruction: {
+                FocusGrabWindows.release(window);
+                // Hotplug can take a window away mid-hover; a count that only
+                // ever went up would leave every later toggle believing the
+                // pointer was still there.
+                if (window.pointerHolding)
+                    bar.pointerRevealed -= 1;
+            }
+
+            // What the pointer is holding open, counted shell-wide so `toggle`
+            // knows what is on screen (#70).
+            readonly property bool pointerHolding: hover.hovered || linger.running
+            onPointerHoldingChanged: bar.pointerRevealed += pointerHolding ? 1 : -1
 
             // Input is masked to what is actually there: the whole bar while
             // it is showing, and a one-pixel reveal strip along the screen edge

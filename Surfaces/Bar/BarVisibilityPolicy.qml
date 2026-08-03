@@ -92,16 +92,28 @@ QtObject {
     /// tile under it.
     ///
     /// An auto-hiding bar does not — that is the point of it — and neither
-    /// does one the user has explicitly hidden, because a hidden bar that
-    /// still reserved 32px would leave a blank band where it used to be.
+    /// does one the user has explicitly hidden or one a fullscreen window has
+    /// taken over from, because a hidden bar that still reserved 32px would
+    /// leave a blank band where it used to be.
     ///
-    /// Fullscreen is deliberately *not* here, and that is the one asymmetry
-    /// with `revealed`. A fullscreen surface ignores exclusive zones already,
-    /// so dropping the zone buys no pixels; what it would cost is a reflow of
-    /// every tiled window on the way into fullscreen and another on the way
-    /// out, for a change nobody can see while it applies.
+    /// Fullscreen is here for the mode that is *not* true fullscreen.
+    /// `Compositor.focusedFullscreen` reads the workspace's `hasfullscreen`,
+    /// which Hyprland also sets for its maximize mode — and a maximized window
+    /// does honour exclusive zones, so keeping the zone there would leave
+    /// exactly that blank band with the maximized window stopping short of it.
+    /// Under true fullscreen the zone is ignored either way, so the reflow it
+    /// costs on the way in happens under a window covering the whole screen.
     function reservesSpace(ctx: var): bool {
-        return ctx.override !== "hidden" && ctx.autoHide !== true;
+        return ctx.override !== "hidden" && ctx.autoHide !== true
+            && !(ctx.fullscreen === true && ctx.focusedScreen === true);
+    }
+
+    /// An override from outside — IPC carries a string, and a value that is not
+    /// one of the three would read as `auto` and make the keybind look broken.
+    /// Falls back rather than throwing: a script with a typo in it should leave
+    /// the bar doing the sensible thing.
+    function normalize(value: string): string {
+        return policy.overrides.indexOf(value) >= 0 ? value : "auto";
     }
 
     /// What `toggle` sets the override to, given what is on screen now.
@@ -128,11 +140,13 @@ QtObject {
     /// lifecycle and one bug then had two candidate causes for a week; with
     /// three hide reasons now converging on one property, "the bar is not
     /// there" needs to say which one did it.
+    /// `override` rather than `ipc`, because the IPC door is not the only one:
+    /// the global shortcut sets the same property, and a line reading
+    /// `toggle (shortcut): hidden (ipc)` would contradict itself on the half
+    /// of the line that is supposed to explain the other half.
     function reason(ctx: var): string {
-        if (ctx.override === "shown")
-            return "ipc";
-        if (ctx.override === "hidden")
-            return "ipc";
+        if (ctx.override !== "auto")
+            return "override";
         if (!policy.autoHidden(ctx))
             return "pinned";
         if (ctx.hovering === true)

@@ -84,11 +84,16 @@ TestCase {
                 "pinned");
     }
 
-    function test_fullscreen_does_not_give_back_the_exclusive_zone() {
-        // Deliberate asymmetry with `revealed`: the zone buys no pixels while
-        // a fullscreen surface is ignoring it, so dropping it would only cost
-        // a tiled reflow on the way in and another on the way out.
-        verify(policy.reservesSpace(ctx({ fullscreen: true })));
+    function test_fullscreen_gives_back_the_exclusive_zone() {
+        // For the mode that is not true fullscreen. `focusedFullscreen` reads
+        // the workspace's `hasfullscreen`, which Hyprland also sets for
+        // maximize — and a maximized window *does* honour exclusive zones, so
+        // keeping the band would leave the window stopping short of a strip
+        // with nothing drawn in it.
+        verify(!policy.reservesSpace(ctx({ fullscreen: true })));
+        // And not on the monitors that are not showing it.
+        verify(policy.reservesSpace(ctx({ fullscreen: true,
+                                          focusedScreen: false })));
     }
 
     // --- the override, which is the IPC door and the keybind -----------------
@@ -99,7 +104,7 @@ TestCase {
         // Unlike fullscreen: the user asked for the bar to be gone, so the
         // band it was reserving goes back to the windows.
         verify(!policy.reservesSpace(hidden));
-        compare(policy.reason(hidden), "ipc");
+        compare(policy.reason(hidden), "override");
     }
 
     function test_an_explicit_hide_is_not_undone_by_the_pointer() {
@@ -177,6 +182,17 @@ TestCase {
                    >= 0);
     }
 
+    function test_an_override_off_the_wire_is_normalised_before_it_is_believed() {
+        // `override` arrives as a string over IPC. Without this a typo'd value
+        // would read as `auto` everywhere downstream, so the door would answer
+        // 0 and the bar would not move — the worst of both.
+        for (const over of policy.overrides)
+            compare(policy.normalize(over), over);
+        compare(policy.normalize("Shown"), "auto");
+        compare(policy.normalize(""), "auto");
+        compare(policy.normalize("toggle"), "auto");
+    }
+
     // --- the door itself -----------------------------------------------------
 
     function test_no_ipc_verb_on_the_bar_is_a_name_the_cli_eats() {
@@ -211,6 +227,6 @@ TestCase {
                 "shown (hover)");
         compare(policy.describe(ctx({ autoHide: true, lingering: true })),
                 "shown (linger)");
-        compare(policy.describe(ctx({ override: "hidden" })), "hidden (ipc)");
+        compare(policy.describe(ctx({ override: "hidden" })), "hidden (override)");
     }
 }

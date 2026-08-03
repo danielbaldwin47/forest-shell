@@ -394,9 +394,14 @@ Item {
 
             text: surface.auth.message
             visible: text !== ""
-            color: surface.auth.lockedOut ? Theme.accentEmber
-                 : surface.auth.messageIsError ? Theme.textPrimary
-                 : Theme.textSecondary
+            color: {
+                switch (policy.messageTone(surface.auth.lockedOut,
+                                           surface.auth.messageIsError)) {
+                case "lockout": return Theme.accentEmber;
+                case "error":   return Theme.textPrimary;
+                }
+                return Theme.textSecondary;
+            }
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             font.family: Theme.fontUi

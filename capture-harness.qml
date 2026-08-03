@@ -131,12 +131,37 @@ ShellRoot {
         Quickshell.env("CAPTURE_CLAUDE_TRANSCRIPT") ?? ""
 
     /// What the lock is showing, as a comma-separated set — `quiet` on its own,
-    /// or any of `summoned`, `caps`, `notify:N`. Every item in the lock's status
-    /// strip is gated on something about the machine (a discharging battery, a
-    /// caps-lock key, notifications waiting), so a capture that does not pin
-    /// them photographs whatever this laptop happened to be doing. #73's
-    /// criterion is about the icons, and an empty strip answers nothing.
+    /// or any of `summoned`, `caps`, `notify:N`, `failed`, `lockout`,
+    /// `fingerprint`. Every item in the lock's status strip is gated on
+    /// something about the machine (a discharging battery, a caps-lock key,
+    /// notifications waiting), so a capture that does not pin them photographs
+    /// whatever this laptop happened to be doing. #73's criterion is about the
+    /// icons, and an empty strip answers nothing.
+    ///
+    /// The last three are #96's half of the failure path: each is gated on a
+    /// PAM answer this seam cannot produce, so they are posed through
+    /// `LockAuth.pose`. The three of them take an optional `:text` suffix
+    /// (`failed:Permission denied`) — no commas in it, since commas separate
+    /// the tokens.
     readonly property var lockState: (Quickshell.env("CAPTURE_LOCK_STATE") || "quiet").split(",")
+
+    /// What a posed failure says when the caller did not say. Real sentences
+    /// from real stacks rather than placeholders, because the message is shown
+    /// *verbatim* and its width is the thing the picture is checking; the
+    /// lockout line is deliberately one `LockPolicy.isLockout` recognises, and
+    /// tests/tst_lockpolicy.qml holds it to that.
+    readonly property var lockPosedText: ({
+        "failed": "Authentication failure",
+        "lockout": "Account locked due to 3 failed logins",
+        "fingerprint": "Place your finger on the reader"
+    })
+
+    /// The text a posed token carries: what follows the colon, or the default
+    /// above when the token is bare.
+    function lockPosedFor(token, kind) {
+        const colon = token.indexOf(":");
+        return colon === -1 ? root.lockPosedText[kind] : token.slice(colon + 1);
+    }
 
     readonly property bool isSettings: root.surfaceName === "settings"
 
@@ -1078,6 +1103,33 @@ ShellRoot {
                         // Normally inferred from a keystroke — LockPolicy
                         // .capsFromKey — which there is no keyboard to press.
                         lockSurface.capsLock = true;
+                    } else if (token === "failed" || token.startsWith("failed:")) {
+                        // A refusal, minus PAM: the message under the field is
+                        // whatever the stack said, and this is the only seam
+                        // that can photograph it. The shake is not here — an
+                        // animation is not a still, and it stays with the
+                        // real-session half of #96.
+                        lockAuth.pose({
+                            message: root.lockPosedFor(token, "failed"),
+                            messageIsError: true
+                        });
+                    } else if (token === "lockout" || token.startsWith("lockout:")) {
+                        // faillock. `lockedOut` is presentation-only and never
+                        // retreats (#30), which is exactly why it had never been
+                        // seen: nothing on this machine could reach it.
+                        lockAuth.pose({
+                            message: root.lockPosedFor(token, "lockout"),
+                            messageIsError: true,
+                            lockedOut: true
+                        });
+                    } else if (token === "fingerprint" || token.startsWith("fingerprint:")) {
+                        // The parallel conversation, on a machine with no
+                        // reader. `fingerprintActive` is the whole gate, so
+                        // posing it is the branch drawing for the first time.
+                        lockAuth.pose({
+                            fingerprintActive: true,
+                            fingerprintMessage: root.lockPosedFor(token, "fingerprint")
+                        });
                     } else if (token.startsWith("notify:")) {
                         // The bell is gated on the count *and* on the setting
                         // that allows it to be shown at all, so both are set:

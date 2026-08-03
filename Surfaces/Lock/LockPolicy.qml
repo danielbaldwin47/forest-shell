@@ -135,6 +135,19 @@ QtObject {
         return "";
     }
 
+    /// How the message under the field is dressed.
+    ///
+    /// Named rather than coloured: the colour is the surface's to pick, the
+    /// decision here is which of the three states the message is in. It is a
+    /// decision because lockout outranks error — faillock's text is the one
+    /// message on this screen that trying again cannot answer, so it must not
+    /// be dressed the same as a wrong password (#96).
+    function messageTone(lockedOut: bool, isError: bool): string {
+        if (lockedOut)
+            return "lockout";
+        return isError ? "error" : "quiet";
+    }
+
     // faillock's voice, in the two shapes it speaks in: the refusal
     // ("Account locked due to 3 failed logins") and the countdown pam_faillock
     // adds when `unlock_time` is set ("Try again in 8 minutes"). Matched only

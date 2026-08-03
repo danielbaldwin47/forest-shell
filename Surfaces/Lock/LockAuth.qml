@@ -203,6 +203,32 @@ Scope {
         priv.messageIsError = false;
     }
 
+    /// Pose the failure path rather than produce it (#96).
+    ///
+    /// A real refusal takes a real PAM stack, a real keyboard and a compositor
+    /// that presents — the capture seam has none of the three, and the nested
+    /// one never presents (#85). But the *picture* of a refusal is five
+    /// presentation flags, each one written from the far side of a PAM callback
+    /// the harness cannot reach, so the harness writes them here instead. Same
+    /// trick as `tools/lock-harness.sh` writing `buffer` to stand in for typing.
+    ///
+    /// Nothing in the shell calls this, and nothing it sets can let anyone in:
+    /// `lockedOut` is presentation only (#30) and the rest is text. The pose is
+    /// logged so a photographed lockout can never be read back as a real one.
+    function pose(fields) {
+        if (fields.message !== undefined)
+            priv.message = fields.message;
+        if (fields.messageIsError !== undefined)
+            priv.messageIsError = fields.messageIsError;
+        if (fields.lockedOut !== undefined)
+            priv.lockedOut = fields.lockedOut;
+        if (fields.fingerprintActive !== undefined)
+            priv.fingerprintActive = fields.fingerprintActive;
+        if (fields.fingerprintMessage !== undefined)
+            priv.fingerprintMessage = fields.fingerprintMessage;
+        Logger.log("lock", "posed " + JSON.stringify(fields));
+    }
+
     // --- the conversations ---------------------------------------------------
     //
     // Declared as plain children: `Scope`'s default property is `children`, and

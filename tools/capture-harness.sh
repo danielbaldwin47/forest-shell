@@ -49,12 +49,27 @@
 # knob now has draws its own state.)
 #
 # --lock-state poses the lock: `quiet`, or any comma-separated combination of
-# `summoned` (the field revealed), `caps` (the caps-lock warning) and
-# `notify:N`. Every item in the status strip is gated on something about the
-# machine, so a capture that does not pose them photographs whatever the laptop
-# happened to be doing — the battery item is the one that cannot be posed, and
-# the saved line reports what it was instead. --delay-ms buys settle time on a
-# loaded machine.
+# `summoned` (the field revealed), `caps` (the caps-lock warning), `notify:N`,
+# and #96's failure path — `failed` (PAM's message under the field, in the
+# error treatment), `lockout` (faillock's message, ember, the one state a user
+# cannot type past) and `fingerprint` (the prompt that only draws on a machine
+# with a finger enrolled). Those three take an optional `:text` suffix carrying
+# the message verbatim, with no commas in it:
+#
+#   tools/capture-harness.sh out.png --surface lock --lock-state failed
+#   tools/capture-harness.sh out.png --surface lock --lock-state lockout
+#   tools/capture-harness.sh out.png --surface lock --session \
+#       --lock-state 'summoned,failed:Permission denied'
+#
+# Every item in the status strip is gated on something about the machine, so a
+# capture that does not pose them photographs whatever the laptop happened to
+# be doing — the battery item is the one that cannot be posed, and the saved
+# line reports what it was instead. --delay-ms buys settle time on a loaded
+# machine.
+#
+# What --lock-state cannot pose, by construction: the shake. An animation is
+# not a still, and the nested seam cannot present one (#85), so the shake is
+# checked by locking a real session — tools/lock-failure-checklist.md.
 #
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module

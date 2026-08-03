@@ -91,6 +91,11 @@ TestCase {
         compare(policy.unsupported(["clock", "aquarium"], { clock: { file: "Clock.qml" } }),
                 ["aquarium"]);
         compare(policy.unsupported(["clock"], { clock: { file: "Clock.qml" } }), []);
+        // An id every object inherits an answer for. A hand-edited settings.json
+        // can hold this string, and reading it as drawable would let a chip
+        // through that renders nothing.
+        compare(policy.unsupported(["toString", "constructor"], { clock: {} }),
+                ["toString", "constructor"]);
     }
 
     function test_nothing_is_greyed_before_the_registry_arrives() {

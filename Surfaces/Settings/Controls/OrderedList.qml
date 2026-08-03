@@ -230,10 +230,17 @@ ColumnLayout {
                     spacing: Theme.space1
 
                     Icon {
-                        // Not a plus, because there is nothing to add: the
-                        // shape of the glyph is what carries the distinction
-                        // for anyone who cannot see the opacity change.
-                        name: poolChip.addable ? "plus" : "clock"
+                        // Not a plus, because there is nothing to add. An
+                        // hourglass and not a clock: `clock` is itself a bar
+                        // module id, and a chip reading "clock" next to a clock
+                        // glyph is a sentence about the wrong thing.
+                        //
+                        // The glyph is the second carrier, not the first. It is
+                        // a `MultiEffect` and draws nothing on the offscreen
+                        // scenegraph (CLAUDE.md, seam 3), so what the capture
+                        // proves is the opacity — which is deliberately the one
+                        // that has to work on its own.
+                        name: poolChip.addable ? "plus" : "hourglass"
                         size: 11
                         color: Theme.textMuted
                     }

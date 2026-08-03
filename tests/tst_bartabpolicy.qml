@@ -44,6 +44,14 @@ TestCase {
         compare(seen.length, 0, "listed twice: " + seen.join(", "));
     }
 
+    function test_every_track_belongs_to_a_key_the_tab_covers() {
+        // The two lists name the same keys from two directions, and this is
+        // what keeps them one set: a track declared for a path the tab does not
+        // put a row on is a range nothing reads.
+        for (const path in policy.ranges)
+            verify(policy.covers.indexOf(path) >= 0, path + " has a track but no row");
+    }
+
     function test_every_slider_track_survives_its_own_coercer() {
         // The criterion that outlived #68: a slider must not offer a value the
         // file would then change. Both ends are checked, because a track is

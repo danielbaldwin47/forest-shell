@@ -89,6 +89,18 @@ Space toggles each: there is no "the choice" for an arrow key to move.
 - **The schema is the single declaration.** A theme-flagged group declares its
   knobs once (`SettingsSchema.group()`), and the coercer *and* the controls are
   both derived from that — a slider cannot offer a value the file would clamp.
+
+  A *plain* leaf cannot reach that, and the exception is worth naming: its
+  bounds live inside the closure `Coerce.integer` returns and nothing can read
+  them back, so a slider on one has to be told its track at the call site. Where
+  a tab does that, the track is declared in a pure-QML policy object the tab
+  reads back — `Tabs/BarTabPolicy.qml` — and a test round-trips both ends
+  through that leaf's own coercer, which is the only way left to ask a plain
+  leaf what it accepts. The same object lists which leaves its tab covers, so
+  "every key in this section has a control" is checkable at all: the tabs↔
+  sections test only reaches section depth, and
+  [#72](https://github.com/danielbaldwin47/forest-shell/issues/72) was five bar
+  keys with no control that nothing failed on.
 - **Hand-editing always works.** A tab that has not been built lists what its
   section already holds rather than pretending the section is empty.
 - **The prose has a floor and the control has a ceiling.** `SettingRow` divides

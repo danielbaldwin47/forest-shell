@@ -73,15 +73,22 @@ QtObject {
     /// the failure mode of forgetting is the greying staying on a module that
     /// now works. Passing the registry's map means the greying goes away by
     /// itself the moment the registry grows an entry.
-    /// No table at all greys nothing, rather than everything. This is a
-    /// warning like the rest of this file and the permissive direction is the
-    /// same one: an id wrongly greyed is one the user cannot add, while an id
-    /// wrongly offered costs a console warning from the registry.
+    /// No table at all greys nothing, rather than everything. This is a warning
+    /// like the rest of this file and the permissive direction is the same one:
+    /// an id wrongly greyed is one the user cannot add, while an id wrongly
+    /// offered costs a console warning from the registry.
+    ///
+    /// An own-property check and not `known[id] === undefined`, because a
+    /// vocabulary is a list of ids a user can hand-edit: `constructor` and
+    /// `toString` are legal strings in `settings.json` and would otherwise
+    /// inherit an answer from `Object.prototype` and read as drawable.
+    /// `hasOwnProperty` through `call` rather than `Object.hasOwn`, which this
+    /// QML engine does not have (measured — the suite throws on it).
     function unsupported(vocabulary: var, known: var): var {
         if (known === undefined || known === null)
             return [];
         return (Array.isArray(vocabulary) ? vocabulary : [])
-            .filter(id => known[id] === undefined);
+            .filter(id => !Object.prototype.hasOwnProperty.call(known, id));
     }
 
     /// A closed list as `SettingChoice` options, with the display names this

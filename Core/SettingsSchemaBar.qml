@@ -15,11 +15,6 @@ QtObject {
     readonly property SchemaKnobs knobs: SchemaKnobs {}
     readonly property QtObject c: knobs.c
 
-    /// Every bar module the registry knows, in no particular order — the order
-    /// that matters is the user's, and it is the cluster arrays below. Ids not
-    /// listed in any cluster are simply off; there is no separate enable flag.
-    /// `status` is one module and not four: #9 groups network, bluetooth, volume
-    /// and mic into a single quiet icon cluster.
     /// Which screen edge the bar sits on. A closed list rather than a literal
     /// inside `oneOf` below, for the reason every other vocabulary in
     /// Core/SettingsSchema.qml is one: the Bar tab's choice control offers this
@@ -27,6 +22,11 @@ QtObject {
     /// the key accepts.
     readonly property var positions: ["top", "bottom"]
 
+    /// Every bar module the registry knows, in no particular order — the order
+    /// that matters is the user's, and it is the cluster arrays below. Ids not
+    /// listed in any cluster are simply off; there is no separate enable flag.
+    /// `status` is one module and not four: #9 groups network, bluetooth, volume
+    /// and mic into a single quiet icon cluster.
     readonly property var modules: [
         "launcher", "workspaces", "activeWindow",
         "clock", "media",

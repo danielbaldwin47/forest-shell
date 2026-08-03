@@ -2,9 +2,10 @@
 
 ## Test seams
 
-Before writing code for a ticket, decide **which of the three seams verifies
-it**, and say so in the PR. A ticket whose acceptance criteria cannot be
-checked at any seam is not ready to build — that is the thing to resolve first.
+Before writing code for a ticket, decide **which seam verifies it** — one of
+the three below, or the real session at the end — and say so in the PR. A
+ticket whose acceptance criteria cannot be checked at any seam is not ready to
+build — that is the thing to resolve first.
 
 **1. `tests/` — pure QML, offscreen, run by `tests/run.sh`.**
 Everything that is a *decision* rather than a picture: policy, formatting,
@@ -76,6 +77,27 @@ layer stacking, frame pacing — needs presents the nested compositor cannot
 currently make and pixels a client-side grab never sees. That still takes a
 real session; a ticket whose acceptance lives there should say that in the PR,
 not claim a seam.
+
+One piece of that is now measurable rather than merely visible.
+`tools/blur-measure.sh` (#97) photographs the caller's own session with `grim`
+with `bar.surface.blur` on and off, and `tools/measure-blur.py` reads the
+difference: a blur is a low-pass, so the detail behind the surface collapses
+while its mean stays put. It borrows the session — empty workspace, `hyprctl
+keyword`, `hyprctl reload` on the way out — and gives it back, which is why it
+is a thing you do to a desktop deliberately rather than a seam to run alongside
+the others.
+
+Two habits from it are worth copying by anything else that needs a real
+session. The run opens with a **control**: an ordinary translucent window, no
+layer rule near it, and the run stops if that shows no blur. #78 spent a
+session unable to tell "the rule did nothing" from "this machine draws no
+blur", and the answer turned out to be `decoration:blur:enabled = 0` in the
+machine's own Hyprland config. And the **arithmetic stays at seam 1** — a
+stdlib script with its own unit tests (`tests/tst_measure_blur.py`), where a
+box blur applied in the test is the picture the compositor is supposed to
+produce. Only the photograph needs the desktop.
+
+Layer stacking and frame pacing are still uncovered.
 
 ### Why this is a rule
 

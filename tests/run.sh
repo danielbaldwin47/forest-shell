@@ -33,6 +33,12 @@ python=$(command -v python3 || true)
 "$python" ../tools/normalize-lucide.py --check
 "$python" ../tools/make-noise.py --check
 
+# The blur measurement's arithmetic (#97). The harness that takes the two
+# captures needs a real compositor, but "does this pair show a blur" is a
+# decision, and a box blur applied here is the picture the compositor is
+# supposed to produce — so the tool that reads it is checkable without one.
+"$python" tst_measure_blur.py
+
 # Same reason, different language: which quickshell binary may run the shell is
 # a decision (parse a version, compare against a floor), but it is bash, and
 # qmltestrunner only loads QML. It rides along here (#57).

@@ -22,7 +22,7 @@
 #   5. templates are off: matugen renders nothing into the user's own config
 #   6. ...and on, it does — the opt-in is real and not just documented
 #   7. going back to fixed forest deletes the palette rather than freezing it
-#   8. switching to the constrained accent replaces it with that mode's two roles
+#   8. switching to the constrained accent drops the palette before it tunes
 #   9. without matugen: the mode says so once, writes nothing, and throws nothing
 #  10. the generated palette holds the contrast floor as a picture (seam 3)
 #
@@ -276,11 +276,15 @@ else
     nested_pass 'templates are off by default — nothing outside the shell is written'
 fi
 
+# The toggle on its own, with no wallpaper change behind it: turning the opt-in
+# on is a request to restyle the external apps *now*, and a shell that waited
+# for the next wallpaper change to honour it would look like a switch that did
+# nothing.
 mark=$(log_lines)
 apply_setting '.appearance.matugenTemplates = true' \
     '.appearance.matugenTemplates == true' 'turning external templates on'
-wallpaper amber
-expect_since "$mark" 'theming: palette generated' 'the palette regenerates with templates on'
+expect_since "$mark" 'theming: palette generated' \
+    'turning the opt-in on regenerates on its own, with no wallpaper change'
 rendered=0
 for _ in $(seq 1 40); do
     [[ -e "$SCRATCH/rendered-by-matugen.txt" ]] && { rendered=1; break; }
@@ -315,10 +319,29 @@ await_json "$SETTINGS" '(.appearance | has("dynamic")) == false' \
     'fixed forest is the shipped row again, with no palette left behind'
 
 # --- 8. the constrained accent replaces it rather than inheriting it ---------
+#
+# The second half of the ticket's fourth criterion, and the half a poll cannot
+# see. The accent's own recompute is asynchronous — its quantizer only starts
+# loading when the mode becomes "accent" — so a switch that waited for it would
+# leave the shell wearing all seventeen generated roles, backgrounds included,
+# until the quantize finished. What proves it did not is the *order* of the two
+# lines: the generated palette is dropped, and only then is an accent tuned.
+
+mark=$(log_lines)
+mode dynamic
+expect_since "$mark" 'theming: palette generated' 'the generated palette is back'
+await_json "$SETTINGS" '(.appearance.dynamic | keys | length) == 17' \
+    'there are seventeen roles to hand over'
 
 mark=$(log_lines)
 mode accent
 expect_since "$mark" 'theming: accent tuned to' 'the constrained accent takes over'
+order=$(since "$mark" | grep -aoE 'generated palette cleared|accent tuned to' | head -2 | tr '\n' ' ')
+if [[ "$order" == 'generated palette cleared accent tuned to '* ]]; then
+    nested_pass 'the generated palette is dropped before the accent is tuned, not after'
+else
+    nested_fail "the shell wore the generated palette while the quantizer ran — order was: $order"
+fi
 await_json "$SETTINGS" \
     '(.appearance.dynamic | keys) == ["accentDeep", "accentPrimary"]' \
     'the accent mode writes its own two roles over the seventeen'

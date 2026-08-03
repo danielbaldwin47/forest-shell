@@ -43,9 +43,11 @@ Singleton {
     /// know the difference between "no" and "not yet".
     property bool probed: false
 
-    /// The last palette generated, and whether the run that produced it worked.
-    /// Kept so a caller that arrives late — the mode switched on after a run —
-    /// does not have to spawn the binary again to find out.
+    /// What a run produced. Signals rather than properties, and nothing is kept:
+    /// the palette belongs in `appearance.dynamic` the moment it exists, which
+    /// is Theming's job and not this one's, and a copy held here would be a
+    /// second answer to "what is the shell wearing" that could disagree with the
+    /// file every consumer actually reads.
     signal generated(palette: var, lifted: int)
     signal failed(reason: string)
 
@@ -86,12 +88,17 @@ Singleton {
         property bool started: false
 
         stdout: StdioCollector { id: out }
+        // Collected, not discarded: an exit code says a run failed and matugen's
+        // stderr says why, specifically enough to act on. Without it the log
+        // line is a number and the only way to read the sentence is to run the
+        // command again by hand.
+        stderr: StdioCollector { id: err }
 
         onStarted: runner.started = true
 
         onExited: (exitCode, exitStatus) => {
             const result = root.policy.outcome(exitCode, out.text,
-                                               runner.asked.darkMode);
+                                               runner.asked.darkMode, err.text);
             if (result.ok) {
                 Logger.log("theming", root.policy.generatedLine(
                     result.palette.accentPrimary, result.lifted,

@@ -254,6 +254,21 @@ QtObject {
         return policy.color.relativeLuminance(policy.color.toRgb(hex));
     }
 
+    /// Whether a stored role → colour map is one *this* mode produced.
+    ///
+    /// The palette in `appearance.dynamic` carries no provenance — it is a
+    /// settings key that two modes write to — and something has to tell them
+    /// apart when the shell announces one being cleared. The test is the
+    /// completeness this file guarantees and the other mode cannot meet: a
+    /// generated palette is every role or it is refused, and the constrained
+    /// accent is two of them. So "all seventeen" is not a heuristic about the
+    /// contents, it is the contract `paletteFrom()` already enforces read back.
+    function generatedHere(palette: var): bool {
+        if (!palette)
+            return false;
+        return policy.roles.every(role => palette[role] !== undefined);
+    }
+
     /// The palette, made legible: each failing role's lightness walked until it
     /// clears its floor against every background it is drawn on, hue and chroma
     /// untouched.
@@ -295,10 +310,12 @@ QtObject {
     /// Note the direction is chosen by score and not by "away from the
     /// background": with several backgrounds there is no single away.
     function fit(hex: string, backgrounds: var, floor: real): string {
-        const score = value => {
+        // `backgrounds` are luminances and so is what this takes: the worst
+        // ratio a colour of that luminance holds against any of them.
+        const score = foreground => {
             let worst = Infinity;
             for (const background of backgrounds)
-                worst = Math.min(worst, policy.color.contrast(value, background));
+                worst = Math.min(worst, policy.color.contrast(foreground, background));
             return worst;
         };
 
@@ -355,10 +372,15 @@ QtObject {
     /// carried out to the log rather than kept: a wallpaper whose palette needs
     /// eight roles rescued is a wallpaper the mode is barely serving, and that
     /// is worth being able to read off a log without re-running anything.
-    function outcome(exitCode: int, text: string, darkMode: bool): var {
+    /// `errorText` is deliberately untyped: a `string` annotation coerces an
+    /// omitted argument to the literal "undefined", which would put that word in
+    /// the log of every caller that has no stderr to hand.
+    function outcome(exitCode: int, text: string, darkMode: bool,
+                     errorText): var {
         if (exitCode !== 0)
             return { ok: false, palette: ({}), lifted: 0,
-                     error: "matugen exited " + exitCode };
+                     error: "matugen exited " + exitCode
+                            + policy.detail(errorText) };
 
         const parsed = policy.parse(text);
         if (!parsed.ok)
@@ -376,6 +398,34 @@ QtObject {
                 lifted++;
 
         return { ok: true, palette: fixed, lifted: lifted, error: "" };
+    }
+
+    /// The sentence matugen wrote on stderr, as ` — <reason>`, or "".
+    ///
+    /// An exit code says a run failed and never says why, and matugen's why is
+    /// specific enough to act on: "no preference was inputted" means the flags
+    /// are wrong, "could not read image" means the wallpaper is. A log line with
+    /// only a number sends whoever reads it to run the command by hand to see
+    /// the sentence the shell already had.
+    ///
+    /// The colour codes come off first — matugen writes a TTY's escapes whether
+    /// or not it has one, and a log file full of `[91m` is a log file nobody
+    /// greps twice. The *last* of the numbered lines is taken because that is
+    /// where its error chain puts the cause: line 0 is "failed to get source
+    /// colour", line 2 is what actually went wrong.
+    function detail(errorText): string {
+        if (!errorText || typeof errorText !== "string")
+            return "";
+        const lines = errorText
+            .replace(/\[[0-9;]*m/g, "")
+            .split("\n")
+            .map(line => line.replace(/^\s*\d+:\s*/, "").trim())
+            .filter(line => line !== "" && line !== "Error:"
+                    && !line.startsWith("Backtrace omitted")
+                    && !line.startsWith("Run with RUST_BACKTRACE"));
+        if (lines.length === 0)
+            return "";
+        return " — " + lines[lines.length - 1].slice(0, 120);
     }
 
     // --- the command ----------------------------------------------------------

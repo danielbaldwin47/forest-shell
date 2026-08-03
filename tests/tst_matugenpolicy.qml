@@ -221,6 +221,32 @@ TestCase {
         compare(failed.error, "matugen exited 2");
     }
 
+    function test_the_reason_matugen_gave_travels_with_the_exit_code() {
+        // Real stderr from matugen 4.1.0, escapes included — it colours its
+        // errors whether or not it has a terminal, and a log full of `[91m` is
+        // a log nobody greps twice. The *last* numbered line is the cause: its
+        // chain starts at "failed to get source colour" and ends at why.
+        const stderr = "Error: \n"
+            + "   0: [91mFailed to get source color.[0m\n"
+            + "   1: [91mCould not get source color from image: wp.png[0m\n"
+            + "   2: [91mMultiple source colors found, no preference was "
+            + "inputted, and a terminal was not detected.[0m\n"
+            + "\nBacktrace omitted. Run with RUST_BACKTRACE=1 environment variable.\n";
+        const failed = policy.outcome(1, "", true, stderr);
+        compare(failed.ok, false);
+        verify(failed.error.indexOf("matugen exited 1") === 0);
+        verify(failed.error.indexOf("Multiple source colors") > 0,
+               "the reason was dropped: " + failed.error);
+        compare(failed.error.indexOf("["), -1, "escape codes reached the log");
+    }
+
+    function test_a_failure_with_nothing_on_stderr_still_says_what_it_can() {
+        compare(policy.outcome(1, "", true, "").error, "matugen exited 1");
+        compare(policy.outcome(1, "", true, "\n  \n").error, "matugen exited 1");
+        compare(policy.detail("Run with RUST_BACKTRACE=full to include source snippets."),
+                "");
+    }
+
     function test_a_clean_exit_with_nothing_on_stdout_is_still_a_failure() {
         compare(policy.outcome(0, "", true).ok, false);
         compare(policy.outcome(0, "", true).error, "no output");
@@ -378,6 +404,25 @@ TestCase {
                     verify(tokens.isColor(palette[role]),
                            name + ": " + role + " = " + palette[role]);
             }
+    }
+
+    function test_a_stored_palette_can_be_told_apart_from_the_accent_modes() {
+        // `appearance.dynamic` carries no provenance — two modes write to it —
+        // and the shell has to know which one it is clearing to say so. The
+        // test is the contract this file already enforces: every role or
+        // nothing, against the constrained accent's two.
+        verify(policy.generatedHere(
+            policy.outcome(0, nested(lake), true).palette));
+        verify(!policy.generatedHere({ accentPrimary: "#6fbec4",
+                                       accentDeep: "#0c757b" }));
+        verify(!policy.generatedHere({}));
+        verify(!policy.generatedHere(null));
+
+        // And a palette one role short is not one of ours either — which is the
+        // same refusal `paletteFrom()` makes on the way in, read back out.
+        const short = policy.outcome(0, nested(lake), true).palette;
+        delete short.fogWash;
+        verify(!policy.generatedHere(short));
     }
 
     function test_short_hex_is_normalized_rather_than_passed_through() {

@@ -60,6 +60,13 @@ Singleton {
 
     readonly property AccentPolicy policy: AccentPolicy {}
 
+    /// The generated mode's rules, held here rather than read through
+    /// `Matugen.policy`: both are pure `QtObject`s that cost nothing to
+    /// instantiate, and a service reaching through another service into its
+    /// child for a sentence it is about to log itself is a chain that makes the
+    /// singleton's shape part of this file's business.
+    readonly property MatugenPolicy generated: MatugenPolicy {}
+
     /// The shipped rows, unlayered. The shift is always measured from where the
     /// brief put the accent and never from what this service last produced —
     /// otherwise each wallpaper change would rotate from the previous result and
@@ -74,6 +81,13 @@ Singleton {
     /// dependency list. The quantizer notices its own source moving; matugen is
     /// a subprocess and notices nothing, so full-dynamic mode needs this.
     readonly property string wallpaper: Config.wallpaper
+
+    /// Whether matugen may render the user's own templates (#59). An input to
+    /// the *command*, so it is named here like the others: turning it on is a
+    /// request to restyle the external apps now, and a shell that waited for the
+    /// next wallpaper change to honour it would look like a switch that did
+    /// nothing.
+    readonly property bool templates: Config.values.appearance.matugenTemplates
 
     readonly property ColorQuantizer quantizer: ColorQuantizer {
         // Only in the mode that uses it: quantizing a 5824×3264 wallpaper is
@@ -94,6 +108,7 @@ Singleton {
 
     onModeChanged: root.retune()
     onWallpaperChanged: root.retune()
+    onTemplatesChanged: root.retune()
 
     Connections {
         target: root.quantizer
@@ -146,6 +161,16 @@ Singleton {
             return;
         }
 
+        // Dropped before the quantizer is asked anything. The accent's own
+        // recompute is asynchronous and its source only starts loading when the
+        // mode becomes "accent", so a switch that waited for it would leave the
+        // shell wearing all seventeen generated roles — backgrounds included —
+        // for as long as the quantize took. The ticket asks for that switch to
+        // restore *instantly*, and instant is the shipped row now and the tuned
+        // accent a moment later, not the previous mode's palette held over.
+        if (root.generated.generatedHere(root.current()))
+            root.clear();
+
         const colors = root.quantizer.colors;
         if (!colors || colors.length === 0)
             return;   // the quantizer has not answered yet; keep what we have
@@ -191,13 +216,12 @@ Singleton {
         if (!Matugen.available) {
             if (!root.warned) {
                 root.warned = true;
-                Logger.warn("theming", Matugen.policy.absentLine());
+                Logger.warn("theming", root.generated.absentLine());
             }
             return;
         }
         root.warned = false;
-        Matugen.run(root.wallpaper, Theme.dark,
-                    Config.values.appearance.matugenTemplates);
+        Matugen.run(root.wallpaper, Theme.dark, root.templates);
     }
 
     /// Whether the missing-binary line has been said. Said once per stretch of
@@ -213,14 +237,15 @@ Singleton {
         const stored = root.current();
         if (Object.keys(stored).length === 0)
             return;
-        // Which mode wrote it, read off what it wrote: only the generated
-        // palette carries backgrounds — the constrained accent is two roles and
-        // neither is one. The two lines are different sentences because they
-        // are different amounts of shell going back to the shipped look, and a
-        // log that called both "accent cleared" would make the bigger one
-        // unfindable.
-        Logger.log("theming", stored.bgBase !== undefined
-                   ? Matugen.policy.clearedLine(root.mode)
+        // Which mode wrote it, read off what it wrote. The key carries no
+        // provenance — two modes write to it — and the thing that tells them
+        // apart is the contract each one keeps: a generated palette is every
+        // role or it is refused, and the constrained accent is two of them. The
+        // two lines are different sentences because they are different amounts
+        // of shell going back to the shipped look, and a log that called both
+        // "accent cleared" would make the bigger one unfindable.
+        Logger.log("theming", root.generated.generatedHere(stored)
+                   ? root.generated.clearedLine(root.mode)
                    : root.policy.clearedLine(root.mode));
         root.forget();
     }

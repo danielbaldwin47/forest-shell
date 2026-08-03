@@ -68,6 +68,18 @@ currently make and pixels a client-side grab never sees. That still takes a
 real session; a ticket whose acceptance lives there should say that in the PR,
 not claim a seam.
 
+Two of those live in scripts anyway, because a performance number wants the
+same method twice rather than a fresh one each pass: `tools/idle-budget.sh`
+(#22 §5 — CPU, context switches, repaints at rest) and `tools/frame-budget.sh`
+(#22 §6 — `render`/`swap`/`total` over driven bar interaction). Both launch the
+real shell on the caller's own session and both say so; neither is a seam. What
+they add over doing it by hand is that they record the conditions: the 1-minute
+load average over the window, and — for the idle one — whether anything drove
+the compositor while it ran, which **exits 2, inconclusive**. #95 measured 155
+idle frames where #73 measured 6, and the difference was another agent
+switching workspaces on the same session, not the shell. A performance number
+without its conditions next to it is a number that will be misread later.
+
 ### Why this is a rule
 
 The build ran seven tickets green against `tests/` alone. The first pass under a

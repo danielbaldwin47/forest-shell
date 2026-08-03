@@ -26,7 +26,18 @@
 #
 # Idle means idle: do not touch the machine while it runs. A pointer crossing
 # the bar is a hover, a hover is a repaint, and a repaint is the thing being
-# counted.
+# counted. That is checked rather than trusted — a window with a workspace
+# switch or an active-window change in it **exits 2, inconclusive**, which is a
+# third verdict distinct from pass and fail: the shell was driven, so it was
+# never measured. The 1-minute load average over the window is reported next to
+# the numbers for the same reason (tools/load-window.sh).
+#
+# The one that is not obvious, and cost #95 three windows: **an animated window
+# title is input.** The bar tracks the focused window, a terminal running an
+# agent puts a spinner in its title, and the title changes about once a second
+# — so the shell repaints about once a second, correctly, for as long as that
+# window has focus. Measure with the focused window static, or from a workspace
+# with nothing on it at all.
 #
 # The shell pushes a Hyprland layerrule for its own namespace at startup (#78)
 # and there is no clearing verb in the 0.5x syntax, so the rule outlives the
@@ -37,6 +48,8 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # shellcheck source=qs-runtime.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
+# shellcheck source=load-window.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-window.sh"
 
 SECONDS_WINDOW=195
 ENTRY="shell.qml"
@@ -117,7 +130,9 @@ frames()    { local count; count=$(grep -ac 'frame rendered in' "$1" 2>/dev/null
 start_ticks=$(cpu_ticks "$SHELL_PID")
 start_switches=$(switches "$SHELL_PID")
 start_frames=$(frames "$LOG")
+start_lines=$(grep -ac '' "$LOG")
 start_time=$(date +%s.%N)
+load_window_start
 
 note "measuring for ${SECONDS_WINDOW}s — do not touch the machine"
 sleep "$SECONDS_WINDOW"
@@ -126,11 +141,25 @@ end_ticks=$(cpu_ticks "$SHELL_PID")
 end_switches=$(switches "$SHELL_PID")
 end_frames=$(frames "$LOG")
 end_time=$(date +%s.%N)
+load_window_report
 
 if [[ -z "$end_ticks" ]]; then
     echo "the shell died during the window — see $LOG" >&2
     exit 1
 fi
+
+# Was the machine actually idle? Every number below is worthless if it was not,
+# and "do not touch the machine" is an instruction to a human that nothing
+# checks — #95 measured 155 frames in a 195 s window and the log said why:
+# something else on the session was switching workspaces, and each switch
+# animates the ridgeline (#75). That is not the shell failing the criterion,
+# it is the window not being an idle window, and the two must not report the
+# same way. So the shell's own compositor lines are the witness: a workspace
+# focus or an active-window change inside the window means there was input on
+# this session, from a human or from another agent driving hyprctl.
+compositor_events=$(tail -n +"$((start_lines + 1))" "$LOG" \
+    | grep -ac 'compositor: \(workspace .* focused\|focused window\)')
+compositor_events=${compositor_events:-0}
 
 printf '\n'
 python3 - "$start_ticks" "$end_ticks" "$start_switches" "$end_switches" \
@@ -169,6 +198,15 @@ screens=$(grep -ac 'bar: content ready on' "$LOG")
 screens=${screens:-1}
 (( screens )) || screens=1
 expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
+
+if (( compositor_events )); then
+    printf '\n'
+    note "$compositor_events compositor event(s) inside the window — workspace switches or"
+    note "active-window changes, so this session was in use while it was measured"
+    printf '\nthe numbers above are a shell being driven, not an idle one, and are not the\n'
+    printf 'criterion. Re-run when nothing else is on the compositor.\n'
+    exit 2
+fi
 
 printf '\n'
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then

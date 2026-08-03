@@ -323,6 +323,43 @@ TestCase {
         close(after, before, 0.6);
     }
 
+    function test_neither_teal_can_leave_the_band() {
+        // Stated over the roles the service actually writes rather than over
+        // `targetHue` alone: the deep teal takes the same rotation as the
+        // primary and is clamped by the same band, so "no accent leaves the
+        // forest" holds by construction rather than because the two shipped
+        // hues happen to be half a degree apart.
+        for (const dark of [true, false]) {
+            const row = dark ? darkRow : lightRow;
+            for (let hue = 0; hue < 360; hue += 5) {
+                const result = policy.accent(
+                    [Qt.hsla(hue / 360, 0.85, 0.5, 1)], row, dark);
+                // Some of these are too bright to vote at all — HSL lightness
+                // 0.5 is Oklab 0.93 around yellow — and a wallpaper with no
+                // surviving colour keeps the shipped accent, which is the
+                // fallback the tests above cover.
+                if (Object.keys(result).length === 0)
+                    continue;
+                for (const role of ["accentPrimary", "accentDeep"]) {
+                    const landed = policy.toOklch(result[role]).H;
+                    verify(landed >= policy.bandFloor(dark) - 0.5
+                           && landed <= policy.bandCeiling + 0.5,
+                           role + " landed at " + landed.toFixed(1) + "° from a "
+                           + hue + "° wallpaper (dark " + dark + ")");
+                }
+            }
+        }
+    }
+
+    function test_a_caller_holding_the_reading_gets_the_same_answer() {
+        // The service reads the wallpaper once and logs the numbers that
+        // decided the outcome, so it needs the reading and the colour to come
+        // from the same evaluation.
+        const colors = [Qt.rgba(0.10, 0.45, 0.62, 1), Qt.rgba(0.08, 0.38, 0.55, 1)];
+        compare(policy.accentFor(policy.dominantHue(colors), darkRow, true),
+                policy.accent(colors, darkRow, true));
+    }
+
     function test_only_the_two_teals_move() {
         // The constraint that makes this a constrained mode: the result is a
         // sparse map of exactly two roles, so every background, every text role

@@ -64,10 +64,6 @@ Singleton {
 
     readonly property string mode: Config.values.appearance.mode
 
-    /// What the shell is wearing, for a harness and for the settings window.
-    /// "" while the reading is still fixed forest.
-    readonly property string accent: Config.values.appearance.dynamic?.accentPrimary ?? ""
-
     readonly property ColorQuantizer quantizer: ColorQuantizer {
         // Only in the mode that uses it: quantizing a 5824×3264 wallpaper is
         // not free, and a mode that is off should cost nothing. An empty source
@@ -86,7 +82,6 @@ Singleton {
     }
 
     onModeChanged: root.retune()
-    onQuantizerChanged: root.retune()
 
     Connections {
         target: root.quantizer
@@ -104,8 +99,9 @@ Singleton {
     ///
     /// Guarded rather than bound: this ends in a settings write, and a binding
     /// that writes the file it reads from is how a loop gets built. The three
-    /// inputs are named above as change handlers so the dependencies are the
-    /// list rather than whatever the expression happened to touch.
+    /// inputs — the mode, the wallpaper's colours and the dark/light flip — are
+    /// named as change handlers above so the dependencies are that list rather
+    /// than whatever an expression happened to touch.
     function retune() {
         if (root.mode !== "accent") {
             root.clear();
@@ -118,10 +114,17 @@ Singleton {
 
         const reading = root.policy.dominantHue(colors);
         const shipped = root.tokens.palette(Theme.dark, null, null);
-        const next = root.policy.accent(colors, shipped, Theme.dark);
+        const next = root.policy.accentFor(reading, shipped, Theme.dark);
 
+        // Declining is a decision, and it is logged every time it is taken —
+        // including on a session that has nothing stored to drop. "The mode ran
+        // and this wallpaper has no hue" and "the service never ran" look
+        // identical from outside otherwise, and that ambiguity is what #81 cost
+        // a week.
         if (Object.keys(next).length === 0) {
-            root.forget(root.policy.keptLine(reading.concentration, reading.sampled));
+            Logger.log("theming",
+                       root.policy.keptLine(reading.concentration, reading.sampled));
+            root.forget();
             return;
         }
         if (root.same(root.current(), next))
@@ -133,23 +136,25 @@ Singleton {
             next.accentPrimary));
     }
 
-    /// Back to the shipped palette because the mode says so. Distinguished in
-    /// the log from the same thing happening because a wallpaper had no
-    /// dominant hue — from outside, "the mode is off" and "the mode ran and
-    /// declined" look identical, and that ambiguity is what #81 cost a week.
+    /// Back to the shipped palette because the mode says so — announced only
+    /// when there is a sample to drop, since a mode that never sampled has
+    /// nothing to say and `theming ready (mode …)` has already said which mode
+    /// it is in.
     function clear() {
-        root.forget(root.policy.clearedLine(root.mode));
+        if (Object.keys(root.current()).length === 0)
+            return;
+        Logger.log("theming", root.policy.clearedLine(root.mode));
+        root.forget();
     }
 
-    /// Drop the sampled accent, if there is one, and say why.
+    /// Drop the sampled accent, if there is one.
     ///
     /// `reset` and not a write of `{}`: the settings file is sparse, and a key
     /// deleted is a key that follows the shipped default if it ever changes.
-    function forget(line: string) {
+    function forget() {
         if (Object.keys(root.current()).length === 0)
             return;
         Config.reset("appearance.dynamic");
-        Logger.log("theming", line);
     }
 
     function current(): var {

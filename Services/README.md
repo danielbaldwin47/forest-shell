@@ -40,7 +40,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Eighteen of them exist so far:
+Nineteen of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -214,6 +214,24 @@ Eighteen of them exist so far:
   Stopping is `SIGINT` and never `SIGTERM`: both tools flush the muxer and write
   the container index on the former and neither does on the latter, so a
   `SIGTERM` leaves an mp4 that exists, is the right size, and will not play.
+
+- `Theming/Theming.qml` (#58) — the palette-mode switch, and the one service in
+  the shell that publishes nothing. It computes the wallpaper-coupled accent and
+  writes it to `appearance.dynamic`; `Core/Theme.qml` reads that key back and
+  layers it under the user's own overrides.
+
+  A settings key and not a property on the singleton, for three reasons that
+  each hold on their own. Core cannot import upwards, and `Core/Theme.qml` is
+  what every surface reads. Consumers stay mode-blind — a surface reads
+  `Theme.accentPrimary` and has no way to discover that a mode produced it,
+  which is what keeps a global feature from becoming a per-surface one. And the
+  quantizer answers off-thread, so a property would start empty and the first
+  frame would paint the shipped teal and then jump; a file that survived the
+  last session does not.
+
+  It is therefore also the purest case for the `ServiceInit` rule: *nothing*
+  references it, so without a line in the deferred list the mode would be
+  selectable in the settings window and simply never run.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

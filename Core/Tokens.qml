@@ -163,12 +163,15 @@ QtObject {
         for (const role of colorRoles)
             out[role] = (darkMode ? undefined : lightSeed[role]) ?? dark[role];
 
-        for (const layer of [dynamic, overrides]) {
+        // Named, because the two layers live in different keys and a warning
+        // that pointed at `paletteOverrides` for a bad role in `dynamic` would
+        // send someone to edit a key that has nothing wrong with it.
+        for (const [name, layer] of [["dynamic", dynamic], ["overrides", overrides]]) {
             if (!layer)
                 continue;
             for (const role in layer) {
                 if (out[role] === undefined) {
-                    console.warn("Theme: unknown palette role in overrides:", role);
+                    console.warn("Theme: unknown palette role in", name + ":", role);
                     continue;
                 }
                 if (!isColor(layer[role])) {

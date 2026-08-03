@@ -7,7 +7,7 @@
 # What is *not* here, on purpose: the colour space, the band, the shift cap, the
 # concentration threshold and the contrast guarantee are decisions over numbers,
 # and they are checked at the first seam in tests/tst_accentpolicy.qml — where
-# the whole 25-image reference corpus costs 30ms rather than a compositor.
+# every hue on the wheel costs 30ms rather than a compositor.
 #
 # What is here is everything that only exists once a shell is running: whether a
 # *new wallpaper* actually retunes the accent, whether the mode switch takes
@@ -20,10 +20,11 @@
 #   3. the tuned hue is inside the sage–lake band
 #   4. a lake-blue wallpaper moves the accent lake-ward
 #   5. ...and a pine-green one moves it sage-ward — the retune of criterion 1
-#   6. an amber wallpaper is clamped rather than obeyed
-#   7. a greyscale wallpaper keeps the shipped accent, and says so
+#   6. a textured photograph is read at both ends of the exposure range
+#   7. an amber wallpaper is clamped rather than obeyed
+#   8. a greyscale wallpaper keeps the shipped accent, and says so
 #      (only the two teal roles are ever written, checked alongside 4)
-#   8. going back to fixed forest deletes the key rather than freezing a sample
+#   9. going back to fixed forest deletes the key rather than freezing a sample
 #
 # The shell under test runs against a scratch XDG_CONFIG_HOME and
 # XDG_STATE_HOME: every check here writes settings, and a harness that repainted
@@ -148,6 +149,68 @@ with open(path, "wb") as f:
 EOF
 }
 
+## A photographic wallpaper: a hue cast, per-pixel jitter, and one pixel in ten
+## off-hue entirely — texture, in other words, which is the thing a flat ramp
+## does not have.
+##
+## This is what the synthetic fixtures above cannot check. `ColorQuantizer` is a
+## recursive *median cut*: it averages clusters together, and averaging
+## suppresses chroma, which is the whole reason `chromaMin` is 0.025 rather than
+## the more obvious 0.04. A flat image has nothing to average, so it never
+## exercises the threshold that decision produced. `--scale` makes the same
+## The last argument scales the whole picture dark or bright, which is the
+## brightest/darkest spot-check the ticket asks for — run against real quantizer output rather than a simulation of it.
+##
+## The board's 25 reference pins are not in this repository (`.wayfinder/assets/`
+## carries the design brief and no images), so the corpus itself is out of reach
+## from here; what is reachable is the property the corpus was used to establish.
+photo() {
+    python3 - "$PAPERS/$1.png" "$2" "$3" "$4" "$5" <<'EOF'
+import struct
+import sys
+import zlib
+
+path, r, g, b = sys.argv[1], *(int(v) for v in sys.argv[2:5])
+scale = float(sys.argv[5])
+w = h = 128
+
+# A seeded LCG rather than `random`, so the same wallpaper is generated on every
+# machine and a failure is reproducible.
+seed = 20260803
+
+
+def rand():
+    global seed
+    seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+    return seed / 0x7FFFFFFF
+
+
+raw = bytearray()
+for y in range(h):
+    raw.append(0)                      # filter type: none
+    for _ in range(w):
+        if rand() < 0.10:
+            # Off-hue litter: bark, sky through leaves, a flower. Enough to give
+            # the quantizer clusters that disagree, not enough to win.
+            raw += bytes(min(255, int(255 * scale * rand())) for _ in range(3))
+            continue
+        jitter = 0.75 + 0.5 * rand()
+        raw += bytes(min(255, int(channel * scale * jitter)) for channel in (r, g, b))
+
+
+def chunk(tag, payload):
+    return (struct.pack(">I", len(payload)) + tag + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+
+
+with open(path, "wb") as f:
+    f.write(b"\x89PNG\r\n\x1a\n")
+    f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)))
+    f.write(chunk(b"IDAT", zlib.compress(bytes(raw), 6)))
+    f.write(chunk(b"IEND", b""))
+EOF
+}
+
 # Three hues far enough apart that consecutive checks cannot be satisfied by a
 # stale answer: each one has to produce a different accent from the one before
 # it, so a service that stopped recomputing would be caught rather than pass by
@@ -156,6 +219,14 @@ paper lake  31 79 143      # deep water at 256° — clamped lake-ward
 paper pine   0 143 131     # 184° — inside the shift cap, so it passes through
 paper amber 211 105 31     # the research's pin24 at 50° — clamped sage-ward
 paper grey  128 128 128    # no hue at all
+
+# Two photographs at the two ends of the exposure range the board pins span, and
+# on opposite sides of the shipped teal: a shot into deep shade, and one up into
+# a bright sky. Opposite sides on purpose — two greens would both clamp to the
+# same sage-ward endpoint, and a check whose expected answer equals the previous
+# check's answer cannot tell a recomputation from a service that stopped.
+photo grove  46 110 62 0.45    # darkest — forest floor, sage-ward
+photo canopy 92 150 210 1.25   # brightest — sky through the canopy, lake-ward
 
 ## Change a settings key and let the shell's watcher pick it up. The mode, the
 ## wallpaper and the dark/light flip are all settings keys, so this is the whole
@@ -171,8 +242,34 @@ settings() {
     jq "$filter" "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 }
 
-mode() { settings ".appearance.mode = \"$1\""; }
-wallpaper() { settings ".wallpaper.path = \"$PAPERS/$1.png\""; }
+## Apply an edit and make sure it survives.
+##
+## The shell writes this same file — the sampled accent goes into it — and its
+## write is a whole-document serialize from the values it last read. An edit
+## that lands in the window between that read and that write is therefore
+## silently reverted, and the check that follows waits six seconds for a retune
+## that was never asked for. A person with an editor open hits the same race and
+## does the same thing about it: look, and type it again.
+apply_setting() {
+    local filter="$1" check="$2" what="$3"
+    for _ in $(seq 1 10); do
+        settings "$filter"
+        sleep 0.4
+        jq -e "$check" "$SETTINGS" > /dev/null 2>&1 && return 0
+    done
+    nested_fail "$what — the edit never survived the shell's own writes"
+    return 1
+}
+
+mode() {
+    apply_setting ".appearance.mode = \"$1\"" ".appearance.mode == \"$1\"" \
+        "selecting the $1 mode"
+}
+
+wallpaper() {
+    apply_setting ".wallpaper.path = \"$PAPERS/$1.png\"" \
+        ".wallpaper.path == \"$PAPERS/$1.png\"" "hanging the $1 wallpaper"
+}
 
 # --- 1. fixed forest samples nothing -----------------------------------------
 
@@ -242,7 +339,31 @@ await_json "$SETTINGS" \
     ".appearance.dynamic.accentPrimary != \"$lake_accent\"" \
     'the two wallpapers produced two different accents'
 
-# --- 6. an amber wallpaper is clamped rather than obeyed ---------------------
+# --- 6. a textured photograph, at both ends of the exposure range ------------
+#
+# The ticket's third acceptance criterion, spot-checked at the brightest and the
+# darkest. Everything above this point is a flat ramp, which gives median cut
+# nothing to average — and averaging is what suppresses chroma and set
+# `chromaMin` to 0.025 in the first place. These two are the only checks in the
+# build where a real quantizer meets a real texture.
+#
+# Contrast itself is not measured here and does not need to be: it is a function
+# of the hue, at the fixed lightness and chroma this mode never moves, and
+# tests/tst_accentpolicy.qml sweeps the whole band for it. What only a running
+# shell can answer is whether a *photograph* still yields a hue inside it.
+
+for shot in grove canopy; do
+    mark=$(log_lines)
+    wallpaper "$shot"
+    if expect_since "$mark" 'theming: accent tuned to' \
+        "a textured photograph ($shot) is read rather than declined"; then
+        shot_hue=$(tuned_hue "$mark")
+        expect_math "$shot_hue >= 118 && $shot_hue <= 240" \
+            "$shot lands inside the band (${shot_hue}°) through a real quantizer"
+    fi
+done
+
+# --- 7. an amber wallpaper is clamped rather than obeyed ---------------------
 #
 # 50° is lamplight, 150° from the shipped teal and far outside the band. The
 # whole point of a constrained mode is that this wallpaper does not turn the
@@ -259,7 +380,7 @@ else
         "an amber wallpaper is clamped into the band (${amber_hue}°), not obeyed"
 fi
 
-# --- 7. a greyscale wallpaper keeps the shipped accent -----------------------
+# --- 8. a greyscale wallpaper keeps the shipped accent -----------------------
 #
 # Failing closed, and saying which of the two silences it is: "the mode declined"
 # and "the service never ran" look identical from outside.
@@ -271,7 +392,7 @@ expect_since "$mark" 'theming: accent kept: no dominant hue' \
 await_json "$SETTINGS" '(.appearance | has("dynamic")) == false' \
     'keeping the shipped accent deletes the sample rather than freezing it'
 
-# --- 8. going back to fixed forest deletes the sample ------------------------
+# --- 9. going back to fixed forest deletes the sample ------------------------
 #
 # The ticket's fourth acceptance criterion. A mode that left its last sample
 # behind would make fixed forest mean "whatever wallpaper you had when you

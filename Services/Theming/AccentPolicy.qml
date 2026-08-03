@@ -340,7 +340,17 @@ QtObject {
     /// background, every text role — is untouched, which is what makes this a
     /// constrained mode rather than a generated one.
     function accent(colors: var, palette: var, darkMode: bool): var {
-        const reading = policy.dominantHue(colors);
+        return policy.accentFor(policy.dominantHue(colors), palette, darkMode);
+    }
+
+    /// The same, for a caller that already holds the reading.
+    ///
+    /// Split out because the service logs the numbers that decided the outcome:
+    /// reading the wallpaper twice would cost a second pass over every
+    /// quantized colour, and — worse — the concentration in the log line would
+    /// come from a different evaluation than the one that produced the colour
+    /// beside it.
+    function accentFor(reading: var, palette: var, darkMode: bool): var {
         if (!reading.ok)
             return ({});
 
@@ -351,8 +361,19 @@ QtObject {
         const background = policy.relativeLuminance(policy.toRgb(palette.bgBase));
         const okL = policy.fitLightness(primary.L, primary.C, hue, background);
 
+        // The deep teal takes the same rotation and then the same band, so the
+        // guarantee is structural rather than a consequence of the two shipped
+        // hues happening to be half a degree apart. At the sage end that costs
+        // the half degree; nothing else notices.
+        //
+        // No contrast check on this one, on purpose: `accentDeep` is a *fill*
+        // and the thing that has to stay readable is the text drawn on it, not
+        // the fill against the page. Its lightness is untouched, which is what
+        // keeps that pairing where the palette put it.
         const deep = policy.toOklch(palette.accentDeep);
-        const deepHue = (deep.H + rotation + 360) % 360;
+        const deepHue = Math.max(policy.bandFloor(darkMode),
+                                 Math.min(policy.bandCeiling,
+                                          (deep.H + rotation + 360) % 360));
 
         return {
             accentPrimary: policy.hexOf(policy.fromOklch(okL, primary.C, hue)),

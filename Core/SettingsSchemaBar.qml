@@ -112,11 +112,20 @@ QtObject {
         // workspace id under the active peak (both measured as not working
         // at a 32px bar).
         surface: knobs.group("bar.surface", {
-            // 86% of `surface` over the wallpaper. Measured 7.12:1 for
-            // text-secondary under the right-hand cluster — the worst
-            // case, since that cluster sits over the brightest part of the
-            // sky. The floor is 0.65: 0.60 measured 4.44:1 and fails the
-            // body-text rule (#10).
+            // 86% of `surface` over the wallpaper — the value #10 measured
+            // and the one every wallpaper on this machine is legible at.
+            //
+            // The range below is *taste*, not safety, and that is a change
+            // from what #68 shipped. It clamped at 0.65 on the strength of
+            // "0.60 measured 4.44:1", a number taken against an averaged
+            // wallpaper luminance; measured properly, 0.65 ships 2.8:1 and
+            // 0.60 ships 2.5:1, and the lowest value that is safe on the
+            // brightest wallpaper is 0.84 — a slider two notches wide (#79,
+            // #94). So the legibility floor moved off the setting and onto
+            // the rendered result: Surfaces/Bar/BarLegibility.qml reads the
+            // strip of wallpaper under the bar and raises the *painted*
+            // fill to whatever holds 4.5:1, leaving this where the user put
+            // it. On a dark wallpaper 0.65 is honoured exactly.
             opacity: { def: 0.86, min: 0.65, max: 1.0, label: "Fill opacity" },
             // Blur is the compositor's job — a Hyprland layerrule on this
             // bar's namespace, which costs the shell nothing per frame.
@@ -131,10 +140,15 @@ QtObject {
             // a horizon, and the horizon motif wants a line.
             hairline: { def: true, label: "Bottom hairline" },
             // 2-4% monochrome noise kills gradient banding (brief §3.5).
-            grain: { def: 0.03, min: 0, max: 0.1, label: "Grain" },
-            // Less translucency as the wallpaper brightens. Off by
-            // default, and costs nothing while off.
-            adaptiveOpacity: { def: false, label: "Adapt opacity to the wallpaper" }
+            grain: { def: 0.03, min: 0, max: 0.1, label: "Grain" }
+            // `adaptiveOpacity` was here — an off-by-default taste knob for
+            // "less translucency as the wallpaper brightens", next to a
+            // schema clamp that was meant to be the safety net. #79
+            // measured the net at 2.73:1 and this knob recovering it to
+            // 3.18:1, so the two became one thing that is always on and
+            // calibrated: Surfaces/Bar/BarLegibility.qml. Removed in v3
+            // rather than left as a no-op, because a switch that changes
+            // nothing is worse than no switch.
         }),
 
         ridgeline: knobs.group("bar.ridgeline", {

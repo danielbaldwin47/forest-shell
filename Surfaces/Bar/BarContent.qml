@@ -35,28 +35,62 @@ Item {
     // one, so a typo costs one module instead of the bar.
     readonly property var layout: registry.resolve(root.settings.modules)
 
+    /// Whether the wallpaper behind the bar has been read and the legibility
+    /// floor (#79) is in force. False for the first moment of a bar's life and
+    /// after every wallpaper change — the bar paints at the plain setting until
+    /// then. Exposed because a capture taken before it is true is a picture of
+    /// a fill the shell does not ship (capture-harness.qml).
+    readonly property bool legibilityReady: legibility.item ? legibility.item.ready : false
+
+    /// Whether the fill has finished fading to the floor as well as being told
+    /// it. The clamp arrives after the first frame and lands on the fog curve,
+    /// so `legibilityReady` is true for ~140ms before the bar looks the way it
+    /// is going to — long enough for a capture to come back with a colour the
+    /// shell never settles on (capture-harness.qml).
+    readonly property bool legibilitySettled: root.legibilityReady
+        && Math.abs(surface.paintedOpacity - surface.fillOpacity) < 0.002
+
     BarRegistry { id: registry }
 
+    SurfaceOpacity { id: opacityPolicy }
+
     BarSurface {
+        id: surface
+
         anchors.fill: parent
         settings: root.settings.surface
         radius: root.settings.floating ? root.settings.floatRadius : 0
         hairlineAtBottom: root.settings.position === "top"
-        fillOpacity: adaptive.item && adaptive.item.ready
-            ? adaptive.item.value
-            : root.settings.surface.opacity
+        // The setting is what the user asked for; the floor is what the
+        // wallpaper in front of it will allow (#79). The greater of the two is
+        // what gets painted, so the slider is never overruled downwards and the
+        // text is never left under 4.5:1.
+        fillOpacity: opacityPolicy.effectiveOpacity(
+            root.settings.surface.opacity,
+            legibility.item ? legibility.item.floor : NaN)
     }
 
-    // Adaptive opacity is off by default and costs nothing while off: the
-    // wallpaper is not read, not decoded and not quantized, because the Loader
-    // holding all of that is inactive. It is also the one part of the bar that
-    // depends on a Quickshell type nothing else here uses, so keeping it behind
-    // a Loader means a build without that type loses the feature rather than
-    // the bar.
+    // The legibility floor is not optional and is not a setting, so this Loader
+    // is no longer an off switch — it is here because this is the one part of
+    // the bar that depends on `ColorQuantizer`, and a runtime without that type
+    // should lose the clamp rather than the bar. Losing it means the bar paints
+    // at the setting, which is exactly what shipped before #79.
     Loader {
-        id: adaptive
-        active: root.settings.surface.adaptiveOpacity
-        source: Qt.resolvedUrl("AdaptiveOpacity.qml")
+        id: legibility
+
+        Component.onCompleted: setSource(Qt.resolvedUrl("BarLegibility.qml"),
+                                         { screen: root.screen })
+
+        // Losing this is a *quiet* degradation — the bar goes on painting at
+        // the setting and looks entirely correct on the dark wallpaper the
+        // author happens to have — so it says so. Without the line, a runtime
+        // with no `ColorQuantizer` is indistinguishable from a working clamp
+        // that had nothing to do.
+        onStatusChanged: {
+            if (status === Loader.Error)
+                Logger.warn("bar", "legibility clamp unavailable, the fill will paint at "
+                            + "the setting whatever the wallpaper does: " + source);
+        }
     }
 
     // One Repeater over the three clusters rather than three hand-written rows:

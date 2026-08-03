@@ -68,7 +68,7 @@ QtObject {
     }
 
     readonly property string versionKey: "settingsVersion"
-    readonly property int version: 2
+    readonly property int version: 3
 
     // --- vocabularies ---------------------------------------------------------
     //
@@ -780,6 +780,28 @@ QtObject {
                 delete background.wallpaper;
                 if (Object.keys(background).length === 0)
                     delete raw.background;
+                return raw;
+            }
+        },
+        {
+            to: 3,
+            describe: "drop bar.surface.adaptiveOpacity — the legibility floor is always on",
+            migrate: function (raw) {
+                // Nothing to carry across: the knob it replaced was a taste
+                // setting on top of a floor that did not hold, and the floor
+                // now applies whatever this said (#79). Dropped rather than
+                // read, so a file that has it stops carrying a key no build
+                // will ever look at again.
+                const bar = raw.bar;
+                if (!bar || typeof bar !== "object" || Array.isArray(bar))
+                    return raw;
+                const surface = bar.surface;
+                if (!surface || typeof surface !== "object" || Array.isArray(surface))
+                    return raw;
+
+                delete surface.adaptiveOpacity;
+                if (Object.keys(surface).length === 0)
+                    delete bar.surface;
                 return raw;
             }
         }

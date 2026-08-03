@@ -14,9 +14,17 @@
 //   fog band, 20% fill  1.25:1     ← invisible
 //
 // (text-secondary under the right-hand cluster, which always sits over the
-// brightest part of the sky.) So the bar is a fill, the blur behind it is the
-// compositor's (Surfaces/Bar/Bar.qml pushes the layerrule), and the schema
-// clamps opacity at 0.65 because 0.60 measured 4.44:1 and fails.
+// brightest part of the sky.) So the bar is a fill, and the blur behind it is
+// the compositor's (Surfaces/Bar/Bar.qml pushes the layerrule).
+//
+// Those four numbers were taken against an *averaged* wallpaper luminance, and
+// that is the part #79 overturned: over the strip the bar actually covers on a
+// real wallpaper, 86% fill measures 4.85:1 rather than 7.12:1 and the schema's
+// old 0.65 clamp measures 2.82:1 rather than the 4.44:1 that was supposed to
+// be the failing case. The ranking above survives — a fill still beats a fog
+// band — but the floor does not live in the schema any more. `fillOpacity` is
+// handed in already clamped to what the wallpaper allows
+// (Surfaces/Bar/BarLegibility.qml).
 //
 // Everything else here is the brief's atmosphere, at bar scale: a mist wash
 // under the fill, the vertical luminance gradient of a forest pin compressed
@@ -33,9 +41,23 @@ Item {
     /// against values that are not the user's.
     required property var settings
 
-    /// Painted opacity of the fill. Separate from `settings.opacity` so
-    /// adaptive opacity can drive it without writing to the config.
+    /// Painted opacity of the fill. Separate from `settings.opacity` because
+    /// the legibility floor (#79) raises it without writing to the config —
+    /// what the user set and what the wallpaper allows are two different
+    /// numbers, and only one of them belongs in settings.json.
     property real fillOpacity: settings.opacity
+
+    /// What the fill is painting *right now*, which is not `fillOpacity` while
+    /// the Behavior below is still running. The legibility floor (#79) arrives
+    /// after the first frame and fades in over `motionSlow`, so anything that
+    /// photographs the bar has to wait for this to reach `fillOpacity` rather
+    /// than for the floor to be decided — measured: three captures taken on the
+    /// decision alone read 5.05:1, 4.76:1 and 4.45:1 off one identical fill.
+    readonly property real paintedOpacity: fill.opacity
+
+    /// The band arithmetic, here only for the two constants the top-light
+    /// gradient below is drawn from — see `topLightStop`.
+    readonly property SurfaceOpacity band: SurfaceOpacity {}
 
     property real radius: 0
 
@@ -45,11 +67,19 @@ Item {
 
     // Which layers sit inside the fill and which sit above it is not a detail:
     // the fill is translucent, so anything parented to it is painted at 86% of
-    // its own strength and moves whenever adaptive opacity moves the fill. So
+    // its own strength and moves whenever the legibility clamp moves the fill. So
     // the rule is what each layer is *about*.
     //
-    //   inside — the top-light, which is a lightening of the fill itself and
-    //            has no meaning apart from it;
+    //   inside — the top-light, which is about the fill itself and has no
+    //            meaning apart from it. "Inside" is where it is parented, and
+    //            not what it does to the pixels: Qt Quick multiplies opacity
+    //            down the tree and blends each node against what is already
+    //            there, so this is drawn *over* the wallpaper the fill let
+    //            through and blocks some of it, rather than lightening the
+    //            fill's colour before the blend. Over a bright wallpaper that
+    //            makes the top of the bar darker than its middle — visible in
+    //            any capture, and the detail the #79 clamp had to model
+    //            correctly to predict what this renders;
     //   above  — the mist wash, the grain and the hairline, each of which is
     //            specified as an absolute (0.10, 3%, 1px `border-subtle`) and
     //            each of which is about the *band*, not about the fill.
@@ -58,8 +88,9 @@ Item {
     // contribute about 1.4% and the setting would do nothing at all, which is
     // not what "86% fill over blurred wallpaper, **plus** the mist wash" (#10)
     // describes. It costs a little contrast — text-secondary over the band
-    // measures ~6.9:1 rather than the fill's own 7.12:1 — against a 4.5:1
-    // floor, so the headroom is still most of the way to double.
+    // measures ~6.9:1 rather than the fill's own 7.12:1 on the averaged
+    // reading, and 4.5:1 rather than 4.85:1 over a real bright strip. The
+    // clamp accounts for it rather than absorbing it.
 
     Rectangle {
         id: fill
@@ -86,8 +117,13 @@ Item {
         // captured: `Qt.lighter` takes a factor rather than a delta, so the
         // 0-0.4 setting is scaled by 4 to reach a useful range (0.05 → a 1.2
         // factor, which is the "barely perceptible" the brief asks for), and
-        // the stop at 0.55 puts the fade out just past halfway so the bottom
-        // half of the bar stays flat.
+        // the stop just past halfway leaves the bottom half of the bar flat.
+        //
+        // Both come from SurfaceOpacity rather than being written here, because
+        // that file predicts this gradient to decide the legibility floor (#79)
+        // and a stop the two disagree on is a floor calculated for a bar nobody
+        // draws — which fails as a passing number rather than as a wrong-looking
+        // bar.
         Rectangle {
             anchors.fill: parent
             radius: fill.radius
@@ -95,9 +131,10 @@ Item {
             gradient: Gradient {
                 GradientStop {
                     position: 0.0
-                    color: Qt.lighter(Theme.surface, 1.0 + root.settings.topLightAmount * 4)
+                    color: Qt.lighter(Theme.surface,
+                                      1.0 + root.settings.topLightAmount * band.topLightScale)
                 }
-                GradientStop { position: 0.55; color: "transparent" }
+                GradientStop { position: band.topLightStop; color: "transparent" }
             }
         }
     }

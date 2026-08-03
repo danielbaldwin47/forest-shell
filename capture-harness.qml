@@ -70,6 +70,12 @@ ShellRoot {
     readonly property string outPath: Quickshell.env("CAPTURE_OUT") ?? ""
     readonly property string surfaceName: Quickshell.env("CAPTURE_SURFACE") || "bar"
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
+
+    /// Whether the bar's legibility clamp (#79) is in force, as it is in the
+    /// shell. Off is how the pre-#79 numbers are reproduced — what the fill
+    /// *would* measure if the setting were the only thing deciding it — and is
+    /// the only way to see the failure the clamp exists to prevent.
+    readonly property bool clampLegibility: (Quickshell.env("CAPTURE_BAR_CLAMP") ?? "1") !== "0"
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
 
     /// How far down the settings page to scroll before grabbing, in px. The
@@ -219,7 +225,45 @@ ShellRoot {
         id: barScene
 
         Backdrop {
+            id: barBackdrop
+
+            /// The setting, before the wallpaper gets a say.
+            readonly property real requested: root.opacityOverride.length > 0
+                ? parseFloat(root.opacityOverride)
+                : Config.values.bar.surface.opacity
+
+            /// What the bar actually paints — the setting raised to the
+            /// legibility floor, exactly as Surfaces/Bar/BarContent.qml does
+            /// it. Measuring the setting instead would measure a bar the shell
+            /// does not draw, which is how #68's floor came to be believed.
+            readonly property real painted: root.clampLegibility
+                ? opacityPolicy.effectiveOpacity(barBackdrop.requested,
+                                                 legibility.item ? legibility.item.floor : NaN)
+                : barBackdrop.requested
+
+            SurfaceOpacity { id: opacityPolicy }
+
+            Loader {
+                id: legibility
+                active: root.clampLegibility
+                // The scene size, not the screen's: the Backdrop above draws the
+                // wallpaper into `scene`, so that is the item PreserveAspectCrop
+                // is resolved against and that is the crop this picture shows.
+                // Left to assume the screen, the clamp would solve for a
+                // different crop of the same file and the gate would be grading
+                // a mismatched pair.
+                Component.onCompleted: {
+                    if (active)
+                        setSource(Qt.resolvedUrl("Surfaces/Bar/BarLegibility.qml"),
+                                  { screen: root.screen,
+                                    viewWidth: root.sceneWidth,
+                                    viewHeight: root.sceneHeight });
+                }
+            }
+
             BarSurface {
+                id: barFill
+
                 anchors {
                     top: parent.top
                     left: parent.left
@@ -227,17 +271,35 @@ ShellRoot {
                 }
                 height: Config.values.bar.height
                 settings: Config.values.bar.surface
-                fillOpacity: root.opacityOverride.length > 0
-                    ? parseFloat(root.opacityOverride)
-                    : Config.values.bar.surface.opacity
+                fillOpacity: barBackdrop.painted
                 hairlineAtBottom: true
             }
 
-            Component.onCompleted: root.sceneDescription =
-                "bar=" + Config.values.bar.height
-                + " opacity=" + (root.opacityOverride.length > 0
-                                 ? root.opacityOverride
-                                 : Config.values.bar.surface.opacity)
+            function describe() {
+                root.sceneDescription = "bar=" + Config.values.bar.height
+                    + " opacity=" + barBackdrop.requested.toFixed(2)
+                    + " painted=" + barBackdrop.painted.toFixed(3)
+                    + " clamp=" + (root.clampLegibility ? "on" : "off");
+            }
+
+            Component.onCompleted: {
+                root.describeScene = barBackdrop.describe;
+                // The clamp is a wallpaper read, so it lands after the first
+                // frame by construction. Grabbing before it does would
+                // photograph the unclamped fill and call it the shipped one.
+                //
+                // And waiting on the *decision* is not enough: the fill fades to
+                // it over `motionSlow`, so a grab taken the moment the floor is
+                // known catches the fade. Three runs on one wallpaper at one
+                // identical `painted` read 5.05:1, 4.76:1 and 4.45:1 that way —
+                // a gate that reports a different answer each time it is asked,
+                // which is worse than one that is merely wrong. Waiting for the
+                // fill to settle at the value it was told is what makes the
+                // measurement a measurement.
+                root.sceneReady = () => !root.clampLegibility
+                    || (legibility.item && legibility.item.ready
+                        && Math.abs(barFill.paintedOpacity - barBackdrop.painted) < 0.002);
+            }
         }
     }
 
@@ -252,7 +314,15 @@ ShellRoot {
         id: barFullScene
 
         Backdrop {
+            // This one is the real BarContent, so its clamp reads the *screen's*
+            // crop of the wallpaper while the Backdrop draws the scene's. The
+            // fill-only scene above is told the difference because it is the
+            // contrast gate; this scene is refused `--contrast` outright
+            // (tools/capture-harness.sh), so the floor it lands on only has to
+            // be a plausible one for the layout picture, not the measured one.
             BarContent {
+                id: fullBar
+
                 anchors {
                     top: parent.top
                     left: parent.left
@@ -262,11 +332,16 @@ ShellRoot {
                 screen: root.screen
             }
 
-            Component.onCompleted: root.sceneDescription =
-                "bar=" + Config.values.bar.height
-                + " modules=" + JSON.stringify(Config.values.bar.modules.left)
-                + "/" + JSON.stringify(Config.values.bar.modules.center)
-                + "/" + JSON.stringify(Config.values.bar.modules.right)
+            Component.onCompleted: {
+                // Same wait as the fill-only scene: this is the real
+                // BarContent, so its fill is clamped too and grabbing early
+                // would photograph the unclamped one (#79).
+                root.sceneReady = () => fullBar.legibilitySettled;
+                root.sceneDescription = "bar=" + Config.values.bar.height
+                    + " modules=" + JSON.stringify(Config.values.bar.modules.left)
+                    + "/" + JSON.stringify(Config.values.bar.modules.center)
+                    + "/" + JSON.stringify(Config.values.bar.modules.right);
+            }
         }
     }
 
@@ -1070,6 +1145,13 @@ ShellRoot {
     /// is the height of an empty card.
     property var describeScene: null
 
+    /// An optional predicate a scene sets when it has something asynchronous
+    /// worth waiting for. The grab retries until it answers true or the budget
+    /// below runs out — it never gives up silently, because a capture taken
+    /// before the scene settled is a picture of the wrong thing and looks
+    /// exactly like a picture of the right thing.
+    property var sceneReady: null
+
     /// A sparkline's worth of samples, generated rather than typed out: sixty
     /// numbers written into the pose above would be sixty numbers to read past
     /// (#50). Deterministic — a sine and not a random walk — because the whole
@@ -1108,12 +1190,33 @@ ShellRoot {
     // the scene graph need a pass before a grab returns anything — and in
     // session mode the toplevel needs a round trip with the compositor first.
     Timer {
+        id: grabTimer
+
+        /// How many more times the grab may wait on `sceneReady`. The budget is
+        /// generous because the thing it waits for is a wallpaper decode: the
+        /// largest wallpaper on this machine is a 27 MiB PNG that takes ~1 s to
+        /// read the size of and ~0.6 s to quantize.
+        property int retries: Math.ceil(6000 / Math.max(1, root.delayMs))
+
         interval: root.delayMs
         running: true
         repeat: false
         onTriggered: {
             if (root.outPath.length === 0) {
                 console.log("capture: saved=false no CAPTURE_OUT set");
+                Qt.quit();
+                return;
+            }
+            if (root.sceneReady && !root.sceneReady()) {
+                if (grabTimer.retries > 0) {
+                    grabTimer.retries--;
+                    grabTimer.restart();
+                    return;
+                }
+                // Said out loud rather than captured anyway: the harness script
+                // treats a missing `saved=true` as a failure, which is the
+                // right outcome for a scene that never settled.
+                console.log("capture: saved=false scene never became ready");
                 Qt.quit();
                 return;
             }

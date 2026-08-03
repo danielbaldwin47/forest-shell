@@ -12,7 +12,8 @@
 # does set is the scale the file comes back at — see the two modes below.
 #
 #   tools/capture-harness.sh out.png                        # defaults
-#   tools/capture-harness.sh out.png --bar-opacity 0.65     # #79's failing floor
+#   tools/capture-harness.sh out.png --bar-opacity 0.65     # the setting, clamped
+#   tools/capture-harness.sh out.png --bar-opacity 0.65 --unclamped  # #79's failure
 #   tools/capture-harness.sh out.png --wallpaper ~/pins/pin11.jpg
 #   tools/capture-harness.sh out.png --size 1920x1080
 #   tools/capture-harness.sh out.png --contrast             # measure, report
@@ -79,6 +80,15 @@
 # is the *stricter* floor: blur only averages the wallpaper locally, so a
 # window that passes unblurred passes blurred.
 #
+# --bar-opacity sets the *setting*. What gets painted is that setting raised to
+# whatever the wallpaper behind it demands (#79) — the bar reads the strip under
+# itself and clamps up to hold 4.5:1 — so `--bar-opacity 0.65 --contrast
+# --min-ratio 4.5` is the gate on the clamp, and the `painted=` field in the
+# saved line is what the clamp chose. --unclamped turns that off and renders the
+# setting raw, which is how the failure #79 reported is reproduced and how the
+# numbers in the Bar tab's copy are checked (#94). The full picture,
+# `--surface bar-full`, always clamps: it is the real BarContent.
+#
 # Two rendering modes, and the difference between them is MultiEffect:
 #
 #   (default)  QT_QPA_PLATFORM=offscreen. Needs no session, so CI can run it,
@@ -124,6 +134,7 @@ WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
 LIGHT=0
+UNCLAMPED=0
 
 while (( $# )); do
     case "$1" in
@@ -147,7 +158,8 @@ while (( $# )); do
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
-        --help|-h)     sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --unclamped)   UNCLAMPED=1; shift ;;
+        --help|-h)     sed -n '2,108p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -311,6 +323,7 @@ CAPTURE_ENV=(
     XDG_CONFIG_HOME="$SCRATCH/config" XDG_STATE_HOME="$SCRATCH/state"
     XDG_CACHE_HOME="$SCRATCH/cache"
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
+    CAPTURE_BAR_CLAMP="$( ((UNCLAMPED)) && echo 0 || echo 1 )"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
     CAPTURE_SETTINGS_SCROLL="$SETTINGS_SCROLL"

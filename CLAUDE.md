@@ -48,6 +48,13 @@ starve it. `--contrast` is the #79 measurement (`tools/measure-contrast.py`),
 and it is the *stricter* form of it: compositor blur only averages the
 wallpaper locally, so a window that passes unblurred passes blurred.
 
+A measurement that decides a *policy* rather than checking one needs more than
+one picture, and that is a third kind of tool rather than a fourth seam:
+`tools/measure-strip-floor.py` runs the bar's contrast arithmetic over a whole
+folder of wallpapers, which is what settled #79 — one capture said the floor
+failed, 171 said no single floor could pass. Tools of that shape may take
+Pillow/NumPy; anything inside a gate stays stdlib-only, so it runs anywhere.
+
 One caveat picks the mode: `MultiEffect` draws nothing on the offscreen
 scenegraph (measured — `Widgets/Icon.qml`), so every Lucide glyph is missing
 from an offscreen capture. `--session` renders the same components on the

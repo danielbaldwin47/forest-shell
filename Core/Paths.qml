@@ -40,6 +40,14 @@ Singleton {
     // lookup across worktrees in ways nothing here can predict.
     readonly property string claudeDir: stateDir + "/claude"
 
+    // Clipboard thumbnails, decoded out of cliphist (#53). Cache and not state:
+    // every file in here is reproducible from the history in one `cliphist
+    // decode`, so losing the lot costs one decode per picture and nothing else.
+    // That is the whole difference between this directory and `stateDir`, and it
+    // is why a `rm -rf` of it is a supported thing to do.
+    readonly property string cacheDir: Quickshell.cacheDir
+    readonly property string clipboardDir: cacheDir + "/clipboard"
+
     // QML `source` properties want a URL, not a path. Percent-encoding is not
     // optional: a wallpaper living in a directory with a `#` in its name parses
     // as a URL fragment and the file silently never loads.

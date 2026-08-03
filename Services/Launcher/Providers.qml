@@ -67,6 +67,11 @@ Singleton {
         // `rowsFor` and not `rows`: the calculator answers asynchronously, and
         // a row that answers a different expression is worse than no row.
         case "calculator": return Calculator.rowsFor(body);
+        // The clipboard needs no such guard. Its list is read once on entering
+        // the provider rather than per query, so filtering it is synchronous —
+        // what arrives late is a *thumbnail*, and a row with a placeholder icon
+        // on it is still a row that copies the right thing.
+        case "clipboard":  return Clipboard.rows(body);
         case "emoji":      return root.emoji.rows(body);
         case "actions":    return Actions.rows(body);
         // Ask Claude has no rows by construction: the panel becomes a
@@ -92,11 +97,17 @@ Singleton {
     /// A query that has routed away from the calculator clears it, so that
     /// coming back to `=` does not show the previous sum's answer under a new
     /// expression for a frame.
+    /// The clipboard is primed here too, and for a second reason on top of the
+    /// calculator's. It re-reads `cliphist list` on *becoming* the routed
+    /// provider — the history changes outside this shell, so a list cached for
+    /// the session goes stale — and this is the only call that can tell it that
+    /// happened. It also decides which pictures are worth decoding, which is a
+    /// function of the query and so has to be pushed rather than pulled.
     function prime(query: string, settings: var): void {
         const routed = root.policy.route(query, settings).id;
-        Calculator.ask(routed === "calculator"
-                       ? root.policy.bodyOf(query, settings)
-                       : "");
+        const body = root.policy.bodyOf(query, settings);
+        Calculator.ask(routed === "calculator" ? body : "");
+        Clipboard.ask(routed === "clipboard" ? body : "", routed === "clipboard");
     }
 
     /// What the launcher says when `rows()` is empty. The routed provider's own
@@ -108,6 +119,7 @@ Singleton {
 
         switch (root.policy.route(query, settings).id) {
         case "calculator": note = Calculator.silence(body); break;
+        case "clipboard":  note = Clipboard.silence(body); break;
         case "emoji":      note = root.emoji.silence(body); break;
         case "actions":    note = Actions.silence(body); break;
         case "claude":     note = Claude.silence(body); break;
@@ -177,6 +189,15 @@ Singleton {
         case "calculator":
         case "emoji":
             return root.copy(String(row.copy ?? ""), String(row.title ?? ""));
+        // Not `copy()`, and this is the fourth verb behind Enter. What a
+        // clipboard row carries is an *id*, because `cliphist list` returns a
+        // truncated one-line preview and copying that would put a mangled
+        // prefix of the entry on the selection while reporting success. The
+        // full entry comes back from `cliphist decode`, so this Enter spawns
+        // something — and an image never touches `clipboardText` at all,
+        // because a QML string cannot carry a PNG (Clipboard.qml).
+        case "clipboard":
+            return Clipboard.copyEntry(row);
         case "actions":
             return Actions.run(row.run);
         }

@@ -103,14 +103,24 @@ TestCase {
     }
 
     function test_an_unlanded_provider_names_the_ticket_that_lands_it() {
-        // The clipboard's owner was `#40` from the day the table was written
-        // and #40 is not the clipboard — #53 is. Not a comment: this string is
-        // what a user typing `;` reads, so a wrong owner sends them to the
-        // wrong ticket.
-        //
-        // One left, which is why this test still has a subject at all.
-        compare(policy.unavailable(policy.route(";", testCase.allOn)),
-                "Clipboard lands with #53");
+        // Against a made-up provider, because since #53 the table has none:
+        // all six have landed. The mechanism outlives its last real subject —
+        // the next provider declared ahead of its implementation depends on it,
+        // and the sentence is what a user typing that prefix reads, so a wrong
+        // owner sends them to the wrong ticket.
+        compare(policy.unavailable({ id: "smoke", name: "Smoke Signals",
+                                     landed: false, owner: "#999" }),
+                "Smoke Signals lands with #999");
+        compare(policy.unavailable({ id: "smoke", name: "Smoke Signals",
+                                     landed: true, owner: "#999" }), "");
+    }
+
+    function test_every_declared_provider_has_landed() {
+        // True since #53, and worth asserting rather than assuming: the
+        // silences below are written against a table where nothing is waiting,
+        // and a provider added ahead of its ticket has to make this fail so
+        // that they get their subject back.
+        verify(policy.providers.every(entry => entry.landed === true));
     }
 
     // --- the provider that is not a list -------------------------------------
@@ -405,16 +415,12 @@ TestCase {
         compare(policy.answers("", testCase.allOn), true);
     }
 
-    function test_a_provider_that_has_not_landed_does_not_answer() {
-        compare(policy.answers(";", testCase.allOn), false);
-    }
-
-    function test_the_providers_that_landed_with_this_ticket_answer() {
-        compare(policy.answers("=2+2", testCase.allOn), true);
-        compare(policy.answers(":tree", testCase.allOn), true);
-        compare(policy.answers("/lock", testCase.allOn), true);
-        compare(policy.answers("2+2", testCase.allOn), true);
-        compare(policy.answers("?hello", testCase.allOn), true);
+    function test_every_provider_answers_now() {
+        // #53 was the last one. `landed` is still consulted — see
+        // `test_an_unlanded_provider_names_the_ticket_that_lands_it` — but the
+        // table it is consulted against no longer has a `false` in it.
+        for (const query of ["=2+2", ":tree", "/lock", "2+2", "?hello", ";git"])
+            compare(policy.answers(query, testCase.allOn), true);
     }
 
     function test_switching_apps_off_actually_switches_apps_off() {
@@ -434,8 +440,15 @@ TestCase {
     function test_the_five_silences_are_told_apart() {
         // #81's lesson on a surface: one picture for five causes is how a bug
         // gets two candidate explanations.
-        compare(policy.empty(";", testCase.allOn, true, null).text,
-                "Clipboard lands with #53");
+        //
+        // Four rungs are reachable from here. The fifth — "has not landed" — no
+        // longer has a subject in the table since #53, and cannot be given one
+        // from outside because `empty()` routes against the real table. It is
+        // tested one call lower down, at `unavailable()`, which is the function
+        // that produces the sentence.
+        const noApps = { apps: false, calculator: true, clipboard: true,
+                         emoji: true, actions: true, claude: true };
+        compare(policy.empty("fire", noApps, true, null).text, "Apps is switched off");
         compare(policy.empty("fire", testCase.allOn, false, null).text,
                 "Looking for applications…");
         compare(policy.empty("fire", testCase.allOn, true, null).text, "No matches");
@@ -452,8 +465,9 @@ TestCase {
         // the provider talking, and it cannot talk if it is not there.
         const noCalculator = { apps: true, calculator: false, clipboard: true,
                                emoji: true, actions: true, claude: true };
-        compare(policy.empty(";", testCase.allOn, true, note).text,
-                "Clipboard lands with #53");
+        const noApps = { apps: false, calculator: true, clipboard: true,
+                         emoji: true, actions: true, claude: true };
+        compare(policy.empty("fire", noApps, true, note).text, "Apps is switched off");
         // With the calculator off, `=2+2` is not the calculator at all — it
         // falls through to apps, which is where the note stops applying.
         compare(policy.empty("=2+2", noCalculator, true, null).text, "No matches");

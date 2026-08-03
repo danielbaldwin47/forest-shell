@@ -7,12 +7,13 @@
 // whole routing rule and a provider registers by appearing in it — a prefix, a
 // name, an icon, and whether it has landed yet.
 //
-// Only the apps provider has landed (#39). The other five are declared here
-// anyway, and deliberately: the footer legend is how six providers become
-// discoverable at all (#11 §7), and a legend that grows a row per ticket would
-// teach the prefixes twice. Typing an unlanded prefix says which ticket owns it
-// rather than showing an empty list, which is the difference between "not yet"
-// and "no matches".
+// All six have landed now — apps with #39, three more with #40, Ask Claude with
+// #41 and the clipboard with #53. The `landed` column stays anyway, and so does
+// everything that reads it: the table was written when only apps answered, and
+// the reason it carried the unlanded five was that the footer legend is how six
+// providers become discoverable at all (#11 §7). Typing a prefix that names its
+// own ticket is the difference between "not yet" and "no matches", and the next
+// provider to be declared ahead of its implementation gets that for free.
 //
 // Everything here is a decision, which is why it is here and not in
 // Surfaces/Drawers/Launcher.qml: this file imports nothing but QtQuick, so
@@ -55,7 +56,7 @@ QtObject {
         // so a user typing `;` was being sent to the wrong ticket.
         { prefix: ";", id: "clipboard", name: "Clipboard",
           icon: "clipboard-list", category: "Clipboard", placeholder: "Search clipboard",
-          landed: false, owner: "#53" },
+          landed: true, owner: "#53" },
         { prefix: ":", id: "emoji", name: "Emoji", icon: "smile",
           category: "Emoji", placeholder: "Search emoji", landed: true, owner: "#40" },
         { prefix: "/", id: "actions", name: "Actions", icon: "command",
@@ -354,7 +355,8 @@ QtObject {
     //     iconSource  an image path (a real application icon), or ""
     //     category    the label at the right-hand end of the row
     //     copy        what Enter puts on the clipboard, or ""
-    //     entryId     the desktop-entry id, for the apps provider
+    //     entryId     the provider's own name for the thing — a desktop-entry
+    //                 id for apps, a cliphist id for the clipboard
     //     run         an action descriptor, for the actions provider
     //
     // One shape and not four, because the delegate is built once at the fold

@@ -44,8 +44,12 @@
 #  21. the argv the *resolved* config builds is contained, and cannot say --bare
 #  22. `?` produces a conversation rather than rows
 #  23. a real question streams, resumes and cancels        (--live only)
-#  24. nothing is fighting itself (no binding loops)
-#  25. a machine with no qalc says so, immediately and only about the calculator
+#  24. `;` lists the clipboard, filters it, and Enter puts an entry back —
+#      text through the compositor's selection, an image through `wl-copy`,
+#      with a thumbnail decoded to disk       (needs cliphist + wl-clipboard)
+#  25. nothing is fighting itself (no binding loops)
+#  26. a machine with no qalc and no cliphist says so about each, immediately,
+#      and only about the provider that owns the tool
 #
 # ## The three #40 providers, and why they are here
 #
@@ -126,8 +130,12 @@ settle() {
 nested_up || exit 1
 
 SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$SCRATCH/cache"
+# The cache is scratch for #53's sake and it is not tidiness: cliphist keeps its
+# store under `XDG_CACHE_HOME`, so a harness without this line would read — and
+# print — the developer's own clipboard history.
+NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state"
+            "XDG_CACHE_HOME=$SCRATCH/cache")
 
 nested_shell launcher-harness.qml 'harness: launcher harness ready' || exit 1
 
@@ -543,7 +551,171 @@ else
     printf '  ..  skipped the live question (pass --live to spend a real turn)\n'
 fi
 
-# --- 24. nothing is fighting itself --------------------------------------------
+# --- 24. the clipboard (#53) ----------------------------------------------------
+#
+# The provider whose every failure looks like success. `cliphist list` prints
+# nothing on an empty history, nothing when the watcher was never started, and
+# nothing when the binary is absent — three different pieces of news, one of
+# which is fine and two of which need a sentence. Only the exit status and the
+# probe tell them apart, which is the ticket's own instruction and #78's shape.
+#
+# The history is seeded through `cliphist store` directly, on stdin, which is
+# exactly what `wl-paste --watch cliphist store` does to it — so this is the
+# real store rather than a fixture, without needing a watcher running inside a
+# nested compositor that cannot present a frame.
+#
+# `XDG_CACHE_HOME` is scratch for the whole run, and that is not tidiness: the
+# store is a file under it, so a harness without it would list the developer's
+# own clipboard history — every password manager paste of the day — into a log
+# this suite prints.
+
+if grep -qa 'startup: stage clipboard provider armed' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the clipboard provider came up'
+else
+    nested_fail 'the clipboard provider never came up'
+fi
+
+## Seed the store the way the watcher does.
+clip_store() { env XDG_CACHE_HOME="$SCRATCH/cache" cliphist store; }
+
+## Leave the provider and come back to it, which is what re-reads the history.
+## The list is read on *entering* the room rather than per keystroke (the
+## history changes outside this shell), so this is the user's own gesture and
+## not a back door: type something else, then type `;` again.
+clip_reenter() {
+    reply rows '' >/dev/null
+    reply rows ';' >/dev/null
+}
+
+## Poll until the listing has at least N entries.
+clip_settle() {
+    local want="$1" tries="${2:-40}"
+    while (( tries-- > 0 )); do
+        [[ "$(reply clipboardCount)" =~ ^[0-9]+$ ]] \
+            && (( $(reply clipboardCount) >= want )) && return 0
+        sleep 0.1
+    done
+    return 1
+}
+
+if ! command -v cliphist >/dev/null 2>&1 || ! command -v wl-copy >/dev/null 2>&1; then
+    # The round trip needs both binaries and there is nothing honest to fake.
+    # What still runs is check 26 below, which removes `cliphist` from PATH on
+    # purpose — so the degradation half is covered on every machine, and only
+    # the success half is skipped here.
+    nested_note 'skipped the clipboard round trip — cliphist and wl-clipboard are not installed'
+else
+    # An empty history, before anything is stored. The state a machine with
+    # cliphist installed and no watcher running sits in forever, so "empty" on
+    # its own would be true and useless.
+    said=$(reply silence ';')
+    if [[ "$said" == *"wl-paste"* && "$said" == *"--watch"* ]]; then
+        nested_pass "an empty history names the watcher: $said"
+    else
+        nested_fail "an empty history said \"$said\""
+    fi
+
+    TEXT='forest-shell harness — git push --force-with-lease'
+    printf '%s' "$TEXT" | clip_store
+    clip_store < assets/noise.png
+    clip_reenter
+
+    if clip_settle 2; then
+        nested_pass "the history was read: $(reply clipboardCount) entries"
+    else
+        nested_fail "the history never came back — count: $(reply clipboardCount)"
+    fi
+
+    if grep -qaE 'launcher: [0-9]+ clipboard entr(y|ies) listed' "$NESTED_SHELL_LOG"; then
+        nested_pass 'the listing logs what it found'
+    else
+        nested_fail 'the listing was never logged'
+    fi
+
+    # The text entry, found by searching for part of it.
+    if [[ "$(reply title ';force-with-lease' 0)" == "$TEXT" ]]; then
+        nested_pass 'a query filters the history down to the entry'
+    else
+        nested_fail "a query for part of the entry found \"$(reply title ';force-with-lease' 0)\""
+    fi
+
+    if [[ -z "$(reply rows ';zzzzznothing')" ]]; then
+        nested_pass 'a query that matches nothing returns nothing'
+    else
+        nested_fail 'a query that should match nothing returned rows'
+    fi
+
+    said=$(reply silence ';zzzzznothing')
+    if [[ "$said" == *"zzzzznothing"* ]]; then
+        nested_pass "a miss over a full history says: $said"
+    else
+        nested_fail "a miss over a full history said \"$said\" — that is the empty-history sentence"
+    fi
+
+    # The text round trip. Enter decodes the *entry*, never the preview — the
+    # preview is truncated, and copying it would paste a mangled prefix while
+    # reporting success.
+    Quickshell_before=$(reply clipboard)
+    if [[ "$(reply activate ';force-with-lease' 0)" == "true" ]]; then
+        tries=40
+        while (( tries-- > 0 )); do
+            [[ "$(reply clipboard)" == "$TEXT" ]] && break
+            sleep 0.1
+        done
+        if [[ "$(reply clipboard)" == "$TEXT" ]]; then
+            nested_pass 'Enter puts the whole text entry back on the selection'
+        else
+            nested_fail "the clipboard holds \"$(reply clipboard)\", not the entry (was: $Quickshell_before)"
+        fi
+    else
+        nested_fail 'Enter on a clipboard row was refused'
+    fi
+
+    # The image half. A row that says what it is, a thumbnail that decodes to a
+    # real file, and an offer the compositor will hand out as image/png.
+    IMAGE_ROW=$(reply title ';image' 0)
+    if [[ "$IMAGE_ROW" == Image* ]]; then
+        nested_pass "the stored PNG is listed as an image: $IMAGE_ROW"
+    else
+        nested_fail "the stored PNG listed as \"$IMAGE_ROW\""
+    fi
+
+    IMAGE_ID=$(prow ';image' 1 | sed 's/^clipboard://')
+    if [[ -n "$IMAGE_ID" ]]; then
+        tries=40
+        THUMB=""
+        while (( tries-- > 0 )); do
+            THUMB=$(reply clipboardThumbnail "$IMAGE_ID")
+            [[ -n "$THUMB" ]] && break
+            sleep 0.1
+        done
+        THUMB_PATH="${THUMB#file://}"
+        if [[ -s "$THUMB_PATH" ]]; then
+            nested_pass "the thumbnail decoded to $THUMB_PATH"
+        else
+            nested_fail "no thumbnail decoded for entry $IMAGE_ID (got \"$THUMB\")"
+        fi
+    else
+        nested_fail 'the image entry has no id to decode'
+    fi
+
+    if [[ "$(reply activate ';image' 0)" == "true" ]]; then
+        tries=40
+        while (( tries-- > 0 )); do
+            nested_env wl-paste --list-types 2>/dev/null | grep -qa 'image/png' && break
+            sleep 0.1
+        done
+        if nested_env wl-paste --list-types 2>/dev/null | grep -qa 'image/png'; then
+            nested_pass 'Enter on an image offers it back as image/png'
+        else
+            nested_fail "the selection offers: $(nested_env wl-paste --list-types 2>/dev/null | tr '\n' ' ')"
+        fi
+    else
+        nested_fail 'Enter on an image row was refused'
+    fi
+fi
+
+# --- 25. nothing is fighting itself --------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"
@@ -551,15 +723,22 @@ else
     nested_pass 'no binding loops in the provider'
 fi
 
-# --- 25. a machine with no qalc -------------------------------------------------
+# --- 26. a machine with no qalc and no cliphist ----------------------------------
 #
 # Last, because it restarts the shell and the restart truncates the log every
 # check above reads.
 #
-# The PATH is a directory of symlinks to everything in /usr/bin except `qalc` —
-# rather than an empty one — so that the only thing missing is the calculator's
-# tool. A shell that lost every binary would fail this check for reasons that
-# have nothing to do with #40.
+# The PATH is a directory of symlinks to everything in /usr/bin except `qalc`
+# and `cliphist` — rather than an empty one — so that the only things missing
+# are the two providers' tools. A shell that lost every binary would fail this
+# check for reasons that have nothing to do with #40 or #53.
+#
+# The clipboard half runs on every machine, including one where check 24 skipped
+# the round trip for want of the binaries: the failure this asserts is produced
+# on purpose rather than found. It is the ticket's second acceptance criterion —
+# "the service degrades gracefully without cliphist" — and the shape it is
+# guarding against is a history that reads as empty because the binary is not
+# there, which is #78 with no error anywhere in it.
 
 nested_kill_shell
 
@@ -573,7 +752,7 @@ done
 # the *outer* PATH before it is replaced.
 QS_PATH=$(command -v "$NESTED_QS" 2>/dev/null || printf '%s' "$NESTED_QS")
 ln -sf "$QS_PATH" "$NOQALC/$(basename "$QS_PATH")"
-rm -f "$NOQALC/qalc"
+rm -f "$NOQALC/qalc" "$NOQALC/cliphist"
 
 NESTED_ENV+=("PATH=$NOQALC")
 if ! nested_shell launcher-harness.qml 'harness: launcher harness ready'; then
@@ -597,6 +776,32 @@ else
         nested_pass 'the other providers are unaffected by a missing qalc'
     else
         nested_fail 'a missing qalc took the emoji provider down with it'
+    fi
+
+    # And the same three questions for the clipboard.
+    if nested_await "$NESTED_SHELL_LOG" 'launcher: no cliphist on PATH' 10; then
+        nested_pass 'a missing cliphist is noticed at startup, not at the first `;`'
+    else
+        nested_fail 'the shell never noticed that cliphist is missing'
+    fi
+
+    if [[ "$(reply clipboardReady)" == "false" && "$(reply clipboardProbed)" == "true" ]]; then
+        nested_pass 'the provider knows it is inert rather than merely empty'
+    else
+        nested_fail "the provider says ready=$(reply clipboardReady) probed=$(reply clipboardProbed)"
+    fi
+
+    said=$(reply silence ';')
+    if [[ "$said" == *"not installed"* ]]; then
+        nested_pass "a \`;\` with no cliphist says: $said"
+    else
+        nested_fail "a \`;\` with no cliphist said \"$said\" — an empty list is the #78 shape"
+    fi
+
+    if [[ -z "$(reply rows ';')" ]]; then
+        nested_pass 'and shows no rows rather than inventing any'
+    else
+        nested_fail 'a missing cliphist produced rows'
     fi
 fi
 

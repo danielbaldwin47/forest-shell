@@ -15,9 +15,14 @@
 //     `set()`. It is for effects that can be expressed *here*, in a file with no
 //     Quickshell imports; anything needing a service connects to
 //     `Config.keyChanged` instead;
-//   - `themed: true` marks a whole sub-object that a theme preset replaces
-//     atomically (#56). Those are leaves, not sections, so a preset never
-//     half-merges into keys a user left behind.
+//   - `themed: true` marks a key a theme preset carries (#56) — the shell's
+//     *skin*, never its layout. A themed **group** is a whole sub-object, and
+//     therefore a leaf rather than a section, so a preset replaces it
+//     atomically and never half-merges into keys a user left behind;
+//   - `derived: true` is that flag's exception: a themed group that is a mode's
+//     *output* rather than anyone's choice. Core/ThemePolicy.qml leaves those
+//     out of a saved theme — a preset carrying one would pin the machine it was
+//     saved on into the palette of the machine it is applied to.
 //
 // What is deliberately *not* here: DND, last-open tab, session ids, caches.
 // Intent lives in config even when it is toggled often — dark mode, the current
@@ -29,21 +34,38 @@
 // configures — guessing them here would commit names those tickets would then
 // have to migrate away from. So the sections whose control has not been
 // designed yet stay empty, and a section fills in when either the feature or
-// **its settings tab** lands. The settings window (#54) is the second of those:
-// Appearance, Bar, Launcher and Notifications are built there, so their keys are
-// here, taken from the resolutions that already fixed them — #9 for the launcher
-// providers and the Claude surface, #10 for the bar geometry, surface and
-// ridgeline (which resolved *"all of it is settings, not constants"*), #41 for
-// the Claude flags. The bar itself (#35) reads these; it does not get to rename
-// them.
+// **its settings tab** lands. The settings window is the second of those: #54
+// built Appearance, Bar, Launcher and Notifications, and #55 the other six, so
+// every section now has keys and a tab in front of them. The names are taken
+// from the resolutions that fixed them — #9 for the launcher providers and the
+// Claude surface, #10 for the bar geometry, surface and ridgeline (which
+// resolved *"all of it is settings, not constants"*), #41 for the Claude flags.
+// The bar itself (#35) reads these; it does not get to rename them.
+//
+// The one key still owed is the clock format: #93 owns it, the interim rule is
+// Core/ClockFormat.qml, and `weatherTime` says so where the key would go.
 //
 // Pure data, no Quickshell imports, so tests/ can reach it.
+//
+// A section that has outgrown this file lives in a sibling
+// `SettingsSchema<Section>.qml` and is composed back into `spec` below, so
+// consumers keep one aggregate: `bar` is the first (Core/SettingsSchemaBar.qml),
+// and a section earns its own file when its settings tab lands. The knob-group
+// machinery those files share is Core/SchemaKnobs.qml.
 import QtQuick
 
 QtObject {
     id: schema
 
-    readonly property QtObject c: Coerce {}
+    readonly property SchemaKnobs knobs: SchemaKnobs {}
+    readonly property QtObject c: knobs.c
+    readonly property SettingsSchemaBar barSchema: SettingsSchemaBar {}
+
+    /// The GUI's knob-kind question, answered by the machinery
+    /// (Surfaces/Settings/Controls/KnobRow.qml reads this off the aggregate).
+    function knobKind(knob): string {
+        return knobs.knobKind(knob);
+    }
 
     readonly property string versionKey: "settingsVersion"
     readonly property int version: 3
@@ -62,18 +84,49 @@ QtObject {
     /// only ever read by `Services/Theming/`.
     readonly property var themingModes: ["forest", "accent", "dynamic"]
 
-    /// Every bar module the registry knows, in no particular order — the order
-    /// that matters is the user's, and it is the cluster arrays below. Ids not
-    /// listed in any cluster are simply off; there is no separate enable flag.
-    /// `status` is one module and not four: #9 groups network, bluetooth, volume
-    /// and mic into a single quiet icon cluster.
-    readonly property var barModules: [
-        "launcher", "workspaces", "activeWindow",
-        "clock", "media",
-        "tray", "status", "battery", "keyboard", "notifications", "controlCenter",
-        // Shipped in the registry, off by default (#9).
-        "systemMonitor", "brightness", "nightLight", "recorder"
-    ]
+    /// The bar's module inventory, owned by the bar's section file — exposed
+    /// here so the Bar tab and the registry keep one address for it.
+    readonly property var barModules: barSchema.modules
+
+    /// The dashboard's card inventory (#49), the same kind of pool as
+    /// `barModules`: what a settings GUI offers to add, and what
+    /// Surfaces/Drawers/DashboardRegistry.qml resolves the result against.
+    ///
+    /// The same four the registry has since #50 built the data cards. It was
+    /// longer than the registry for one ticket, on purpose and only in that
+    /// direction: `weather` and `systemMonitor` were named here before either
+    /// could be drawn, so a config written against a newer shell kept them
+    /// rather than having them stripped on the first save — which is what the
+    /// bar's vocabulary still does for the optional modules nobody has built.
+    readonly property var dashboardCards: ["calendar", "media", "weather", "systemMonitor"]
+
+    /// The screen recorder's encoders (#52), plus `auto` for "whichever of
+    /// them this machine has". Naming one is a *preference* and not a demand:
+    /// Services/Recorder/RecorderPolicy.qml falls through to the other when the
+    /// named one is missing, because a machine that cannot record is a worse
+    /// answer than a machine that records in software.
+    readonly property var recordingEngines: ["auto", "gpu-screen-recorder", "wf-recorder"]
+
+    /// gpu-screen-recorder's own preset words, passed through to `-q` rather
+    /// than translated. `wf-recorder` has no equivalent and ignores this.
+    readonly property var recordingQualities: ["medium", "high", "very_high", "ultra"]
+
+    /// The container, which is also the file extension. Two, because these are
+    /// the two both encoders mux natively: mp4 for anything that has to be
+    /// uploaded, mkv for a long capture that might be interrupted.
+    readonly property var recordingContainers: ["mp4", "mkv"]
+
+    /// Which sound goes in. `wf-recorder` has one audio switch and records the
+    /// default device, so it honours `desktop` and `none` exactly and narrows
+    /// the other two — the shell logs a line when that happens rather than
+    /// approximating in silence.
+    readonly property var recordingAudio: ["none", "desktop", "mic", "both"]
+
+    /// What a temperature and a wind speed are measured in (#50). Two systems
+    /// and not four keys: nobody wants their temperature in Celsius and their
+    /// wind in miles per hour, and Open-Meteo takes the pair as two parameters
+    /// Services/Weather/WeatherPolicy.qml derives from this one word.
+    readonly property var weatherUnits: ["metric", "imperial"]
 
     /// Model aliases, not ids: the launcher passes these through to `--model`
     /// (#41). `opusplan` is a plan-mode alias and resolves to sonnet under
@@ -96,6 +149,21 @@ QtObject {
         "WebSearch", "WebFetch", "Read", "Grep", "Glob"
     ]
 
+    /// The control centre's grid, in the order it is drawn (#44, #52), and the
+    /// sliders above it. What a settings GUI offers to put back, and what
+    /// Surfaces/Drawers/ControlCenterPolicy.qml resolves the configured list
+    /// against — the same pool-and-list arrangement `barModules` and
+    /// `dashboardCards` have, for the same reason: presence is enablement.
+    ///
+    /// Written here *and* in the policy, which cannot be imported from Core/.
+    /// tests/tst_schemas.qml holds the two together.
+    readonly property var controlCenterTiles: [
+        "wifi", "bluetooth", "dnd", "nightlight", "keepawake",
+        "mode", "powerprofile", "vpn", "wallpaper", "recording"
+    ]
+
+    readonly property var controlCenterSliders: ["volume", "mic", "brightness"]
+
     /// Where the OSD pill sits (#46). One edge with the pill centred against
     /// it, or the middle of the screen — layer-shell centres a surface on
     /// whichever axis it is not anchored to, so this list is the anchor table.
@@ -106,77 +174,16 @@ QtObject {
     /// Per-app notification handling (#9, #43): silent means history only.
     readonly property var notificationRules: ["normal", "silent", "blocked"]
 
-    /// Builds one theme-flagged group leaf (#56) from a table of knobs.
-    ///
-    /// A themed group is a *single* leaf carrying a whole sub-object, so that a
-    /// preset replaces it atomically. That shape has nowhere to write down what
-    /// each knob is, which the settings GUI needs — so the knobs are declared
-    /// here, one line each, and this derives the three things that follow from
-    /// them: the group's default object, the coercer that repairs a hand-edited
-    /// group knob by knob, and the table the Bar tab renders its controls from.
-    /// Nothing is written twice, so a range cannot drift away from the control
-    /// that offers it.
-    ///
-    /// A knob is `{ def, label }` plus at most one of:
-    ///
-    ///   - `min`/`max` — a number. Integer or real is taken from the default,
-    ///     since a knob whose default is `14` is not one you want at `14.3`;
-    ///   - `values` — one of a closed list;
-    ///   - nothing — a bool, from a bool default.
-    ///
-    /// `coerce` may still be given outright for a knob none of that fits, and
-    /// is what a future knob type lands as before it earns a shorthand here.
-    function group(label, knobs) {
-        const fields = {};
-        for (const key in knobs) {
-            const knob = knobs[key];
-            fields[key] = { def: knob.def, coerce: knob.coerce ?? coercerFor(knob) };
-        }
-
-        return { def: c.shapeDefaults(fields), coerce: c.shape(fields, label),
-                 themed: true, knobs: knobs };
-    }
-
-    /// What kind of knob this is: `choice`, `range` or `toggle`. One answer,
-    /// read by both things that need it — the coercer below, and the control
-    /// the settings GUI renders (Surfaces/Settings/Controls/KnobRow.qml). Asking
-    /// the same three questions in two places is how a knob ends up validated
-    /// as one thing and edited as another.
-    ///
-    /// Integer or real is not part of the kind: it follows from the default,
-    /// since a knob whose default is `14` is not one anybody wants at `14.3`.
-    function knobKind(knob): string {
-        if (knob.values !== undefined)
-            return "choice";
-        if (knob.min !== undefined || knob.max !== undefined)
-            return "range";
-        if (typeof knob.def === "boolean")
-            return "toggle";
-        // Reached only by a knob line that declares nothing this understands —
-        // a schema bug, and one worth failing loudly on rather than admitting
-        // an uncoerced value into a hand-edited file.
-        throw new Error("SettingsSchema: cannot tell what kind of knob this is: "
-                        + JSON.stringify(knob));
-    }
-
-    function coercerFor(knob) {
-        switch (knobKind(knob)) {
-        case "choice":
-            return c.oneOf(knob.values);
-        case "range":
-            return Number.isInteger(knob.def) ? c.integer(knob.min, knob.max)
-                                              : c.number(knob.min, knob.max);
-        default:
-            return c.boolean;
-        }
-    }
-
     readonly property var spec: ({
         appearance: {
             // Fixed forest until #58/#59 land the other two; the key exists now
             // because the control does (#54), and a mode the shell cannot serve
             // yet is disabled in the GUI rather than missing from the file.
-            mode: { def: "forest", coerce: c.oneOf(schema.themingModes) },
+            //
+            // Theme-flagged and not a group: a preset carries the *choice* of
+            // mode (#56) even though what a wallpaper-coupled mode then
+            // produces is `dynamic` below, which it never carries.
+            mode: { def: "forest", coerce: c.oneOf(schema.themingModes), themed: true },
             // Intent, not ephemera: dark mode is part of the setup, so it is
             // config even though it is a one-click toggle (#21).
             darkMode: { def: true, coerce: c.boolean },
@@ -189,163 +196,17 @@ QtObject {
             // an unparseable colour is dropped with a warning rather than
             // painted, because this arrives hand-edited.
             paletteOverrides: { def: ({}), coerce: c.object, themed: true },
-            dynamic: { def: ({}), coerce: c.object, themed: true }
+            // What a wallpaper-coupled mode produced here, on this machine, from
+            // this wallpaper (#58, #59). Theme-flagged so a preset *replaces* it
+            // atomically rather than merging into last week's sample, and
+            // `derived` so no preset ever carries it away from the machine that
+            // sampled it (#56).
+            dynamic: { def: ({}), coerce: c.object, themed: true, derived: true }
         },
 
-        // Geometry and inventory are plain keys; the two styling groups are
-        // theme-flagged, because a preset (#56) swaps how the bar *looks*
-        // without moving modules around or resizing it.
-        bar: {
-            // Top horizontal is the v1 bar (#9). Left/right are absent rather
-            // than accepted-and-ignored: the widgets are built axis-agnostic so
-            // a vertical bar can land post-v1 without rewrites, but a position
-            // the shell cannot actually lay out is a dead setting.
-            position: { def: "top", coerce: c.oneOf(["top", "bottom"]) },
-            // 32 logical px — 48 device px at the T480's 1.5 scale. 26 crowds
-            // the icons, 36+ reads as a title bar (#10).
-            height: { def: 32, coerce: c.integer(20, 64) },
-            padding: { def: 12, coerce: c.integer(0, 48) },
-            moduleGap: { def: 14, coerce: c.integer(0, 48) },
-
-            // Flush full-width is the default; floating insets the bar into a
-            // rounded slab. The margins and radius only apply while floating.
-            floating: { def: false, coerce: c.boolean },
-            floatMarginH: { def: 12, coerce: c.integer(0, 64) },
-            floatMarginV: { def: 8, coerce: c.integer(0, 64) },
-            floatRadius: { def: 10, coerce: c.integer(0, 32) },
-
-            // The window is never destroyed to hide it (#12 §2, #22 §5) — it
-            // drops its content and keeps a reveal strip.
-            autoHide: { def: false, coerce: c.boolean },
-
-            // Which modules the bar carries, in which cluster, in what order.
-            // Presence *is* enablement: there is no separate `enabled` flag,
-            // because a module that is off is a module that is not in a list.
-            //
-            // A list of names, not a closed enum: unknown names are dropped by
-            // the registry with a warning rather than here
-            // (Surfaces/Bar/BarRegistry.qml), so a file written by a newer
-            // shell keeps its modules under an older one. Three leaves rather
-            // than one leaf holding all three, so reordering one cluster
-            // writes back only that cluster.
-            //
-            // The default inventory is #9's, in #9's order — #37 brought all
-            // but the notification indicator, which lands here with the
-            // notification centre (#43). Left is where you are — the workspaces and
-            // the window in front of you, behind the door into the launcher.
-            // Centre is the clock and what is playing. Right is the machine's
-            // condition, tray first and the control-centre door outermost: the
-            // right cluster is all readings except that last one, and a door at
-            // the screen edge is the easiest target on the bar.
-            //
-            // Three of these hide themselves — media with nothing playing, the
-            // keyboard layout on a single-layout machine, the window title on
-            // an empty workspace — so the shipped bar is shorter than this list
-            // most of the time.
-            modules: {
-                left: { def: ["launcher", "workspaces", "activeWindow"],
-                        coerce: c.arrayOf(c.string, "bar.modules.left") },
-                center: { def: ["clock", "media"],
-                          coerce: c.arrayOf(c.string, "bar.modules.center") },
-                right: { def: ["tray", "status", "battery", "keyboard", "notifications",
-                               "controlCenter"],
-                         coerce: c.arrayOf(c.string, "bar.modules.right") }
-            },
-
-            // The two ceilings #37 needed and #36 did not: a track title and a
-            // window title are arbitrary text from another application, and an
-            // uncapped one walks across the bar and pushes the clock off centre
-            // (the #80 class of overflow). Both elide from the right.
-            //
-            // JSON-only for now, which #9 allows for the long tail: they are
-            // two numbers in px that depend on a screen width the Bar tab has
-            // no preview of.
-            mediaMaxWidth: { def: 180, coerce: c.integer(60, 600) },
-            windowMaxWidth: { def: 220, coerce: c.integer(60, 800) },
-
-            // The two styling groups, declared knob by knob (`group()` above):
-            // the group's default object, its knob-by-knob coercer and the
-            // controls the Bar tab renders are all derived from each line, so
-            // a slider cannot offer a value the file would then clamp.
-            //
-            // Every number below is a measured decision from the bar prototype
-            // (#10), not a taste call made at this keyboard. What is *not*
-            // here is as deliberate: no ridgeline shape key (`peaks` and
-            // `pills` were built and rejected — shipping them as settings
-            // would ship the rejected designs), no horizon rule and no
-            // workspace id under the active peak (both measured as not working
-            // at a 32px bar).
-            surface: schema.group("bar.surface", {
-                // 86% of `surface` over the wallpaper — the value #10 measured
-                // and the one every wallpaper on this machine is legible at.
-                //
-                // The range below is *taste*, not safety, and that is a change
-                // from what #68 shipped. It clamped at 0.65 on the strength of
-                // "0.60 measured 4.44:1", a number taken against an averaged
-                // wallpaper luminance; measured properly, 0.65 ships 2.8:1 and
-                // 0.60 ships 2.5:1, and the lowest value that is safe on the
-                // brightest wallpaper is 0.84 — a slider two notches wide (#79,
-                // #94). So the legibility floor moved off the setting and onto
-                // the rendered result: Surfaces/Bar/BarLegibility.qml reads the
-                // strip of wallpaper under the bar and raises the *painted*
-                // fill to whatever holds 4.5:1, leaving this where the user put
-                // it. On a dark wallpaper 0.65 is honoured exactly.
-                opacity: { def: 0.86, min: 0.65, max: 1.0, label: "Fill opacity" },
-                // Blur is the compositor's job — a Hyprland layerrule on this
-                // bar's namespace, which costs the shell nothing per frame.
-                blur: { def: true, label: "Blur the wallpaper behind" },
-                // The brief's pale mist wash, §6.1.
-                mistWash: { def: 0.10, min: 0, max: 0.5, label: "Mist wash" },
-                // "Barely-perceptible top-edge lightening" — the vertical
-                // luminance gradient every board pin has, compressed into 32px.
-                topLight: { def: true, label: "Top-edge lightening" },
-                topLightAmount: { def: 0.05, min: 0, max: 0.4, label: "Top light amount" },
-                // 1px border-subtle bottom hairline: the bar's bottom edge is
-                // a horizon, and the horizon motif wants a line.
-                hairline: { def: true, label: "Bottom hairline" },
-                // 2-4% monochrome noise kills gradient banding (brief §3.5).
-                grain: { def: 0.03, min: 0, max: 0.1, label: "Grain" }
-                // `adaptiveOpacity` was here — an off-by-default taste knob for
-                // "less translucency as the wallpaper brightens", next to a
-                // schema clamp that was meant to be the safety net. #79
-                // measured the net at 2.73:1 and this knob recovering it to
-                // 3.18:1, so the two became one thing that is always on and
-                // calibrated: Surfaces/Bar/BarLegibility.qml. Removed in v3
-                // rather than left as a no-op, because a switch that changes
-                // nothing is worse than no switch.
-            }),
-
-            ridgeline: schema.group("bar.ridgeline", {
-                // Width is the whole ballgame (#10): at w14/gap4 the units
-                // read as receding strata; narrower and it reads as a bar
-                // chart, wider and it reads as a row of buttons. Locked taste
-                // call.
-                unitWidth: { def: 14, min: 4, max: 40, label: "Unit width" },
-                gap: { def: 4, min: 0, max: 20, label: "Gap" },
-                // Heights: active tallest, occupied falling away by distance,
-                // empty at the vanishing height regardless.
-                activeHeight: { def: 14, min: 2, max: 48, label: "Active height" },
-                occupiedHeight: { def: 9, min: 1, max: 48, label: "Occupied height" },
-                emptyHeight: { def: 3, min: 0, max: 48, label: "Empty height" },
-                falloff: { def: 2, min: 0, max: 12, label: "Height falloff" },
-                minHeight: { def: 4, min: 0, max: 48, label: "Minimum height" },
-                // Haze: the same encoding again, in opacity, so distance reads
-                // twice.
-                occupiedHaze: { def: 0.62, min: 0, max: 1, label: "Occupied haze" },
-                emptyHaze: { def: 0.22, min: 0, max: 1, label: "Empty haze" },
-                hazeFalloff: { def: 0.10, min: 0, max: 1, label: "Haze falloff" },
-                minHaze: { def: 0.15, min: 0, max: 1, label: "Minimum haze" },
-                // Hyprland destroys empty workspaces, so a fixed slot range is
-                // unioned with whatever live workspaces exist beyond it —
-                // otherwise the row grows and shrinks as you work.
-                slots: { def: 5, min: 1, max: 20, label: "Workspace slots" },
-                // The single-lamplight rule, resolved (#10): amber is reserved
-                // for attention, so the active workspace is teal and the bar
-                // at rest carries no warm element at all. This is the escape
-                // hatch for the other reading, not the default.
-                amberActive: { def: false, label: "Amber active workspace" }
-            })
-        },
+        // The fattest section, owned by Core/SettingsSchemaBar.qml and
+        // composed back in whole — same keys, same groups, same defaults.
+        bar: barSchema.section,
 
         launcher: {
             // One flag per provider rather than a list, because the set is
@@ -379,7 +240,52 @@ QtObject {
         },
 
         controlCenter: {
-            // Sliders, toggle grid and drill-ins land with #44 and #45.
+            // The toggle grid (#44, #52), as a list of tile names in the order
+            // they are drawn.
+            //
+            // Presence *is* enablement, exactly as it is for the bar's modules
+            // and the dashboard's cards: a tile that is off is a tile that is
+            // not in the list, and there is no second `enabled` flag to
+            // disagree with it. Removing one closes the gap behind it rather
+            // than leaving a hole — Surfaces/Drawers/ControlCenterPolicy.qml
+            // states that rule and does the chunking.
+            //
+            // Names and not a closed enum, for the reason `dashboard.cards`
+            // gives: a file written by a newer shell keeps a tile this one
+            // cannot draw, and the policy drops the unknown id when it builds
+            // the grid rather than the coercer stripping it on the first save.
+            //
+            // Order matters and is the user's: grid position is muscle memory,
+            // so the tile you reach for without looking must not move because a
+            // VPN profile got configured. What this key adds is that it is now
+            // *your* fixed order.
+            tiles: { def: schema.controlCenterTiles.slice(),
+                     coerce: c.arrayOf(c.string, "controlCenter.tiles"),
+                     label: "The tiles the grid carries, in order" },
+
+            // How wide the grid is. Three is #44's, and the ceiling is five
+            // because the panel is 380px and a sixth column is a tile with no
+            // room for the label under its glyph. The floor is two: one column
+            // is a list, and the panel already has one of those.
+            columns: { def: 3, coerce: c.integer(2, 5),
+                       label: "Tiles per row" },
+
+            // The sliders above the grid, same shape and same rule. A machine
+            // with no backlight has no brightness slider whatever this says —
+            // absent hardware has no control, and a list is a preference rather
+            // than a claim about what exists.
+            sliders: { def: schema.controlCenterSliders.slice(),
+                       coerce: c.arrayOf(c.string, "controlCenter.sliders"),
+                       label: "The sliders above the grid, in order" },
+
+            // One notch of a wheel or an arrow key, in percent. The same step
+            // the bar's scroll uses, which is why it is one key and not one per
+            // channel: a notch should mean one thing in the shell rather than
+            // three. 25 is the ceiling because a coarser step cannot reach most
+            // of the range at all, and 1 is a scroll that takes a hundred
+            // notches to cross the track.
+            step: { def: 5, coerce: c.integer(1, 25),
+                    label: "Percent per scroll notch" },
 
             // The OSD (#46) — the pill that pops on a volume, mic or
             // brightness change.
@@ -393,9 +299,9 @@ QtObject {
             // under the section that owns those controls, and reads as "what
             // the control centre does when it is not open".
             //
-            // JSON-only for now, which #9 permits in as many words ("long-tail
-            // options may stay JSON-only until they earn a control"): the
-            // Control Center tab is #55's, and these three rows land with it.
+            // Three rows on the Control Center tab (#55), under a heading of
+            // their own: the OSD is what the control centre does when it is not
+            // open, so it reads as part of that tab rather than as a stray.
             osd: {
                 // How long it stays up, in ms. Bounded either side rather than
                 // at zero: a 0 here would be a surface that maps and unmaps in
@@ -417,7 +323,65 @@ QtObject {
         },
 
         dashboard: {
-            // Card registry and per-card options land with #49 and #50.
+            // Which cards the dashboard carries, top to bottom (#49).
+            //
+            // Presence *is* enablement, exactly as it is for the bar's modules:
+            // a card that is off is a card that is not in the list, and there is
+            // no second `enabled` flag to disagree with it.
+            //
+            // A list of names and not a closed enum: an unknown name is dropped
+            // by the registry with a warning rather than refused here
+            // (Surfaces/Drawers/DashboardRegistry.qml), so a file written by a
+            // newer shell keeps the cards this one cannot draw — which is how
+            // #50's weather and system-monitor cards survived a round trip
+            // through the version before they existed.
+            //
+            // The default is #9's four-card dashboard: the month, the weather,
+            // the machine and what is playing. The header is not in the list —
+            // it is what the panel *is*, not a card.
+            cards: { def: ["calendar", "weather", "systemMonitor", "media"],
+                     coerce: c.arrayOf(c.string, "dashboard.cards") },
+
+            // What the system-monitor card samples, and how often (#50).
+            //
+            // Here rather than under `system` because these are the *card's*
+            // knobs: the sampler exists for it, runs only while something is
+            // watching it (Services/System/SystemStats.qml), and a machine with
+            // the card off never reads a value at either of these settings.
+            systemMonitor: {
+                // Seconds between samples. One is the readable maximum — a
+                // sparkline updating faster than that is a shimmer rather than
+                // a reading — and ten is a monitor that has become a summary.
+                // The floor is not zero for the obvious reason: a zero-interval
+                // timer is a busy loop reading four files.
+                intervalSeconds: { def: 1, coerce: c.integer(1, 10),
+                                   label: "Seconds between system samples" },
+
+                // Which filesystem the disk row is about. One and not all of
+                // them: a machine with fifteen mounts would need the card to
+                // choose anyway, and the one that matters is where the user's
+                // files are. A path that is not a mount point drops the row
+                // with a warning rather than showing a wrong number.
+                diskPath: { def: "/", coerce: c.path,
+                            label: "The filesystem the disk row is about" }
+            },
+
+            // The header, which is a person rather than a card: a name and a
+            // face beside the date (#9).
+            //
+            // Both default to empty and mean "work it out" rather than "leave it
+            // blank" — the shell knows the user's login name and where a
+            // desktop keeps a face, and a header that said nothing until it was
+            // configured would be a header nobody configures. They are keys at
+            // all because neither guess is always right: a login name is not a
+            // name, and an account picture is a per-machine file that
+            // settings.json travels away from.
+            profile: {
+                name: { def: "", coerce: c.string,
+                        label: "What the dashboard calls you" },
+                avatar: { def: "", coerce: c.path,
+                          label: "A picture for the dashboard header" }
+            }
         },
 
         notifications: {
@@ -465,7 +429,58 @@ QtObject {
         },
 
         weatherTime: {
-            // Location, units and clock format land with #50.
+            // **Still no clock-format key here, and that is now the only thing
+            // this section is missing.** This stub used to say it landed with
+            // #50; #50 built the weather half and left the clock alone, because
+            // its acceptance criteria are four and none of them is a clock —
+            // the ownership gap its own maintenance comment raised was never
+            // resolved either way. The interim rule lives in
+            // Core/ClockFormat.qml (locale-derived, no seconds) and is read by
+            // the bar and the dashboard header; Surfaces/Lock/LockPolicy.qml
+            // still holds a duplicate of it, pinned to that one by
+            // tests/tst_clockformat.qml. Collapsing the two and giving the
+            // format a key is what #93 has left, and #55's Weather & Time tab
+            // is where the control would go.
+
+            // The weather card (#50). Open-Meteo, keyless, and asked about one
+            // place — Services/Weather/WeatherPolicy.qml builds every URL these
+            // keys turn into.
+            weather: {
+                // A place name, geocoded once and then cached in `state.json`
+                // with the reading. `auto` is #9's optional IP-based mode.
+                //
+                // Empty is the default and it means **neither**: the card says
+                // it has not been told where it is, and no request is made.
+                // That is deliberately not the pattern `dashboard.profile.name`
+                // and `wallpaper.folder` use, where empty means "work it out" —
+                // working this one out means asking a geolocation service what
+                // this IP looks like, which is the one request this shell makes
+                // that tells a third party something rather than only asking it
+                // something. A shell does not make that request because nobody
+                // filled a field in; `auto` is how it is asked for.
+                place: { def: "", coerce: c.string,
+                         label: "The place the weather card is about" },
+
+                units: { def: "metric", coerce: c.oneOf(schema.weatherUnits),
+                         label: "Temperature and wind units" },
+
+                // How often a card left on screen re-fetches. Nothing polls
+                // behind a closed drawer at all (Services/Weather/Weather.qml),
+                // so this is the interval of an *open* dashboard — and the
+                // staleness threshold that decides whether opening one fetches.
+                // Thirty minutes is roughly how often the upstream model
+                // updates; the floor is five because a card refreshing faster
+                // than the forecast changes is a request that answers with the
+                // same numbers.
+                refreshMinutes: { def: 30, coerce: c.integer(5, 720),
+                                  label: "Minutes between weather refreshes" },
+
+                // Rows in the forecast strip, including today. Seven is the
+                // API's free ceiling; four is a strip that fits the 380px panel
+                // without the rows becoming columns of two characters.
+                days: { def: 4, coerce: c.integer(1, 7),
+                        label: "Days in the forecast strip" }
+            },
 
             // Night light (#44). Here rather than under `appearance` because
             // this is the section that will own sunset — the schedule #50
@@ -512,6 +527,99 @@ QtObject {
         },
 
         system: {
+            // The region picker (#51).
+            //
+            // **Here, and not in a tenth section.** #21 fixes the section list
+            // at nine and `tests/tst_settingstabs.qml` holds every section to a
+            // tab, so a top-level `screenshot` would be a section the GUI
+            // cannot reach — the constraint the OSD hit above, resolved the
+            // same way. This tab already owns the session's commands, the night
+            // light and the lock; a screenshot is the same kind of thing, a
+            // system-level action the shell performs rather than a surface it
+            // draws.
+            //
+            // All four have a row on the System tab (#55).
+            screenshot: {
+
+                // Where shots land. Empty means `~/Pictures/Screenshots`, worked
+                // out at use rather than baked in here: the default has to be
+                // relative to the running user's home, and a literal path in the
+                // schema would be written into every settings.json that ever
+                // travelled between machines.
+                //
+                // `~` is expanded by Services/Screenshot/ScreenshotPolicy.qml and
+                // not by a shell — nothing on this path goes through one — so a
+                // value with a space in it is safe and a value with a `~` in it
+                // works.
+                directory: { def: "", coerce: c.path },
+
+                // Whether the shot goes on the Wayland selection as well as to
+                // disk. On, because it is the thing most screenshots are for.
+                //
+                // Quickshell owns the selection for *text* with no subprocess, but
+                // 0.3.0 has no image equivalent, so this needs `wl-copy`. When it
+                // is absent the shell puts the file's *path* on the clipboard and
+                // says so in the log — a degraded answer rather than a silent one.
+                copyToClipboard: { def: true, coerce: c.boolean },
+
+                // The optional edit handoff. A tool name and not a boolean, because
+                // `satty` and `swappy` take the same `-f <file>` and choosing
+                // between them should not need a new key. Empty turns it off, which
+                // is a different outcome from "configured and not installed" and
+                // gets a different log line.
+                editor: { def: "swappy", coerce: c.string },
+
+                // Whether a drag's edges are pulled onto nearby window edges.
+                // On: it is the difference between a screenshot of a window and a
+                // screenshot of a window with four pixels of desktop down one side.
+                snapToWindows: { def: true, coerce: c.boolean }
+            },
+
+            // Screen recording (#52), beside the screenshot for the reason the
+            // note above gives — the same kind of thing, and there is no tenth
+            // section to put it in. It shares the picker with the screenshot
+            // too: a recorded region is the same drag.
+            //
+            // All six have a row on the System tab (#55), beside the
+            // screenshot's.
+            recording: {
+
+                // Where recordings land. Empty means `~/Videos/Recordings`,
+                // worked out at use for the reason the screenshot's directory
+                // is: a literal home path in the schema would be written into
+                // every settings.json that ever travelled between machines.
+                directory: { def: "", coerce: c.path },
+
+                // Which encoder. `auto` prefers the GPU one, which is the whole
+                // point of the ticket — a 60fps capture that costs a few
+                // percent of one core rather than a whole one.
+                //
+                // Naming an engine explicitly is a preference and not a demand:
+                // an engine that is missing falls through to the other and the
+                // shell says so, because the alternative is a machine that
+                // silently cannot record.
+                engine: { def: "auto", coerce: c.oneOf(schema.recordingEngines) },
+
+                // Frames per second. 60 rather than 30: the thing most screen
+                // recordings are of is a UI, and a UI at 30fps looks like the
+                // UI is stuttering rather than like the recording is.
+                framerate: { def: 60, coerce: c.integer(1, 240) },
+
+                // Desktop audio by default, which is what a recording of the
+                // shell wants. `both` is the commentary case and gets two
+                // tracks on the GPU encoder, so an editor can mute one.
+                audio: { def: "desktop", coerce: c.oneOf(schema.recordingAudio) },
+
+                // gpu-screen-recorder's preset, passed through untranslated.
+                // `very_high` is its own recommendation for screen content,
+                // where flat colour and sharp text punish a low bitrate far
+                // more visibly than camera footage does.
+                quality: { def: "very_high", coerce: c.oneOf(schema.recordingQualities) },
+
+                // The container, and therefore the file extension.
+                container: { def: "mp4", coerce: c.oneOf(schema.recordingContainers) }
+            },
+
             // The session drawer's four system actions (#38), next to the lock
             // below because they are the same menu: lock, log out, suspend,
             // restart, shut down.
@@ -593,8 +701,10 @@ QtObject {
             // Nor is the audio gate: it is on suspend only, and which stage a
             // rule applies to is not a setting.
             //
-            // JSON-only for now, which #9 permits for the long tail: the System
-            // tab is #55's, and these rows land with it.
+            // Every rung is editable on the System tab (#55), and a change
+            // applies without a restart: Services/System/Idle.qml binds this
+            // sub-tree, so writing a minute here rearms the monitor that reads
+            // it (tests/tst_idlepolicy.qml owns the conversion).
             idle: {
                 // Screen down to `level`, restored on the first activity. The
                 // backlight facade does it (#36), so this is one number rather

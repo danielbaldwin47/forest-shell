@@ -174,6 +174,44 @@ Singleton {
     /// focused window and nothing to say about one.
     readonly property bool hasActiveWindow: windows.showing(root.activeWindow)
 
+    // --- window geometry (#51) -----------------------------------------------
+    //
+    // The region picker snaps to window rectangles, and this is where it asks.
+    // Raw snapshots rather than filtered ones: which windows are worth snapping
+    // to is a decision, and it lives in Services/Screenshot/ScreenshotPolicy.qml
+    // where tests/ can pose a three-window desktop.
+
+    /// Every toplevel's own `hyprctl clients` snapshot — `at`, `size`,
+    /// `workspace`, `monitor`, `mapped`, `hidden`, `title`, `class`.
+    ///
+    /// Bound, never read imperatively: Hyprland's models populate
+    /// asynchronously and a read at `Component.onCompleted` answers zero with
+    /// every window on screen.
+    readonly property var toplevelSnapshots:
+        Hyprland.toplevels.values.map(toplevel => toplevel.lastIpcObject)
+
+    /// The focused monitor's snapshot — position, *native* size, scale, and
+    /// its active workspace. The size is native and the windows above are
+    /// logical; whoever divides is the caller's business, not this file's.
+    readonly property var monitorSnapshot:
+        Hyprland.focusedMonitor ? Hyprland.focusedMonitor.lastIpcObject : null
+
+    /// Ask the compositor to re-take those snapshots.
+    ///
+    /// **Mandatory before reading a rectangle off them**, and the same trap
+    /// `activeWindow` documents above from the other side: `lastIpcObject` is
+    /// refreshed only by an explicit call, so every window mapped since startup
+    /// carries a stale one — or an empty one. A picker that skipped this would
+    /// snap to where windows used to be, which is worse than not snapping,
+    /// because it looks like it worked.
+    ///
+    /// Asynchronous. The caller reads the snapshots on the far side of
+    /// something else — for the picker, the ~50ms the screen freeze takes.
+    function refreshWindowGeometry(): void {
+        Hyprland.refreshToplevels();
+        Hyprland.refreshMonitors();
+    }
+
     // One line per focused window, which is a keypress and not a frame — and
     // the evidence tools/services-harness.sh reads to check the module tracks
     // focus at all. Retitling is the same event class: a browser that renames

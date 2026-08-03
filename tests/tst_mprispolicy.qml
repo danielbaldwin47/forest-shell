@@ -114,4 +114,89 @@ TestCase {
         verify(!policy.showing("   "));
         verify(policy.showing("Reckoner"));
     }
+
+    // --- the dashboard's card (#49) ------------------------------------------
+
+    function test_a_position_reads_as_a_clock() {
+        compare(policy.clock(0), "0:00");
+        compare(policy.clock(7), "0:07");
+        compare(policy.clock(67), "1:07");
+        compare(policy.clock(599), "9:59");
+        // Seconds are padded and minutes are not: `3:7` is not a time, and
+        // `03:07` is not how a track length is written.
+        compare(policy.clock(187), "3:07");
+    }
+
+    function test_an_hour_long_track_grows_a_third_field() {
+        compare(policy.clock(3600), "1:00:00");
+        compare(policy.clock(3671), "1:01:11");
+        // A podcast, which is the case this exists for.
+        compare(policy.clock(7384), "2:03:04");
+    }
+
+    function test_a_position_the_player_did_not_give_is_zero_and_not_blank() {
+        // The label sits under the bar, so a disappearing one re-lays the card
+        // out on every track change.
+        compare(policy.clock(undefined), "0:00");
+        compare(policy.clock(null), "0:00");
+        compare(policy.clock(NaN), "0:00");
+        compare(policy.clock(-12), "0:00");
+        compare(policy.clock("not a number"), "0:00");
+    }
+
+    function test_a_fractional_second_is_not_shown_as_one() {
+        // MPRIS counts in microseconds and upstream hands back a double, so a
+        // position is almost never whole.
+        compare(policy.clock(66.9), "1:06");
+        compare(policy.clock(0.4), "0:00");
+    }
+
+    function test_the_progress_is_a_fraction_of_the_track() {
+        compare(policy.progress(0, 200), 0);
+        compare(policy.progress(50, 200), 0.25);
+        compare(policy.progress(200, 200), 1);
+    }
+
+    function test_a_position_outside_the_track_does_not_draw_outside_the_bar() {
+        // Both happen: a player reports past its own length on the last second
+        // of a track, and negative between two of them.
+        compare(policy.progress(260, 200), 1);
+        compare(policy.progress(-4, 200), 0);
+    }
+
+    function test_a_track_with_no_length_has_no_progress() {
+        // A live stream is not a fraction of anything, and neither is a
+        // division by zero.
+        compare(policy.progress(90, 0), 0);
+        compare(policy.progress(90, undefined), 0);
+        compare(policy.progress(undefined, 200), 0);
+        compare(policy.progress(90, -1), 0);
+    }
+
+    function test_dragging_the_bar_needs_all_three_answers() {
+        verify(policy.scrubbable(true, true, 200));
+        verify(!policy.scrubbable(false, true, 200));   // the player refuses seeks
+        verify(!policy.scrubbable(true, false, 200));   // it will not say where it is
+        verify(!policy.scrubbable(true, true, 0));      // there is no end to seek within
+    }
+
+    function test_a_player_that_answers_nothing_is_not_scrubbable() {
+        verify(!policy.scrubbable(undefined, undefined, undefined));
+        verify(!policy.scrubbable(true, true, "unknown"));
+    }
+
+    function test_a_click_across_the_bar_lands_inside_the_track() {
+        compare(policy.seekTarget(0, 200), 0);
+        compare(policy.seekTarget(0.5, 200), 100);
+        compare(policy.seekTarget(1, 200), 200);
+        // A pointer dragged off either end of the bar it started in.
+        compare(policy.seekTarget(-0.3, 200), 0);
+        compare(policy.seekTarget(1.4, 200), 200);
+    }
+
+    function test_a_seek_target_is_rounded_to_something_a_player_can_act_on() {
+        compare(policy.seekTarget(1 / 3, 200), 66.667);
+        compare(policy.seekTarget(0.5, 0), 0);
+        compare(policy.seekTarget(NaN, 200), 0);
+    }
 }

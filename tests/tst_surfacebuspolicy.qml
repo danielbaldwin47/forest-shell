@@ -53,10 +53,23 @@ TestCase {
     }
 
     function test_a_surface_nobody_declared_is_a_shell_bug_and_reads_like_one() {
-        verify(!policy.known("dashboard"));
-        compare(policy.absent("dashboard"), "no such surface: dashboard");
-        compare(policy.command("dashboard"), "");
+        // `dashboard` was the undeclared name until #49 declared it. The name
+        // used here has to be one that is *still* undeclared, or the check
+        // quietly becomes "a surface that exists reads as a shell bug".
+        verify(!policy.known("notepad"));
+        compare(policy.absent("notepad"), "no such surface: notepad");
+        compare(policy.command("notepad"), "");
         verify(policy.known("launcher"));
         verify(policy.known("controlcenter"));
+    }
+
+    function test_the_clock_can_reach_the_dashboard_by_name() {
+        // #49. The bar's clock dispatches through the bus like the launcher and
+        // control-centre buttons do, so the name it asks for has to be in this
+        // table — a clock that opened nothing would be the #81 shape all over
+        // again.
+        verify(policy.known("dashboard"));
+        compare(policy.command("dashboard"), "qs ipc call dashboard toggle");
+        verify(policy.callable(policy.surfaces.dashboard.verb));
     }
 }

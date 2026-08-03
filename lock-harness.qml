@@ -16,7 +16,7 @@
 // config root, and only from here does `qs.Surfaces.Lock` resolve to the real
 // lock.
 //
-//   qs-upstream -p lock-harness.qml   # inside the nested display
+//   qs -p lock-harness.qml   # inside the nested display
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell

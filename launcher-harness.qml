@@ -48,7 +48,7 @@
 // the config root, and only from here does `qs.Services.Launcher` resolve to
 // the real provider.
 //
-//   qs-upstream -p launcher-harness.qml   # inside the nested display
+//   qs -p launcher-harness.qml   # inside the nested display
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
@@ -175,14 +175,14 @@ ShellRoot {
         function calculatorReady(): bool { return Calculator.available; }
         function calculatorProbed(): bool { return Calculator.probed; }
 
-        // --- the clipboard ----------------------------------------------------
+        // --- Enter, and what it wrote -----------------------------------------
 
         /// Activate a row — the Enter path, minus the keystroke, exactly as
         /// `remember()` is for the apps provider.
         ///
-        /// Safe for the calculator and emoji providers, which copy. For the
-        /// actions provider see `runAction()` below; for apps this refuses,
-        /// because activating an app row launches it.
+        /// Safe for the calculator, emoji and clipboard providers, which copy.
+        /// For the actions provider see `runAction()` below; for apps this
+        /// refuses, because activating an app row launches it.
         function activate(query: string, index: int): bool {
             const list = harness.queryRows(query);
             if (index < 0 || index >= list.length)
@@ -199,7 +199,39 @@ ShellRoot {
         /// What is on the clipboard now. Read back through Quickshell rather
         /// than through a `wl-paste` subprocess, so the assertion is about the
         /// protocol the shell actually wrote to.
+        ///
+        /// Text only, and that is the protocol rather than a shortcut: an image
+        /// copy never passes through here — it is `cliphist decode` piped into
+        /// `wl-copy`, which then *holds* the offer — so the picture half of the
+        /// round trip is checked from outside, with `wl-paste --list-types`
+        /// against the nested display.
         function clipboard(): string { return Quickshell.clipboardText; }
+
+        // --- clipboard history (#53) ------------------------------------------
+        //
+        // The provider whose failure mode is silence. An absent `cliphist`, a
+        // watcher that was never started and a genuinely empty history all
+        // produce zero rows and zero bytes on stdout, so every question below is
+        // asked separately rather than inferred from an empty list (#78).
+
+        /// Whether the listing at startup found `cliphist`. The calculator's
+        /// `calculatorReady()`, and it cannot be a unit test for the same
+        /// reason: the answer comes from a spawn that may never have happened.
+        function clipboardReady(): bool { return Clipboard.available; }
+        function clipboardProbed(): bool { return Clipboard.probed; }
+
+        /// How many entries the last listing found. Distinct from the row count
+        /// for a query: a filter that matched nothing over a history of forty is
+        /// not an empty history, and only one of those two is worth a sentence
+        /// about the watcher.
+        function clipboardCount(): int { return Clipboard.count; }
+
+        /// The decoded thumbnail for an entry, as a file URL, or "". Arrives
+        /// after the row does — one `cliphist decode` per picture — so a script
+        /// polls this the way it polls the calculator's answer.
+        function clipboardThumbnail(id: string): string {
+            return String(Clipboard.thumbnails[id] ?? "");
+        }
 
         // --- the actions ------------------------------------------------------
 

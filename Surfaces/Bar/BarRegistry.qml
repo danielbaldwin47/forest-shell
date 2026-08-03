@@ -26,9 +26,10 @@ QtObject {
     /// the two modules that make the bar usable, #36 the status cluster, the
     /// battery and the optional brightness readout, and #37 the rest — the
     /// tray, media, active window, keyboard layout and the two surface
-    /// buttons, and #43 the notification indicator that completes them. What
-    /// is left are the three other off-by-default optionals (system monitor,
-    /// night light, recorder).
+    /// buttons, and #43 the notification indicator that completes them. #50
+    /// added the system-monitor readout, which rides on the dashboard card's
+    /// sampler, and #52 the recording dot. What is left is the last
+    /// off-by-default optional, the night light.
     ///
     /// `status` is one entry and not four: #9 groups network, bluetooth, volume
     /// and mic into a single quiet icon cluster, and four entries would let a
@@ -53,7 +54,16 @@ QtObject {
         notifications: { file: "NotificationIndicator.qml", label: "Notifications" },
         // Shipped, and in no default list (#9). A module that is off is a
         // module no cluster names — see the note on enablement above.
-        brightness: { file: "Brightness.qml", label: "Brightness" }
+        brightness: { file: "Brightness.qml", label: "Brightness" },
+        // #50, and the one optional module with a running cost: it holds a
+        // subscription on Services/System/SystemStats.qml for as long as it is
+        // on the bar, which is the sampler the dashboard card starts and stops.
+        systemMonitor: { file: "SystemMonitor.qml", label: "System monitor" },
+        // #52, and the one module that is invisible even when it is on: the dot
+        // has nothing to say until something is recording. The file is not
+        // `Recorder.qml` for the same reason the notification one is not
+        // `Notifications.qml` — it would shadow the service singleton it reads.
+        recorder: { file: "RecorderIndicator.qml", label: "Screen recorder" }
     })
 
     readonly property var clusters: ["left", "center", "right"]

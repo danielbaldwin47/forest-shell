@@ -125,4 +125,85 @@ QtObject {
     function showing(label: var): bool {
         return policy.clean(label) !== "";
     }
+
+    // --- the dashboard's card (#49) ------------------------------------------
+    //
+    // The bar's pill is one glyph and a title; the dashboard's card is the whole
+    // player — cover art, two lines of text, three transport buttons and a track
+    // position you can drag. The three decisions the position brings with it are
+    // here, because every one of them is arithmetic on numbers that arrive from
+    // another application and are routinely absent, negative or nonsense.
+
+    /// A track position or length as a clock: `m:ss`, and `h:mm:ss` once there
+    /// is an hour in it. Minutes are unpadded because that is how a duration is
+    /// written and how every player writes it; seconds always are, because
+    /// `3:7` is not a time.
+    ///
+    /// Anything that is not a usable number — a missing property, a NaN out of
+    /// a division, the negative a player reports between tracks — is `0:00`
+    /// rather than blank: this sits under a progress bar, and a label that
+    /// disappears re-lays the card out every time a track changes.
+    function clock(seconds: var): string {
+        const total = Number(seconds);
+        if (!isFinite(total) || total <= 0)
+            return "0:00";
+
+        const whole = Math.floor(total);
+        const s = whole % 60;
+        const m = Math.floor(whole / 60) % 60;
+        const h = Math.floor(whole / 3600);
+        const pad = value => (value < 10 ? "0" : "") + value;
+
+        return h > 0 ? h + ":" + pad(m) + ":" + pad(s) : m + ":" + pad(s);
+    }
+
+    /// How far through the track, 0 to 1, for the width of a filled bar.
+    ///
+    /// Clamped at both ends rather than trusted: a player that reports a
+    /// position past its own length — which happens on the last second of a
+    /// track, and permanently on streams whose length is a guess — would
+    /// otherwise draw a fill wider than the bar it is inside, and a negative one
+    /// would draw it backwards.
+    ///
+    /// A length of zero is 0 and not a division: a live stream has no end to be
+    /// a fraction of.
+    function progress(position: var, length: var): real {
+        const at = Number(position);
+        const total = Number(length);
+        if (!isFinite(at) || !isFinite(total) || total <= 0)
+            return 0;
+        return Math.max(0, Math.min(1, at / total));
+    }
+
+    /// Whether the bar can be *dragged* — an absolute seek, which is what a
+    /// progress bar under a finger means.
+    ///
+    /// Three conditions and all of them necessary: the player has to allow
+    /// seeking at all, it has to report a position (upstream refuses the write
+    /// otherwise, and a bar that jumps back to zero on release is worse than one
+    /// that does not move), and there has to be a length for a fraction of the
+    /// bar to mean a time.
+    ///
+    /// A player that fails this still gets the bar, drawn and inert — where it
+    /// is up to is worth showing even where it cannot be changed.
+    function scrubbable(canSeek: var, positionSupported: var, length: var): bool {
+        return canSeek === true && positionSupported === true
+            && isFinite(Number(length)) && Number(length) > 0;
+    }
+
+    /// Where a click at `fraction` across the bar lands, in seconds.
+    ///
+    /// Clamped into the track, because the fraction comes from a pointer that
+    /// can be dragged past either end of the bar it started in — and rounded to
+    /// the millisecond MPRIS counts in, so the number handed back is one a
+    /// player can act on rather than a float with a tail on it.
+    function seekTarget(fraction: var, length: var): real {
+        const total = Number(length);
+        if (!isFinite(total) || total <= 0)
+            return 0;
+        const at = Number(fraction);
+        if (!isFinite(at))
+            return 0;
+        return Math.round(Math.max(0, Math.min(1, at)) * total * 1000) / 1000;
+    }
 }

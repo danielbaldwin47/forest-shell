@@ -67,6 +67,22 @@ QtObject {
             sessionId: { def: "", coerce: c.string }
         },
 
+        theme: {
+            // Which preset was last applied (#56). A breadcrumb and nothing
+            // more: applying a theme *copies* its keys into settings.json, so
+            // the skin is already in the config and this only names where it
+            // came from. Nothing reads it but the list, which ticks that row —
+            // and stops ticking it the moment a knob is moved afterwards.
+            //
+            // State rather than config for the reason the file's header gives:
+            // this is shell-authored churn, and the setup it would otherwise
+            // travel with is the copied keys, which travel by themselves. A
+            // settings.json carried to another machine takes the look with it
+            // and leaves the label behind, which is the honest answer — the
+            // theme file it names may not exist over there.
+            lastApplied: { def: "", coerce: c.string }
+        },
+
         seen: {
             // Suppresses the what's-new notice for a version already read.
             changelogVersion: { def: "", coerce: c.string }

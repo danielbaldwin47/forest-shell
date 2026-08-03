@@ -133,31 +133,54 @@ QtObject {
     readonly property var lightFallbackRoles: colorRoles.filter(
         role => lightSeed[role] === undefined)
 
-    /// The colour table for one mode, with user overrides applied.
+    /// The colour table for one mode, with the wallpaper-coupled layer and then
+    /// the user's overrides applied.
     ///
     /// Always returns every role in `colorRoles`, so consumers are mode-blind:
-    /// nothing downstream ever tests which palette it got.
+    /// nothing downstream ever tests which palette it got, and in particular
+    /// nothing downstream can tell whether a theming mode is running.
     ///
-    /// `overrides` is `appearance.paletteOverrides` — a role → colour map. An
+    /// Three layers, bottom to top:
+    ///
+    ///   1. the row for the mode — the design system as shipped;
+    ///   2. `dynamic` — `appearance.dynamic`, what a wallpaper-coupled mode
+    ///      computed on this machine (#58, #59). Empty in fixed-forest mode, so
+    ///      the shipped look is the shipped row unchanged;
+    ///   3. `overrides` — `appearance.paletteOverrides`, the user's own.
+    ///
+    /// The user is on top of the wallpaper on purpose: someone who has written
+    /// a role down by hand has said something more specific than a sampler can,
+    /// and a mode that overwrote it would make the field in the settings window
+    /// look broken.
+    ///
+    /// Both maps are role → colour and both are checked the same way: an
     /// unknown role or an unparseable colour is dropped with a warning rather
-    /// than poisoning the palette, because it arrives from a hand-edited file.
-    function palette(darkMode: bool, overrides: var): var {
+    /// than poisoning the palette, because one arrives from a hand-edited file
+    /// and the other from a file the shell wrote and the user may since have
+    /// edited.
+    function palette(darkMode: bool, overrides: var, dynamic: var): var {
         const out = {};
         for (const role of colorRoles)
             out[role] = (darkMode ? undefined : lightSeed[role]) ?? dark[role];
 
-        if (overrides)
-            for (const role in overrides) {
+        // Named, because the two layers live in different keys and a warning
+        // that pointed at `paletteOverrides` for a bad role in `dynamic` would
+        // send someone to edit a key that has nothing wrong with it.
+        for (const [name, layer] of [["dynamic", dynamic], ["overrides", overrides]]) {
+            if (!layer)
+                continue;
+            for (const role in layer) {
                 if (out[role] === undefined) {
-                    console.warn("Theme: unknown palette role in overrides:", role);
+                    console.warn("Theme: unknown palette role in", name + ":", role);
                     continue;
                 }
-                if (!isColor(overrides[role])) {
-                    console.warn("Theme: not a colour:", role, "=", overrides[role]);
+                if (!isColor(layer[role])) {
+                    console.warn("Theme: not a colour:", role, "=", layer[role]);
                     continue;
                 }
-                out[role] = overrides[role];
+                out[role] = layer[role];
             }
+        }
 
         return out;
     }

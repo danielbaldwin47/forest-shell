@@ -1,20 +1,29 @@
 # Settings
 
 The settings window ([#54](https://github.com/danielbaldwin47/forest-shell/issues/54)
-builds the frame and four tabs; [#55](https://github.com/danielbaldwin47/forest-shell/issues/55)
-builds the other six).
+built the frame and four tabs; [#55](https://github.com/danielbaldwin47/forest-shell/issues/55)
+built the other six, so all ten are live).
 
 | File | What |
 | --- | --- |
 | `SettingsWindow.qml` | Singleton: who may open the window, and the `settings` IPC target |
 | `SettingsView.qml` | The `FloatingWindow` — tab rail on the left, one page on the right |
 | `SettingsTabs.qml` | The ten tabs as pure data. No Quickshell imports; `tests/` loads it |
+| `AboutFacts.qml` | The version, the credits, and the changelog-seen rule. Also pure data |
 | `Controls/` | The config-bound form kit, shared by every tab |
 | `Tabs/` | The implemented tabs, plus the parts only one tab uses |
 
-`BarModuleCluster.qml` and `NotificationRuleRow.qml` live in `Tabs/` rather than
-`Controls/` on purpose: each is one tab's editor for one key, not a form control
-anything else could hold. A second caller is what moves a file up to `Controls/`.
+`NotificationRuleRow.qml`, `IdleStage.qml` and `ThemeSection.qml` live in
+`Tabs/` rather than `Controls/` on purpose: each is one tab's editor for one key
+group, not a form control anything else could hold. `ThemeSection.qml` is the
+theme list ([#56](https://github.com/danielbaldwin47/forest-shell/issues/56)) —
+it holds the window's one free-text field that is not a config key, since a
+theme name is not in `settings.json` at all, and every file it touches belongs
+to `Core/Themes.qml`. A second caller is what moves a file up to
+`Controls/`, and that is exactly what happened to `OrderedList.qml`: it was the
+Bar tab's `BarModuleCluster.qml` until #55 gave it two more callers — the
+dashboard's cards and the control centre's grid are the same shape, an ordered
+list of names where membership is the enable flag.
 
 ## Opening it
 
@@ -30,9 +39,6 @@ qs ipc call settings close
 qs ipc show                            # the whole external surface
 ```
 
-Neither the control centre nor the launcher exists yet, so the IPC target is
-currently the only way in — and the way the ticket's first acceptance criterion
-is exercised until they land and call the same functions.
 `tools/settings-harness.sh` drives all of it inside a nested Hyprland.
 
 There is deliberately no `show` on the IPC surface
@@ -94,10 +100,19 @@ Space toggles each: there is no "the choice" for an arrow key to move.
   this, three chips on the Appearance tab were off the right edge of the
   window).
 
-  `Tabs/BarModuleCluster.qml` and `Tabs/NotificationRuleRow.qml` were audited
+  `Controls/OrderedList.qml` and `Tabs/NotificationRuleRow.qml` were audited
   for the same shape and do not have it: neither sits in a `SettingRow` slot,
   and in both the text column is the one on `Layout.fillWidth` and elides, so
   the controls beside it keep their width and stay on screen.
+
+  The rule cuts the other way too, which #55's System tab is what found: a
+  control that is *narrower* than what the slot allows and cannot show its value
+  is the same bug seen from the other side. Every session command was longer
+  than `SettingText`'s flat 132px box, so the tab that configures what ends your
+  session read `tl dispatch exit`. A field now sizes to the value it holds,
+  clamped by `slotCeiling` — and clamped with `Math.min` rather than assigned,
+  because the slot's implicit width is its child's and a control that *takes*
+  the ceiling widens the row that computed it.
 
 ## Why `Controls/` is not in `Widgets/`
 

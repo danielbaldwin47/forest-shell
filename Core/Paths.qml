@@ -19,9 +19,19 @@ Singleton {
     // User intent — hand-editable, hot-reloaded. Owned by Core/Config.qml.
     readonly property string settingsFile: configDir + "/settings.json"
 
+    // Saved skins (#56), beside the settings they are fragments of: a theme is
+    // a file the user may hand-write, copy between machines and keep in a dotfile
+    // repo, which is the same claim `settings.json` makes.
+    readonly property string themesDir: configDir + "/themes"
+
     // Ephemera (last tab, session ids, DND) — never mixed into settings.json.
     readonly property string stateDir: Quickshell.stateDir
     readonly property string stateFile: stateDir + "/state.json"
+
+    // The undo slot behind "Previous settings" (#56): what the skin was just
+    // before the last apply. State and not config — it is written by the shell,
+    // for the shell, and losing it costs one press of undo.
+    readonly property string previousThemeFile: stateDir + "/previous-theme.json"
 
     // Where every `claude -p` turn runs (#41). It is a directory and not a
     // detail: the CLI scopes session lookup to the working directory, so two
@@ -29,6 +39,14 @@ Singleton {
     // stable, and deliberately not the checkout — a git repository widens the
     // lookup across worktrees in ways nothing here can predict.
     readonly property string claudeDir: stateDir + "/claude"
+
+    // Clipboard thumbnails, decoded out of cliphist (#53). Cache and not state:
+    // every file in here is reproducible from the history in one `cliphist
+    // decode`, so losing the lot costs one decode per picture and nothing else.
+    // That is the whole difference between this directory and `stateDir`, and it
+    // is why a `rm -rf` of it is a supported thing to do.
+    readonly property string cacheDir: Quickshell.cacheDir
+    readonly property string clipboardDir: cacheDir + "/clipboard"
 
     // QML `source` properties want a URL, not a path. Percent-encoding is not
     // optional: a wallpaper living in a directory with a `#` in its name parses

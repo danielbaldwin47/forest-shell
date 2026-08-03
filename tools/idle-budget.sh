@@ -35,7 +35,9 @@
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-QS_BIN="${QS_BIN:-qs-upstream}"   # #14/#15: upstream prefix until the swap (#57)
+# shellcheck source=qs-runtime.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
+
 SECONDS_WINDOW=195
 ENTRY="shell.qml"
 KEEP=0
@@ -62,8 +64,10 @@ LOG=$(mktemp -t forest-idle.XXXXXX.log)
 # QSG_RENDER_TIMING makes the scenegraph print a line per rendered frame. It is
 # the only way to count repaints from outside, and it costs a printf per frame —
 # which is why it is here and not in the shell.
+QS_RUNTIME=$(qs_runtime_bin) || exit 1
+
 QSG_RENDER_TIMING=1 QT_ASSUME_STDERR_HAS_CONSOLE=1 \
-    "$QS_BIN" -p "$ENTRY" > "$LOG" 2>&1 &
+    "$QS_RUNTIME" -p "$ENTRY" > "$LOG" 2>&1 &
 SHELL_PID=$!
 
 cleanup() {

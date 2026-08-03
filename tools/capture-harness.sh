@@ -21,11 +21,15 @@
 #   tools/capture-harness.sh out.png --surface bar-full --session   # with modules
 #   tools/capture-harness.sh out.png --surface lock --session --lock-state summoned
 #   tools/capture-harness.sh out.png --surface settings --session --tab appearance
+#   tools/capture-harness.sh out.png --surface settings --tab system --scroll 900
 #   tools/capture-harness.sh out.png --surface drawer --session   # the fog scrim
 #   tools/capture-harness.sh out.png --surface launcher --session # the clearing
 #   tools/capture-harness.sh out.png --surface center --session   # the notification centre
+#   tools/capture-harness.sh out.png --surface dashboard --session # the dashboard
 #   tools/capture-harness.sh out.png --surface osd --session      # the OSD pill
 #   tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
+#   tools/capture-harness.sh out.png --surface screenshot           # the region picker
+#   tools/capture-harness.sh out.png --surface screenshot --pick window
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
@@ -55,12 +59,20 @@
 # --surface picks what is rendered: `bar` is the fill over the wallpaper (the
 # composite #79 measures), `bar-full` is the whole bar including its module
 # clusters, `lock` is the lock surface (`--lock-state summoned` reveals the
-# field), `settings` is the settings window at the tab `--tab` names, and
+# field), `settings` is the settings window at the tab `--tab` names — scrolled
+# down `--scroll <px>` first, because the System tab is several windows tall and
+# a capture of its first screen is not a capture of the tab — and
 # `drawer` is #38's fog scrim with the session menu in it, laid out below the
 # bar the way the compositor lays it out — the picture that answers "scrim at
 # 0.10, bar above the fog". Its icons need `--session`. `osd` is #46's pill,
 # placed where the settings' position key puts it and posed with `--osd
-# channel[:percent[:muted]]`; its glyph needs `--session` too.
+# channel[:percent[:muted]]`; its glyph needs `--session` too. `dashboard` is
+# #49's panel under the clock, posed with a fixed day and a fixed player so the
+# same picture is taken twice — its glyphs need `--session` as well.
+# `screenshot` is #51's region picker over a frozen screen, posed with `--pick
+# region` (a drawn selection and its readout) or `--pick window` (the highlight
+# a click would take). It is the one surface with no glyph in it at all, so the
+# default offscreen mode judges it completely and `--session` buys nothing.
 #
 # --contrast runs tools/measure-contrast.py over the strip the bar occupies
 # (skipping the 1px hairline row) against Theme.textSecondary #a9b8b0 — the
@@ -98,7 +110,8 @@
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-QS_BIN="${QS_BIN:-qs-upstream}" # #14/#15: upstream prefix until the swap (#57)
+# shellcheck source=qs-runtime.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
 
 OUT=""
 WALLPAPER=""
@@ -110,11 +123,13 @@ SURFACE="bar"
 SESSION=0
 LOCK_STATE="quiet"
 SETTINGS_TAB=""
+SETTINGS_SCROLL="0"
 LAUNCHER_QUERY=""
 CLAUDE_TRANSCRIPT=""
 DRILL=""
 OSD_STATE="volume:45"
 OSD_SET=0
+PICK=""
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -133,15 +148,18 @@ while (( $# )); do
         --session)     SESSION=1; shift ;;
         --lock-state)  LOCK_STATE="$2"; shift 2 ;;
         --tab)         SETTINGS_TAB="$2"; shift 2 ;;
+        --scroll)      SETTINGS_SCROLL="$2"; shift 2 ;;
         --query)       LAUNCHER_QUERY="$2"; shift 2 ;;
         --transcript)  CLAUDE_TRANSCRIPT="$2"; shift 2 ;;
         --drill)       DRILL="$2"; shift 2 ;;
+        --pick)
+            PICK="${2:-}"; shift 2 ;;
         --osd)         OSD_STATE="$2"; OSD_SET=1; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
-        --help|-h)     sed -n '2,75p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,108p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -181,9 +199,21 @@ case "${OSD_STATE%%:*}" in
     *) echo "unknown OSD channel: ${OSD_STATE%%:*} (volume, mic, brightness)" >&2; exit 2 ;;
 esac
 
+# `--pick` only means anything on the picker, and it names a state the overlay
+# can actually be in: a silently ignored flag is a capture of the wrong thing
+# that looks right.
+if [[ -n "$PICK" ]]; then
+    [[ "$SURFACE" == screenshot ]] || {
+        echo "--pick only applies to --surface screenshot" >&2; exit 2; }
+    case "$PICK" in
+        region|window) ;;
+        *) echo "unknown pick state: $PICK (region, window)" >&2; exit 2 ;;
+    esac
+fi
+
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|osd) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, osd)" \
+    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd|screenshot) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd, screenshot)" \
            >&2; exit 2 ;;
 esac
 
@@ -249,7 +279,7 @@ EOF
 fi
 [[ -f "$WALLPAPER" ]] || { echo "no such wallpaper: $WALLPAPER" >&2; exit 2; }
 
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$SCRATCH/cache"
 # The wallpaper picker's folder (#45). Defaults to the one the deterministic
 # wallpaper above was written into, so `--drill wallpaper` has exactly one
 # thumbnail to draw and the picture is the same on every machine — the folder
@@ -272,15 +302,34 @@ cat > "$SCRATCH/offscreen.json" <<EOF
                  "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1 } ] }
 EOF
 
+# The clipboard list (#53), seeded so `--surface launcher --query ';'` draws the
+# same rows on every machine — the argument the generated wallpaper above makes,
+# and a sharper one: cliphist's store lives under `XDG_CACHE_HOME`, so a capture
+# without the scratch cache in CAPTURE_ENV below would render the caller's own
+# clipboard history into a PNG. Two entries, because the picture worth looking at
+# is a text row and an image row in the same list.
+if [[ "$SURFACE" == launcher && "$LAUNCHER_QUERY" == \;* ]]; then
+    if command -v cliphist >/dev/null 2>&1; then
+        printf 'git push --force-with-lease' \
+            | XDG_CACHE_HOME="$SCRATCH/cache" cliphist store
+        XDG_CACHE_HOME="$SCRATCH/cache" cliphist store < assets/noise.png
+        note 'seeded a scratch clipboard history (one text entry, one image)'
+    else
+        note 'no cliphist — the clipboard rows will be the empty-history line'
+    fi
+fi
+
 CAPTURE_ENV=(
     XDG_CONFIG_HOME="$SCRATCH/config" XDG_STATE_HOME="$SCRATCH/state"
+    XDG_CACHE_HOME="$SCRATCH/cache"
     CAPTURE_OUT="$OUT" CAPTURE_BAR_OPACITY="$BAR_OPACITY"
     CAPTURE_BAR_CLAMP="$( ((UNCLAMPED)) && echo 0 || echo 1 )"
     CAPTURE_SURFACE="$SURFACE" CAPTURE_W="$W" CAPTURE_H="$H"
     CAPTURE_LOCK_STATE="$LOCK_STATE" CAPTURE_SETTINGS_TAB="$SETTINGS_TAB"
+    CAPTURE_SETTINGS_SCROLL="$SETTINGS_SCROLL"
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
     CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
-    CAPTURE_OSD="$OSD_STATE"
+    CAPTURE_OSD="$OSD_STATE" CAPTURE_PICK="$PICK"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.
@@ -291,8 +340,10 @@ else
                  "${CAPTURE_ENV[@]}")
 fi
 
+QS_RUNTIME=$(qs_runtime_bin) || exit 1
+
 LOG="$SCRATCH/shell.log"
-env "${CAPTURE_ENV[@]}" timeout 30 "$QS_BIN" -p capture-harness.qml > "$LOG" 2>&1
+env "${CAPTURE_ENV[@]}" timeout 30 "$QS_RUNTIME" -p capture-harness.qml > "$LOG" 2>&1
 rc=$?
 
 SAVED=$(grep -a 'capture: saved=' "$LOG" || true)

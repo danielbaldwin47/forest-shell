@@ -1,5 +1,10 @@
-// A tab whose controls have not been built yet (#54 ships four of ten; #55
-// builds the rest).
+// A tab whose controls have not been built yet.
+//
+// Nothing reaches this today: #54 built four tabs and #55 the other six, so
+// every id in the registry has a page. It stays because it is what `pageFor`
+// falls through to and what the `built` flag selects — an eleventh tab landing
+// half-built should say so on a navigable page rather than open an empty one,
+// which is the state this component exists to make impossible.
 //
 // Navigable rather than hidden, and not empty: it lists whatever keys the
 // section already has, with their live values, so the tab is a true statement
@@ -18,9 +23,7 @@ import qs.Surfaces.Settings.Controls
 TabPage {
     id: page
 
-    // Every unbuilt tab is #55's — the ticket list is not a per-tab property,
-    // because there is exactly one ticket and it builds all six.
-    blurb: "Not built yet — #55. The keys below are live: edit "
+    blurb: "No controls for this one yet. The keys below are live: edit "
            + "`~/.config/forest-shell/settings.json` and the shell picks them up as you "
            + "save."
 

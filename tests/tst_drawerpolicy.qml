@@ -66,8 +66,26 @@ TestCase {
         // The bus already logs the miss (Core/SurfaceBusPolicy.qml). What must
         // not happen is the open drawer closing because someone pressed a
         // button for a surface that has not landed.
-        compare(policy.next("session", "dashboard"), "session");
-        compare(policy.next("", "dashboard"), "");
+        //
+        // The name was `dashboard` until #49 landed it, which is the hazard
+        // this check has to be written against: an unbuilt name that quietly
+        // becomes a built one turns this into "a toggle for a drawer that
+        // exists does nothing", which is the opposite claim and passes for the
+        // wrong reason. `notepad` is not on any build plan; move it again if it
+        // ever is.
+        compare(policy.next("session", "notepad"), "session");
+        compare(policy.next("", "notepad"), "");
+    }
+
+    function test_the_dashboard_is_the_fifth_tenant() {
+        // #49, and the reason the check above had to move: the clock opens it,
+        // so a toggle for it now has to *change* something.
+        verify(policy.known("dashboard"));
+        compare(policy.next("", "dashboard"), "dashboard");
+        compare(policy.next("dashboard", "dashboard"), "");
+        // And it swaps with its neighbours rather than stacking under them.
+        compare(policy.next("controlcenter", "dashboard"), "dashboard");
+        compare(policy.next("dashboard", "launcher"), "launcher");
     }
 
     // --- which screen --------------------------------------------------------

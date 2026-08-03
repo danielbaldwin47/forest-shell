@@ -24,6 +24,12 @@
 #   8b-8d. the launcher, the notification centre and the control centre are
 #      real tenants: each registers, opens, agrees it is open, and *swaps* with
 #      another rather than taking the fog down between them
+#   8i. the dashboard is the fifth (#49): it registers, opens, stacks the cards
+#      the config named, builds its media card from the player on the bus, and
+#      seeks it to a point in the track. Since #50 it also carries the two data
+#      cards, and the sampler behind one of them is a *lifecycle*: nothing
+#      samples the machine at startup, the system-monitor card starts the
+#      sampler when it appears, and closing the dashboard stops it again
 #   8e. the four service facades #44 added come up and say so
 #   8f. every control-centre toggle is wired: each press logs what it asked for
 #      and the facade answers — working or refusing
@@ -57,7 +63,7 @@
 # ydotool), so the keyboard path is a `--keep` step:
 #
 #   tools/drawer-harness.sh --keep
-#   qs-upstream -p shell.qml ipc call session open   # in the nested session
+#   qs -p shell.qml ipc call session open   # in the nested session
 #   ...press Escape in it, and look for `drawers: session closed (escape)`
 #
 # tools/settings-harness.sh can press keys only because the settings window is
@@ -135,6 +141,29 @@ SCRATCH="$NESTED_WORK/xdg"
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
 SETTINGS_FILE="$SCRATCH/config/forest-shell/settings.json"
 NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+
+# A player on the session bus, for the dashboard's media card (#49): a card that
+# is absent with nothing playing — which is the shipped behaviour and the right
+# one — cannot be checked on a machine that is not playing anything. The fixture
+# carries a length, a cover and `CanSeek`, which is what makes "cover art,
+# transport, seek if the player allows" a thing this seam can ask about at all.
+#
+# Started before the shell, so the facade sees it at construction rather than as
+# a player arriving mid-run, and guarded on the bindings being installed — the
+# rest of this harness has to run on a machine without them.
+FAKE_CLIENTS_PID=""
+if python3 -c 'import dbus, gi' 2>/dev/null; then
+    python3 "$(dirname "${BASH_SOURCE[0]}")/fake-dbus-clients.py" mpris \
+        > "$NESTED_WORK/fake-clients.log" 2>&1 &
+    FAKE_CLIENTS_PID=$!
+    nested_await "$NESTED_WORK/fake-clients.log" 'mpris org.mpris' 5 || true
+    nested_note 'a fake media player is on the session bus'
+    # Chained onto the teardown the nested session installed, not over it: a
+    # trap that replaced it would leave a nested Hyprland running.
+    trap 'kill "$FAKE_CLIENTS_PID" 2>/dev/null; nested_down' EXIT
+else
+    nested_note 'no python dbus bindings — the dashboard checks read the empty case'
+fi
 
 nested_shell shell.qml 'drawers armed' || exit 1
 
@@ -272,20 +301,24 @@ fi
 
 # --- 8. a drawer nobody built leaves the open one alone ----------------------
 #
-# The dashboard is declared and unbuilt (#49). Reaching for it has to be a
-# no-op — what must not happen is the open drawer closing because someone
-# reached for a surface that is not there.
+# Reaching for a drawer that does not exist has to be a no-op — what must not
+# happen is the open drawer closing because someone reached for a surface that
+# is not there.
 #
 # This was `launcher` until #39 landed and made it a real drawer, then
-# `controlcenter` until #44 did the same, which is the hazard the check has to
-# be written against: the unbuilt name has to be one that is *still* unbuilt, or
-# the assertion quietly becomes "a toggle for a drawer that exists does
-# nothing", which is the opposite claim and passes for the wrong reason. When
-# #49 lands, move this to the next unbuilt name rather than deleting it.
+# `controlcenter` until #44 did the same, then `dashboard` until #49 did, which
+# is the hazard the check has to be written against: the unbuilt name has to be
+# one that is *still* unbuilt, or the assertion quietly becomes "a toggle for a
+# drawer that exists does nothing", which is the opposite claim and passes for
+# the wrong reason.
+#
+# #49 was the last tenant the build plan names, so the name below is an invented
+# one rather than the next ticket's. If a sixth drawer is ever called `notepad`,
+# move this again rather than deleting it.
 
 ipc open > /dev/null
 mark=$(log_lines)
-nested_ipc call dashboard toggle > /dev/null 2>&1
+nested_ipc call notepad toggle > /dev/null 2>&1
 expect_quiet_since "$mark" 'drawers: session closed' \
     'a toggle for an unbuilt drawer leaves the open one alone'
 ipc close > /dev/null
@@ -426,6 +459,171 @@ if nested_ipc show | sed -n '/^target controlcenter$/,/^target /p' \
     nested_fail 'the controlcenter target advertises show(), which the CLI cannot call'
 else
     nested_pass 'the controlcenter target does not advertise an uncallable show()'
+fi
+
+# --- 8i. the dashboard is the fifth tenant -----------------------------------
+#
+# #49, and the last drawer the build plan names. `dashboard`, lowercase and one
+# word, which is the spelling Core/SurfaceBusPolicy.qml wrote down for the bar's
+# *clock* — the module that opens it. A rename here is a clock that stops
+# opening anything.
+
+if grep -qa 'surfaces: dashboard registered (qs ipc call dashboard toggle)' \
+        "$NESTED_SHELL_LOG"; then
+    nested_pass 'the dashboard registered on the surface bus'
+else
+    nested_fail 'the dashboard never registered on the surface bus'
+fi
+
+if nested_ipc show | grep -qa '^target dashboard$'; then
+    nested_pass 'the dashboard owns the `dashboard` ipc target'
+else
+    nested_fail 'there is no `dashboard` ipc target'
+fi
+
+# #50's first acceptance criterion, checked *before* the panel is ever opened:
+# no sampling and no network at startup. The weather service is on the deferred
+# list and the sampler is deliberately not (Core/ServiceInit.qml) — so at this
+# point in the session the weather has read its cache and said so, and nothing
+# has read /proc even once.
+if grep -qa 'sysmon: sampling every' "$NESTED_SHELL_LOG"; then
+    nested_fail 'the system monitor was sampling before anything opened the dashboard'
+else
+    nested_pass 'nothing sampled the machine at startup'
+fi
+
+if grep -qa 'weather: no place configured' "$NESTED_SHELL_LOG"; then
+    nested_pass 'the weather service came up at the deferred stage without fetching'
+else
+    nested_fail 'the weather service never announced itself at the deferred stage'
+fi
+
+mark=$(log_lines)
+nested_ipc call dashboard toggle > /dev/null
+expect_since "$mark" 'drawers: dashboard opened on ' \
+    'ipc call dashboard toggle opens the dashboard'
+
+# The panel's own line, and the reason it exists: it is the evidence that the
+# stack was assembled from `dashboard.cards` rather than drawn from a hardcoded
+# list. The four names are asserted, because unlike the control centre's tiles
+# they do not depend on this machine's hardware — the shipped default is #9's
+# inventory in its order.
+expect_since "$mark" 'dashboard: 4 card\(s\): calendar, weather, systemMonitor, media' \
+    'the dashboard stacked the cards the config named, in the config order'
+
+# The weather card with nowhere configured, which is the state a fresh install
+# is in and the one the nested session runs in: it says so rather than sitting
+# blank, and — the point — it puts nothing on the wire. The auto mode is opt-in
+# (Core/SettingsSchema.qml at `weatherTime.weather.place`), so a shell nobody has
+# configured never asks a geolocation service anything.
+expect_since "$mark" 'dashboard: weather unset' \
+    'the weather card says it has not been told where it is'
+
+# The sampler, and the whole reason it is a subscription: it starts when the
+# card that needs it appears, and #50's acceptance criterion is that it stops
+# again. This is the first half.
+expect_since "$mark" 'sysmon: sampling every [0-9]+ms for 1 watcher\(s\)' \
+    'the system monitor card started the sampler when it appeared'
+
+# What the machine answered. The row count is not asserted: a machine with no
+# thermal sensor gets three rows and one with a sensor gets four, and both are
+# real answers (Services/System/SystemStatsPolicy.qml drops the row rather than
+# dashing it).
+expect_since "$mark" 'dashboard: system monitor [0-9]+ row\(s\)' \
+    'the system monitor card built its rows from the sampler'
+
+# The calendar's line names a real month rather than a placeholder. Which month
+# is not asserted — the nested session runs on today's date, whatever today is —
+# only that the grid was built from one, with the six rows a fixed-height grid
+# always has.
+expect_since "$mark" 'dashboard: calendar [0-9]+/[0-9]{4} \(6 rows' \
+    'the calendar built a month grid from the clock'
+
+reply=$(nested_ipc call dashboard isOpen)
+if grep -qa 'true' <<< "$reply"; then
+    nested_pass 'the dashboard agrees it is open'
+else
+    nested_fail "dashboard isOpen said \"$reply\" with the panel open"
+fi
+
+# The media card, which is the one card made of something outside the shell.
+# With the fixture on the bus it names the track; without the python bindings
+# there is nothing playing, and the card's *absence* is the shipped behaviour
+# rather than a failure — so the two cases are asserted separately and both are
+# real answers.
+if [[ -n "$FAKE_CLIENTS_PID" ]]; then
+    expect_since "$mark" 'dashboard: media Test Track' \
+        'the media card was built from the player on the bus'
+
+    # The seek. A drag on the progress bar is not reachable from here, so the
+    # gesture is driven through the door the media service owns (#49) — without
+    # it the ticket's "seek if the player allows" would have no seam under it at
+    # all. Both halves are checked: the shell's arithmetic, and the player
+    # receiving the position it computed.
+    #
+    # `media` and not `dashboard`, because the player is the service's and not
+    # the drawer's — a verb on the drawer would answer with the drawer shut.
+    if nested_ipc show | grep -qa '^target media$'; then
+        nested_pass 'the media facade owns the `media` ipc target'
+    else
+        nested_fail 'there is no `media` ipc target for the card to be driven through'
+    fi
+
+    seek_mark=$(log_lines)
+    nested_ipc call media seek 50 > /dev/null
+    expect_since "$seek_mark" 'media: seek to 1:30' \
+        'the dashboard seeks the player to half way through a 3:00 track'
+    if nested_await "$NESTED_WORK/fake-clients.log" 'seeked to 90' 5; then
+        nested_pass 'the player was asked for that position and took it'
+    else
+        nested_fail "the player never saw the seek: $(cat "$NESTED_WORK/fake-clients.log")"
+    fi
+else
+    expect_since "$mark" 'dashboard: media no player' \
+        'the media card is absent with nothing playing'
+fi
+
+# The cards survive a settings write that is not about them (#75). This is the
+# check for a failure with no visible symptom until you meet it: Core/SpecFile.qml
+# replaces `Config.values` whole on every reload, so a dashboard that *bound* its
+# card list would hand the Repeater a new array on any key changing — and every
+# card would be destroyed and rebuilt, losing the month you had paged to and
+# remounting the media card mid-track. The evidence is an absence: no card
+# announces itself a second time.
+cards_mark=$(log_lines)
+printf '{ "notifications": { "maxVisible": 4 } }\n' > "$SETTINGS_FILE"
+expect_since "$cards_mark" 'config: reloaded ' 'an unrelated settings write reaches the shell'
+expect_quiet_since "$cards_mark" 'dashboard: calendar [0-9]' \
+    'the cards are not rebuilt by a settings write that is not about them'
+
+# Cross-drawer, from the middle of the bar to its right-hand corner: the
+# dashboard hangs off the clock in the centre cluster and the control centre off
+# a button at the edge, so these two are anchored to different places and the
+# swap is the one most likely to be built as a close and an open.
+mark=$(log_lines)
+nested_ipc call controlcenter toggle > /dev/null
+expect_since "$mark" 'drawers: dashboard → controlcenter' \
+    'the dashboard and the control centre swap rather than stacking'
+expect_quiet_since "$mark" 'drawers: dashboard closed' \
+    'the swap does not take the fog down on its way'
+
+# The second half of #50's subscription criterion, and the one that is a *cost*
+# rather than a feature: the dashboard going away destroys the card, the card
+# releases its subscription, and four file reads a second stop. A drawer swap is
+# the harder case than a plain close — the panel is replaced rather than
+# dismissed — so it is the one asserted.
+expect_since "$mark" 'sysmon: sampling stopped — nothing is watching' \
+    'the sampler stopped when the dashboard was replaced'
+
+mark=$(log_lines)
+nested_ipc call controlcenter toggle > /dev/null
+expect_since "$mark" 'drawers: controlcenter closed \(toggle\)' 'and it toggles shut'
+
+if nested_ipc show | sed -n '/^target dashboard$/,/^target /p' \
+        | grep -qa 'function show('; then
+    nested_fail 'the dashboard target advertises show(), which the CLI cannot call'
+else
+    nested_pass 'the dashboard target does not advertise an uncallable show()'
 fi
 
 # --- 8e. the services the grid is made of came up ----------------------------

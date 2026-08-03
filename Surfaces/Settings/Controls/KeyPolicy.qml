@@ -9,7 +9,7 @@
 // #77 shipped the window pointer-only: every control drove off a `TapHandler`,
 // nothing was focusable, and Escape did nothing. That is the whole of the
 // keyboard path, so it is one treatment in `Controls/` rather than seven, and
-// #55's six remaining tabs inherit it by being built out of the same controls.
+// #55's six further tabs inherited it by being built out of the same controls.
 import QtQuick
 
 QtObject {

@@ -8,10 +8,12 @@
 // without a tab is a setting the GUI cannot reach, and a tab without a section
 // is a tab with nothing in it.
 //
-// `built` is honest about what this ticket ships: #54 builds the frame and the
-// first four tabs, #55 builds the rest. An unbuilt tab is navigable and says so,
-// which is a better answer than hiding it — the shape of the whole window is
-// visible from the first release, and the JSON is editable by hand meanwhile.
+// `built` is honest about what has been shipped: #54 built the frame and the
+// first four tabs, #55 the other six, so every tab is built today. The flag
+// stays rather than being deleted with the last `false`, because what it buys
+// is the state on the way there — an unbuilt tab is navigable and says so,
+// which is a better answer than hiding it, and an eleventh tab landing
+// half-done should reach the same page rather than an empty one.
 //
 // Pure data, no Quickshell imports, so tests/ can reach it. It carries no
 // components either: the window maps an id to its page, because a page imports
@@ -29,20 +31,20 @@ QtObject {
         { id: "launcher", title: "Launcher", icon: "search",
           section: "launcher", built: true },
         { id: "controlCenter", title: "Control Center", icon: "sliders-horizontal",
-          section: "controlCenter", built: false },
+          section: "controlCenter", built: true },
         { id: "dashboard", title: "Dashboard", icon: "layout-dashboard",
-          section: "dashboard", built: false },
+          section: "dashboard", built: true },
         { id: "notifications", title: "Notifications", icon: "bell",
           section: "notifications", built: true },
         { id: "weatherTime", title: "Weather & Time", icon: "cloud-sun",
-          section: "weatherTime", built: false },
+          section: "weatherTime", built: true },
         { id: "wallpaper", title: "Wallpaper", icon: "image",
-          section: "wallpaper", built: false },
+          section: "wallpaper", built: true },
         { id: "system", title: "System", icon: "monitor-cog",
-          section: "system", built: false },
+          section: "system", built: true },
         // The one tab with no config section: version, credits, changelog.
         { id: "about", title: "About", icon: "info",
-          section: "", built: false }
+          section: "", built: true }
     ]
 
     /// The tab an id names, or null. Used to validate what arrives from outside

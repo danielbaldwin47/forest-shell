@@ -1,12 +1,12 @@
 // Appearance — theming mode, dark/light, reduced effects, palette overrides
 // (#54).
 //
-// The three theming modes are all listed and only one is selectable: fixed
-// forest is what the shell does today, and the constrained accent (#58) and the
-// full matugen palette (#59) are ticketed. Listing them greyed is the honest
-// shape — the key is in the file, a hand-edit can set it, and the mode will
-// start working when its service lands rather than appearing in the window from
-// nowhere.
+// Two of the three theming modes are selectable: fixed forest is what the shell
+// has always done, the constrained accent arrived with Services/Theming/ (#58),
+// and the full matugen palette (#59) is still ticketed. Listing the unbuilt one
+// greyed is the honest shape — the key is in the file, a hand-edit can set it,
+// and the mode will start working when its service lands rather than appearing
+// in the window from nowhere.
 //
 // Palette overrides are the one open map in the config: role → colour, applied
 // on top of whichever palette the mode produced (Core/Tokens.qml). The role list
@@ -31,8 +31,10 @@ TabPage {
 
     SettingRow {
         label: "Theming mode"
-        hint: "Fixed forest is the shipped palette. The wallpaper-coupled modes arrive "
-              + "with their services and are inert until then."
+        hint: "Fixed forest is the shipped palette. Constrained accent lets the wallpaper "
+              + "slide the teal between sage and lake blue and changes nothing else — the "
+              + "backgrounds, the warm accents and every text colour stay put. Full "
+              + "dynamic arrives with its service and is inert until then."
         binding: modeBinding
 
         ConfigBinding { id: modeBinding; path: "appearance.mode" }
@@ -41,7 +43,7 @@ TabPage {
             binding: modeBinding
             options: [
                 { value: "forest", label: "Fixed forest" },
-                { value: "accent", label: "Constrained accent", enabled: false },
+                { value: "accent", label: "Constrained accent" },
                 { value: "dynamic", label: "Full dynamic", enabled: false }
             ]
         }
@@ -57,6 +59,18 @@ TabPage {
 
         SettingSwitch { binding: darkBinding }
     }
+
+    SectionHeader { text: "Themes" }
+
+    SectionNote {
+        note: "A theme is a skin and never a layout: the palette overrides below, the "
+              + "bar's surface and ridgeline styling, and the theming mode. Bar geometry, "
+              + "module lists and every service setting stay on this machine. Applying one "
+              + "copies its keys into settings.json — there is no live link afterwards, so "
+              + "editing a knob is editing your settings and not the theme."
+    }
+
+    ThemeSection {}
 
     SectionHeader { text: "Effects" }
 

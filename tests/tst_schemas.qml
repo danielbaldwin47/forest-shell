@@ -3,6 +3,7 @@
 import QtQuick
 import QtTest
 import "../Core"
+import "../Surfaces/Drawers"
 
 TestCase {
     name: "Schemas"
@@ -11,6 +12,11 @@ TestCase {
     StateSchema { id: state }
     SpecStore { id: store }
     Migrations { id: migrations }
+
+    // Only for the one check that the control centre's factory grid and the
+    // schema's default grid are the same list (#55). Both files are pure
+    // QtQuick, which is the whole reason that check can live at this seam.
+    ControlCenterPolicy { id: control }
 
     // --- settings.json -------------------------------------------------------
 
@@ -50,6 +56,16 @@ TestCase {
             verify(leaf !== null, path + " is not a leaf");
             verify(leaf.themed === true, path + " is not marked themed");
         }
+    }
+
+    function test_the_mode_choice_travels_and_its_output_does_not() {
+        // #56 draws this line: a preset carries the *choice* of theming mode,
+        // and never what a wallpaper-coupled mode sampled on the machine it was
+        // saved on. Both flags are read by Core/ThemePolicy.qml and by nothing
+        // else, so losing one would be silent everywhere but here.
+        compare(store.leafAt(settings.spec, "appearance.mode").themed, true);
+        compare(store.leafAt(settings.spec, "appearance.mode").derived, undefined);
+        compare(store.leafAt(settings.spec, "appearance.dynamic").derived, true);
     }
 
     function test_intent_lives_in_settings() {
@@ -176,13 +192,31 @@ TestCase {
         compare(out.bar.surface, undefined);
     }
 
-    function test_empty_sections_are_sections_and_not_leaves() {
-        // Several sections are deliberately empty until their ticket lands;
-        // they must still be walkable, not read as a whole-sub-object leaf.
-        for (const section of ["dashboard"]) {
+    function test_every_section_is_a_section_and_not_a_leaf() {
+        // A section with one sub-object in it must still be walkable rather
+        // than read as a whole-sub-object leaf. `dashboard` was the last empty
+        // one and filled in with #49; the check outlives it because the
+        // distinction is what `themed: true` turns off deliberately, and a
+        // section that acquired it by accident would half-merge under a preset.
+        for (const section of ["dashboard", "controlCenter", "weatherTime"]) {
             verify(!store.isLeaf(settings.spec[section]), section + " reads as a leaf");
-            compare(store.leafPathsUnder(settings.spec, section).length, 0);
+            verify(store.leafPathsUnder(settings.spec, section).length > 0,
+                   section + " has no keys under it");
         }
+    }
+
+    function test_the_dashboard_carries_its_cards_and_its_header() {
+        // #49. The card list is one key and not one per card, because the order
+        // is the whole of what it decides (Surfaces/Drawers/DashboardRegistry.qml).
+        //
+        // #50's two sampler knobs are here rather than under `system` because
+        // they are the *card's*: the sampler exists for it and runs only while
+        // something is watching it (Services/System/SystemStats.qml).
+        compare(store.leafPathsUnder(settings.spec, "dashboard").sort(),
+                ["dashboard.cards", "dashboard.profile.avatar", "dashboard.profile.name",
+                 "dashboard.systemMonitor.diskPath", "dashboard.systemMonitor.intervalSeconds"]);
+        compare(store.defaults(settings.spec).dashboard.cards,
+                ["calendar", "weather", "systemMonitor", "media"]);
     }
 
     function test_the_osd_keys_live_under_the_control_centre() {
@@ -192,20 +226,97 @@ TestCase {
         // three channels the control centre puts sliders on — Core/
         // SettingsSchema.qml argues it where the keys are.
         compare(store.leafPathsUnder(settings.spec, "controlCenter").sort(),
-                ["controlCenter.osd.margin",
+                ["controlCenter.columns",
+                 "controlCenter.osd.margin",
                  "controlCenter.osd.position",
-                 "controlCenter.osd.timeout"]);
+                 "controlCenter.osd.timeout",
+                 "controlCenter.sliders",
+                 "controlCenter.step",
+                 "controlCenter.tiles"]);
+    }
+
+    function test_the_grid_and_the_sliders_are_two_lists_of_names() {
+        // #55's Control Center tab. The same shape as `dashboard.cards` and the
+        // bar's module lists, and for the same reason: presence *is*
+        // enablement, so a tile that is off is a tile that is not in the list
+        // and there is no second flag to disagree with it.
+        //
+        // Names rather than a closed enum, so a file written by a newer shell
+        // keeps a tile this one cannot draw —
+        // Surfaces/Drawers/ControlCenterPolicy.qml drops an unknown id when it
+        // builds the grid, which is the same rule the dashboard registry
+        // follows.
+        const values = store.defaults(settings.spec);
+        compare(values.controlCenter.tiles,
+                ["wifi", "bluetooth", "dnd", "nightlight", "keepawake",
+                 "mode", "powerprofile", "vpn", "wallpaper", "recording"]);
+        compare(values.controlCenter.sliders, ["volume", "mic", "brightness"]);
+        compare(values.controlCenter.columns, 3);
+        compare(values.controlCenter.step, 5);
+    }
+
+    function test_the_grid_defaults_are_the_grid_the_panel_draws() {
+        // The schema cannot import the policy — Core/ does not reach up into
+        // Surfaces/ — so the order and the two numbers are written twice, and
+        // this is what holds them together. A disagreement would otherwise only
+        // be visible as a panel whose factory settings differ from the file's,
+        // which is the kind of thing nobody goes looking for.
+        //
+        // Same arrangement as the night-light temperature range, which
+        // Services/Hardware/NightLightPolicy.qml and the schema both state.
+        compare(settings.controlCenterTiles, control.tileOrder);
+        compare(settings.controlCenterSliders, control.sliderOrder);
+        compare(store.defaults(settings.spec).controlCenter.tiles, control.tileOrder);
+        compare(store.defaults(settings.spec).controlCenter.sliders, control.sliderOrder);
+        compare(store.defaults(settings.spec).controlCenter.columns, control.columns);
+        compare(store.defaults(settings.spec).controlCenter.step, control.step);
     }
 
     function test_the_night_light_keys_live_under_weather_time() {
         // #44 puts them here rather than under `appearance` because this is the
         // section that will own sunset (#50) — the schedule needs a location,
         // and a warmth key three sections away from the times that drive it is
-        // a key nobody finds.
+        // a key nobody finds. #50 brought that location: the weather card's
+        // four keys are its neighbours here.
         compare(store.leafPathsUnder(settings.spec, "weatherTime").sort(),
                 ["weatherTime.nightLight.command",
                  "weatherTime.nightLight.offCommand",
-                 "weatherTime.nightLight.temperature"]);
+                 "weatherTime.nightLight.temperature",
+                 "weatherTime.weather.days",
+                 "weatherTime.weather.place",
+                 "weatherTime.weather.refreshMinutes",
+                 "weatherTime.weather.units"]);
+    }
+
+    function test_the_weather_card_is_not_configured_into_a_location_lookup() {
+        // The auto mode is opt-in: an empty place means "nowhere configured"
+        // and makes no request at all, rather than being read as permission to
+        // ask a geolocation service about this address
+        // (Services/Weather/WeatherPolicy.qml, `mode`).
+        compare(store.defaults(settings.spec).weatherTime.weather.place, "");
+    }
+
+    function test_a_hand_edited_refresh_cannot_hammer_the_forecast_service() {
+        // Clamped rather than refused, which is what `c.integer` does with a
+        // range: a hand-edited 1 becomes the floor rather than falling back to
+        // the default, so the file still says roughly what its author meant.
+        const weather = settings.spec.weatherTime.weather;
+        compare(weather.refreshMinutes.coerce(1), 5);
+        compare(weather.refreshMinutes.coerce(9999), 720);
+        compare(weather.refreshMinutes.coerce(5), 5);
+        // And a unit system this shell does not have falls back rather than
+        // being passed through to the API as a query parameter.
+        compare(weather.units.coerce("kelvin"), undefined);
+        compare(weather.units.coerce("imperial"), "imperial");
+    }
+
+    function test_a_hand_edited_sample_interval_cannot_become_a_busy_loop() {
+        // A zero-interval timer is four file reads in a tight loop; the floor
+        // is what a hand-edit lands on instead.
+        const monitor = settings.spec.dashboard.systemMonitor;
+        compare(monitor.intervalSeconds.coerce(0), 1);
+        compare(monitor.intervalSeconds.coerce(1), 1);
+        compare(monitor.intervalSeconds.coerce(11), 10);
     }
 
     function test_the_idle_ladder_lives_under_system() {
@@ -256,12 +367,14 @@ TestCase {
         compare(idle.lock.ac, 10);
     }
 
-    // --- the keys the settings window is built on (#54) ----------------------
+    // --- the keys the settings window is built on (#54, #55) -----------------
 
-    function test_the_four_built_tabs_have_keys_to_edit() {
-        // Appearance, Bar, Launcher and Notifications are implemented in #54, so
-        // an empty section there is a tab with nothing in it.
-        for (const section of ["appearance", "bar", "launcher", "notifications"])
+    function test_every_tab_has_keys_to_edit() {
+        // #54 built four tabs and #55 the other six, so every section now has a
+        // tab in front of it and an empty one is a tab with nothing in it.
+        // About is the tenth tab and has no section, which
+        // tests/tst_settingstabs.qml pins from the other side.
+        for (const section in settings.spec)
             verify(store.leafPathsUnder(settings.spec, section).length > 0,
                    section + " has no keys");
     }

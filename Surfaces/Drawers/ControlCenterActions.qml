@@ -44,12 +44,21 @@ import qs.Services.Media
 import qs.Services.Hardware
 import qs.Services.Networking
 import qs.Services.Notifications
+import qs.Services.Recorder
 import qs.Surfaces.Background
 
 Singleton {
     id: root
 
-    readonly property ControlCenterPolicy policy: ControlCenterPolicy {}
+    readonly property ControlCenterPolicy policy: ControlCenterPolicy {
+        // The grid is a setting (#55). Bound and not read once: an edit on the
+        // Control Center tab has to move the panel behind it, and
+        // Core/Config.qml replaces `values` wholesale on every write.
+        tileOrder: Config.values.controlCenter.tiles
+        sliderOrder: Config.values.controlCenter.sliders
+        columns: Config.values.controlCenter.columns
+        step: Config.values.controlCenter.step
+    }
     readonly property DrillInPolicy drillPolicy: DrillInPolicy {}
 
     /// What each toggle is currently showing, so the line logged below can say
@@ -67,6 +76,7 @@ Singleton {
         case "keepawake":  return KeepAwake.on;
         case "mode":       return !Theme.dark;    // the tile is lit for light
         case "vpn":        return Vpn.on;
+        case "recording":  return Recorder.active;
         }
         return false;
     }
@@ -99,6 +109,11 @@ Singleton {
         case "keepawake":    root.announce(id); KeepAwake.toggle(); return;
         case "mode":         root.announce(id); Theme.setDark(!Theme.dark); return;
         case "vpn":          root.announce(id); Vpn.toggle(); return;
+        // A toggle like the others, and the only one that leaves a file
+        // behind. Whole-screen: the region variant is a drag, so it goes
+        // through the launcher and a keybind rather than through a tile the
+        // drawer would have to close first.
+        case "recording":    root.announce(id); Recorder.toggle("control-centre"); return;
         // The two with no on-state to name: one cycles through whatever the
         // daemon offers, one opens a door.
         case "powerprofile":

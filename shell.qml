@@ -1,12 +1,16 @@
 // forest-shell — entry point.
 //
-//   qs-upstream -p ~/repos/forest-shell/shell.qml
+//   qs -p ~/repos/forest-shell/shell.qml
 //
 // The repo root is the Quickshell config dir (#12 §3): this file is the config,
 // layer directories are imported through the `qs.` namespace, and there is no
-// symlink into ~/.config/quickshell. `qs-upstream` is the dev wrapper for the
-// side-by-side upstream 0.3.0 prefix (#14) — the runtime swap ticket (#57)
-// retires it.
+// symlink into ~/.config/quickshell — the launch is the direct path, which #12
+// settled and the #13 assembly refinements closed. That is also what
+// shell-switch is registered with and what the keybinds call over IPC.
+//
+// The runtime is upstream Quickshell >= 0.3.0 at plain `qs`. #57 retired the
+// side-by-side `qs-upstream` prefix (#14/#15) that stood in while /usr/bin/qs
+// was still the noctalia fork. See integration/README.md.
 //
 // Startup is staged (Core/Startup.qml):
 //   stage 1, synchronous — Config, Theme, Background, Bar. #22 §4 budgets the
@@ -25,6 +29,7 @@ import qs.Surfaces.Notifications
 import qs.Surfaces.Bar
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
+import qs.Surfaces.Screenshot
 
 ShellRoot {
     id: shell
@@ -76,6 +81,18 @@ ShellRoot {
         component: OsdWindow {}
     }
 
+    // The region picker's windows (#51) — one per screen, mapped only while a
+    // selection is being made, so an idle shell has no surface here either.
+    // Deferred for the same reason the three above are.
+    //
+    // The state behind it is the `Screenshot` singleton, constructed in the
+    // deferred stage below; that is what registers `qs ipc call screenshot …`,
+    // and it is what this window binds to.
+    LazyLoader {
+        id: pickerWindows
+        component: PickerWindow {}
+    }
+
     Connections {
         target: Startup
         function onDeferredStage() {
@@ -88,6 +105,7 @@ ShellRoot {
             notificationPopups.active = true;
             drawerWindows.active = true;
             osdWindows.active = true;
+            pickerWindows.active = true;
         }
     }
 

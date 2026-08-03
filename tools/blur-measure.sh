@@ -84,7 +84,7 @@ while (( $# )); do
         --passes) BLUR_PASSES="${2:?--passes needs a number}"; shift 2 ;;
         --text-color) TEXT_COLOR="${2:?--text-color needs RRGGBB}"; shift 2 ;;
         --max-kept) MAX_KEPT="${2:?--max-kept needs a percentage}"; shift 2 ;;
-        -h|--help) sed -n '2,74p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -172,6 +172,10 @@ cleanup() {
     [[ -z "$FOREIGN_BARS" ]] || note "the reload dropped every runtime layer rule, including the blur of the forest-shell that was already running — restart it to get that back"
 }
 trap cleanup EXIT
+# A signal must become an exit, or the EXIT trap never runs and the caller's
+# compositor keeps this run's keywords.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo
 echo "blur measurement (#97) — $MONITOR ${MON_W}x${MON_H} at scale $SCALE"

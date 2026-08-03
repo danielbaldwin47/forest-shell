@@ -24,6 +24,7 @@ import qs.Services.Launcher
 import qs.Services.Screenshot
 import qs.Services.Recorder
 import qs.Services.Weather
+import qs.Services.Theming
 
 Singleton {
     id: root
@@ -152,7 +153,18 @@ Singleton {
         // registers `qs ipc call theme …` — the door a keybind that swaps skins
         // goes through, and the one tools/theme-harness.sh drives. It reads the
         // undo slot on construction, which is a file read and no more.
-        report("deferred", [ShellState, Themes, Notifications, Compositor,
+        // Theming (#58) is the list's original argument in its purest form:
+        // *nothing* references it. It publishes through the settings file, so
+        // no surface has a reason to name it, and without a line here the
+        // wallpaper-coupled accent would simply never be computed — the mode
+        // would be selectable in the settings window and do nothing.
+        //
+        // Deferred and not sync on purpose. The first frame paints the accent
+        // already in the settings file, which is the one this machine sampled
+        // last session; quantizing the wallpaper to confirm it is not worth a
+        // frame, and doing it before the wallpaper would delay the thing it is
+        // reading.
+        report("deferred", [ShellState, Themes, Theming, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
                             PowerProfiles, NightLight, Vpn,

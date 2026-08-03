@@ -65,10 +65,20 @@ Singleton {
 
     // --- colour --------------------------------------------------------------
 
-    // Every role, resolved for the current mode with the user's overrides on
-    // top. Re-evaluates when either changes; the roles below ride that.
+    // Every role, resolved for the current mode: the shipped row, whatever a
+    // wallpaper-coupled mode sampled (#58), and the user's overrides on top.
+    // Re-evaluates when any of the three changes, and the roles below ride that
+    // — which is what makes a new wallpaper recolour the whole shell with no
+    // per-surface handling and nothing to reload.
+    //
+    // `appearance.dynamic` is read here and written by Services/Theming/, which
+    // Core cannot import; the settings file is the seam between them. That also
+    // means the shell opens already wearing the accent it sampled last session
+    // rather than flashing the shipped teal while the quantizer runs.
     readonly property var palette: tokenData.palette(
-        root.dark, Config.values.appearance.paletteOverrides)
+        root.dark,
+        Config.values.appearance.paletteOverrides,
+        Config.values.appearance.dynamic)
 
     readonly property color bgBase: palette.bgBase
     readonly property color bgSunken: palette.bgSunken

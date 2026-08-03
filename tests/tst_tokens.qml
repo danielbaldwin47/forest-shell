@@ -278,6 +278,61 @@ TestCase {
         compare(p.noSuchRole, undefined);
     }
 
+    // --- the wallpaper-coupled layer (#58) ------------------------------------
+
+    function test_fixed_forest_is_the_shipped_row_untouched() {
+        // The ticket's fourth acceptance criterion, and the reason the layer is
+        // a separate argument rather than folded into the overrides: with no
+        // mode running there is nothing between the row and the consumer, so
+        // fixed forest renders exactly as it did before Services/Theming/
+        // existed.
+        for (const darkMode of [true, false]) {
+            const before = tokens.palette(darkMode, null);
+            for (const empty of [null, undefined, {}]) {
+                const after = tokens.palette(darkMode, null, empty);
+                for (const role of tokens.colorRoles)
+                    compare(after[role], before[role]);
+            }
+        }
+    }
+
+    function test_the_dynamic_layer_replaces_single_roles() {
+        // What a wallpaper-coupled mode writes: a sparse map of the roles it
+        // moved. Everything it does not name is the shipped colour, which is
+        // what makes "constrained" structural rather than promised.
+        const p = tokens.palette(true, null, {
+            accentPrimary: "#7bb8d8", accentDeep: "#0e6f8f"
+        });
+        compare(p.accentPrimary, "#7bb8d8");
+        compare(p.accentDeep, "#0e6f8f");
+        for (const role of tokens.colorRoles)
+            if (role !== "accentPrimary" && role !== "accentDeep")
+                compare(p[role], tokens.dark[role]);
+    }
+
+    function test_a_hand_written_override_outranks_the_wallpaper() {
+        // Someone who typed a colour into the settings window has said
+        // something more specific than a sampler can, and a mode that
+        // overwrote it would make the field look broken.
+        const p = tokens.palette(true, { accentPrimary: "#123456" },
+                                       { accentPrimary: "#7bb8d8",
+                                         accentDeep: "#0e6f8f" });
+        compare(p.accentPrimary, "#123456");
+        compare(p.accentDeep, "#0e6f8f");   // the role nobody claimed
+    }
+
+    function test_the_dynamic_layer_is_checked_like_any_other() {
+        // The shell writes this key, but the user can edit the same file — so
+        // it gets the hand-edited treatment rather than being trusted.
+        ignoreWarning(/unknown palette role/);
+        ignoreWarning(/not a colour/);
+        const p = tokens.palette(true, null, {
+            noSuchRole: "#ffffff", accentPrimary: "chartreuse"
+        });
+        compare(p.accentPrimary, tokens.dark.accentPrimary);
+        compare(p.noSuchRole, undefined);
+    }
+
     function test_only_the_hex_lengths_qcolor_parses_are_accepted() {
         // Qt takes #RGB, #RRGGBB and #AARRGGBB. There is no #RGBA: a
         // four-digit override would sail through and then paint as something

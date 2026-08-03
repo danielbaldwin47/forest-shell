@@ -15,7 +15,7 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Weather/` | The forecast behind the dashboard's weather card (#50) |
 | `Screenshot/` | The region picker's freeze, selection, save and handoff (#51) |
 | `Recorder/` | Screen recording over the two encoders, and the fallback between them (#52) |
-| `Theming/` | The three palette modes behind `Core/Theme.qml` |
+| `Theming/` | The three palette modes behind `Core/Theme.qml` — the constrained accent (#58) is built, the full dynamic one (#59) is not |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
 Two rules that hold across all of them:

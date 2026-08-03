@@ -93,6 +93,15 @@ where available, Explore otherwise), which returns an address or a
 conclusion, not the files. Reserve main-session Read for files about to be
 edited — and do not re-read a file after editing it.
 
+**Code review means the two-axis skill, not a lone reviewer agent.** When a
+session is told to `/code-review` its work, invoke the
+`mattpocock-skills:code-review` skill and follow it as written: Standards and
+Spec run as parallel sub-agents and are reported side by side. Do not
+substitute a single `cavecrew-reviewer` pass — that collapses both axes into
+one correctness sweep (this happened on #79). The skill's own sub-agents are
+already context-cheap: each axis reports back under 400 words, which is why
+the measurement above found review subagents were never the cost.
+
 **On a big file, grep first and Read a range.** `Grep -n` for the key or
 section name, then Read with offset/limit around the hit. Never write down or
 reuse line numbers across edits — they drift; the grep is the address. Section

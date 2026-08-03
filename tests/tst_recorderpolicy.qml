@@ -444,12 +444,12 @@ TestCase {
     }
 
     function test_the_start_line_says_which_rectangle_and_which_engine() {
-        const whole = policy.startingWith("wf-recorder", "/tmp/a.mp4", null);
+        const whole = policy.startingWith("wf-recorder", "/tmp/a.mp4", null, "ipc");
         verify(whole.indexOf("the whole screen") >= 0);
         verify(whole.indexOf("wf-recorder") >= 0);
         verify(whole.indexOf("/tmp/a.mp4") >= 0);
 
-        const part = policy.startingWith("gpu-screen-recorder", "/tmp/a.mp4", suite.region);
+        const part = policy.startingWith("gpu-screen-recorder", "/tmp/a.mp4", suite.region, "ipc");
         verify(part.indexOf("640x480 region") >= 0);
     }
 
@@ -482,13 +482,53 @@ TestCase {
         verify(!policy.canStart("recording"));
     }
 
+    /// Four different endings to a run nobody stopped, and they must not
+    /// borrow each other's words: `noEngine()` here would contradict the probe
+    /// line that said the engine was present, and `failed()` would point at a
+    /// truncated file that was never created.
+    function test_the_four_endings_of_an_unstopped_run_are_distinct() {
+        const lines = [policy.engineGone("wf-recorder"),
+                       policy.initFailed("wf-recorder", 1),
+                       policy.failed("wf-recorder", 1),
+                       policy.endedOnItsOwn("wf-recorder"),
+                       policy.noEngine()];
+        for (let i = 0; i < lines.length; i++)
+            for (let j = i + 1; j < lines.length; j++)
+                verify(lines[i] !== lines[j]);
+
+        // The two that are easiest to confuse say opposite things about a file.
+        verify(policy.initFailed("wf-recorder", 1).indexOf("nothing was recorded") >= 0);
+        verify(policy.failed("wf-recorder", 1).indexOf("may be truncated") >= 0);
+        // And neither of them claims nothing is installed.
+        verify(policy.engineGone("wf-recorder").indexOf("installed") < 0);
+    }
+
+    /// A start during an outstanding pick is its own refusal: nothing is
+    /// recording, and the rectangle is still on the other side of a drag.
+    function test_a_start_during_a_pick_is_its_own_refusal() {
+        verify(policy.alreadyPicking() !== policy.alreadyRecording());
+        verify(policy.alreadyPicking() !== policy.stillStopping());
+        verify(policy.alreadyPicking().indexOf("region") >= 0);
+    }
+
+    /// #81's rule: a state change logs the reason it happened, so a recording
+    /// nobody meant to start can be traced to the thing that started it.
+    function test_the_start_and_stop_lines_carry_the_reason() {
+        verify(policy.startingWith("wf-recorder", "/tmp/a.mp4", null, "control-centre")
+                     .indexOf("(control-centre)") >= 0);
+        verify(policy.signalledStop("bar").indexOf("(bar)") >= 0);
+        // An empty reason adds no empty brackets.
+        compare(policy.signalledStop("").indexOf("()"), -1);
+        compare(policy.startingWith("wf-recorder", "/tmp/a.mp4", null, "").indexOf("()"), -1);
+    }
+
     function test_the_probe_line_says_which_way_round_it_went() {
         verify(policy.probed("wf-recorder", true).indexOf("is available") >= 0);
         verify(policy.probed("wf-recorder", false).indexOf("not installed") >= 0);
     }
 
     function test_stopping_says_it_used_sigint() {
-        verify(policy.signalledStop().indexOf("SIGINT") >= 0);
+        verify(policy.signalledStop("ipc").indexOf("SIGINT") >= 0);
         compare(policy.stopSignal, 2);
     }
 }

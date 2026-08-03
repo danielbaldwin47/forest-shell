@@ -61,4 +61,12 @@ BarIndicator {
     // `shown`, and an indicator that came back at 0.45 after its second
     // recording would look half-disabled.
     onShownChanged: if (!root.shown) root.opacity = 1.0
+
+    // The one line this module logs, and it is not decoration: a module that is
+    // invisible until something is recording has no other way to prove it
+    // loaded, and #73 is the reason to want that proof — a directory reached
+    // only by file URL is not a QML module, so a module whose imports do not
+    // resolve is a silent absence rather than an error. Asserted by
+    // tools/recorder-harness.sh.
+    Component.onCompleted: Logger.log("bar", "recorder dot on the bar")
 }

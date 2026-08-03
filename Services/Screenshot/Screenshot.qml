@@ -117,24 +117,6 @@ Singleton {
     ///
     /// Zero for the keybind and IPC paths, which have nothing to wait for and
     /// should not pay for someone else's fade.
-    /// The same drag, for somebody who wants the rectangle rather than a
-    /// photograph of it (#52's recorder is the only consumer).
-    ///
-    /// A mode on this picker and not a second selection surface: the freeze,
-    /// the window snapping, the keyboard grab and Escape are all already here,
-    /// and `slurp` would be a second overlay with different keys and no
-    /// snapping. The only difference downstream is `commit()`, which emits
-    /// `regionPicked` instead of `saveRequested` and writes no file.
-    /// Set *after* the open rather than before it: `openAfter` clears the flag
-    /// as part of resetting the run, so a pick that is refused for a picker
-    /// already up leaves the picker's existing mode alone.
-    function pickRegion(reason: string, settleMs: int): bool {
-        const opened = root.openAfter(reason, settleMs);
-        if (opened)
-            root.handingOver = true;
-        return opened;
-    }
-
     function openAfter(reason: string, settleMs: int): bool {
         if (root.busy) {
             Logger.log("screenshot", root.policy.alreadyOpen());
@@ -172,6 +154,25 @@ Singleton {
             seed.running = true;
         }
         return true;
+    }
+
+    /// The same drag, for somebody who wants the rectangle rather than a
+    /// photograph of it (#52's recorder is the only consumer).
+    ///
+    /// A mode on this picker and not a second selection surface: the freeze,
+    /// the window snapping, the keyboard grab and Escape are all already here,
+    /// and `slurp` would be a second overlay with different keys and no
+    /// snapping. The only difference downstream is `commit()`, which emits
+    /// `regionPicked` instead of `saveRequested` and writes no file.
+    ///
+    /// The flag is set *after* the open rather than before it: `openAfter`
+    /// clears it as part of resetting the run, so a pick refused for a picker
+    /// that is already up leaves the picker's existing mode alone.
+    function pickRegion(reason: string, settleMs: int): bool {
+        const opened = root.openAfter(reason, settleMs);
+        if (opened)
+            root.handingOver = true;
+        return opened;
     }
 
     /// Put it away. Every exit but a completed save comes through here, and the

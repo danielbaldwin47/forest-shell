@@ -106,11 +106,21 @@ Singleton {
     function startRegionAfter(reason: string, settleMs: int): bool {
         if (!root.guardStart())
             return false;
-        return Screenshot.pickRegion("recorder: " + reason, settleMs);
+        root.awaitingRegion = Screenshot.pickRegion("recorder: " + reason, settleMs);
+        return root.awaitingRegion;
     }
 
     /// The checks both entry points share, so the refusals cannot drift apart.
     function guardStart(): bool {
+        // A pick in flight is not a state the machine can see: the recorder is
+        // idle by every other measure, and the rectangle is somewhere on the
+        // other side of a drag. Without this a control-centre press during a
+        // pick starts a full-screen recording, and the rectangle the user then
+        // draws is swallowed as "already recording".
+        if (root.awaitingRegion) {
+            Logger.log("recorder", root.policy.alreadyPicking());
+            return false;
+        }
         if (!root.policy.canStart(root.state)) {
             // Two different refusals, because they resolve differently: one
             // waits for the user, the other for the muxer.
@@ -165,7 +175,7 @@ Singleton {
             container: container
         };
         root.attempt = root.engine;
-        root.lastFile = root.pending.file;
+        root.why = String(reason ?? "");
         root.advance("start");
 
         // The directory is made before the encoder runs rather than beside it:
@@ -182,20 +192,28 @@ Singleton {
     /// Stop, and keep the file. SIGINT rather than SIGTERM — see
     /// RecorderPolicy's header for what SIGTERM leaves on disk.
     function stop(reason: string): bool {
+        // Stopping while the picker is up means "never mind" — the recording
+        // has not started, so there is nothing to signal, but leaving the
+        // picker on screen after a stop would be a press that did nothing.
+        if (root.awaitingRegion) {
+            root.awaitingRegion = false;
+            Screenshot.cancel("recorder: " + reason);
+            return true;
+        }
         if (!root.policy.canStop(root.state)) {
             Logger.log("recorder", root.policy.notRecording());
             return false;
         }
 
         root.advance("stop");
-        Logger.log("recorder", root.policy.signalledStop());
+        Logger.log("recorder", root.policy.signalledStop(reason));
 
         // Stopping something that has not spawned yet: there is no process to
         // signal, so the state is unwound here rather than waiting for an exit
         // that will never come.
         if (!encoder.running) {
             seed.running = false;
-            root.finish(0, false);
+            root.finish(false);
             return true;
         }
 
@@ -205,7 +223,8 @@ Singleton {
     }
 
     function toggle(reason: string): bool {
-        return root.policy.canStop(root.state) ? root.stop(reason) : root.start(reason);
+        return (root.awaitingRegion || root.policy.canStop(root.state))
+            ? root.stop(reason) : root.start(reason);
     }
 
     // --- internals -----------------------------------------------------------
@@ -219,6 +238,15 @@ Singleton {
     /// fallback it is the one after it.
     property string attempt: ""
 
+    /// Why the run in flight was started, for the line it logs. Held rather
+    /// than passed down, because the fallback re-spawns from `settle()` and the
+    /// second attempt was started for the same reason as the first.
+    property string why: ""
+
+    /// Whether the picker is up on this service's behalf. Not a state on the
+    /// machine: nothing is starting, and the rectangle may never arrive.
+    property bool awaitingRegion: false
+
     /// When the encoder was spawned, for the elapsed clock and — more sharply —
     /// for `shouldFallback`, which needs to tell "died during init" from "ran
     /// for twenty minutes and then died".
@@ -229,7 +257,7 @@ Singleton {
     }
 
     /// Everything that has to happen once the encoder is gone, however it went.
-    function finish(code: int, report: bool): void {
+    function finish(report: bool): void {
         clock.stop();
         muxWatchdog.stop();
         root.advance("exited");
@@ -248,7 +276,7 @@ Singleton {
                 return;
             if (code !== 0) {
                 Logger.warn("recorder", root.policy.directoryFailed(code));
-                root.finish(code, false);
+                root.finish(false);
                 return;
             }
             root.spawn();
@@ -266,7 +294,7 @@ Singleton {
                        root.policy.audioNarrowed(root.policy.audio(root.settings.audio)));
 
         Logger.log("recorder", root.policy.startingWith(root.attempt, root.pending.file,
-                                                        root.pending.region));
+                                                        root.pending.region, root.why));
 
         encoder.started = false;
         root.startedAt = Date.now();
@@ -286,6 +314,10 @@ Singleton {
         onStarted: {
             encoder.started = true;
             root.advance("started");
+            // Here and not at `begin()`: `ipc last` must not answer with a
+            // path nothing ever wrote, which is what a failed directory or an
+            // encoder that never started would have left behind.
+            root.lastFile = root.pending ? root.pending.file : root.lastFile;
             root.elapsedMs = 0;
             clock.start();
             Logger.log("recorder", root.policy.encodingStarted(root.attempt));
@@ -310,40 +342,53 @@ Singleton {
             return;
 
         const elapsed = Math.max(0, Date.now() - root.startedAt);
-        const stopping = root.state === root.policy.stopping;
         const from = root.attempt;
 
         // A recording the user stopped is never retried, whatever it exited
         // with: the file is written and a second engine would start over it.
-        if (!stopping && root.policy.shouldFallback(from, started, code, elapsed)) {
+        if (root.state === root.policy.stopping) {
+            root.finish(true);
+            return;
+        }
+
+        if (root.policy.shouldFallback(from, started, code, elapsed)) {
             const next = root.policy.fallbackFor(from);
+            // Logged once, before the two outcomes diverge — the reason the
+            // first engine is being abandoned is the same either way.
+            Logger.warn("recorder",
+                        root.policy.fellBack(from, next,
+                                             root.policy.fallbackReason(started, code)));
             if (root.available[next] === true) {
-                Logger.warn("recorder",
-                            root.policy.fellBack(from, next,
-                                                 root.policy.fallbackReason(started, code)));
                 clock.stop();
                 root.attempt = next;
                 root.state = root.policy.starting;
                 root.spawn();
                 return;
             }
-            Logger.warn("recorder", root.policy.fellBack(from, next,
-                                                         root.policy.fallbackReason(started, code)));
             Logger.warn("recorder", root.policy.noEngine());
-            root.finish(code, false);
+            root.finish(false);
             return;
         }
 
-        if (!stopping && (!started || code !== 0)) {
-            // Ran and broke, or the last engine could not start either. Not
-            // retried — see `shouldFallback` — so this is the whole report.
-            Logger.warn("recorder", started ? root.policy.failed(from, code)
-                                            : root.policy.noEngine());
-            root.finish(code, false);
+        // Nowhere left to go. Four different endings, and they are four
+        // different lines: `noEngine()` here would contradict the probe line
+        // that said this engine was present, and `failed()` would point at a
+        // truncated file that was never created.
+        if (!started) {
+            Logger.warn("recorder", root.policy.engineGone(from));
+        } else if (code !== 0 && elapsed < root.policy.initGraceMs) {
+            Logger.warn("recorder", root.policy.initFailed(from, code));
+        } else if (code !== 0) {
+            Logger.warn("recorder", root.policy.failed(from, code));
+        } else {
+            // Exited cleanly without being asked to. The file is finished, so
+            // it is reported like any other — but the line above says nobody
+            // pressed stop, which is the part that would otherwise be silent.
+            Logger.log("recorder", root.policy.endedOnItsOwn(from));
+            root.finish(true);
             return;
         }
-
-        root.finish(code, true);
+        root.finish(false);
     }
 
     // The elapsed clock. One second, because it draws `M:SS`; running only
@@ -367,7 +412,7 @@ Singleton {
         onTriggered: {
             Logger.warn("recorder", root.policy.stopTimedOut());
             encoder.signal(9);
-            root.finish(0, false);
+            root.finish(false);
         }
     }
 
@@ -377,11 +422,17 @@ Singleton {
         target: Screenshot
 
         function onRegionPicked(region, screen, scale) {
+            if (!root.awaitingRegion)
+                return;
+            root.awaitingRegion = false;
             root.begin({ x: region.x, y: region.y,
                          width: region.width, height: region.height }, "picker");
         }
 
         function onRegionCancelled() {
+            if (!root.awaitingRegion)
+                return;
+            root.awaitingRegion = false;
             Logger.log("recorder", root.policy.pickCancelled());
         }
     }

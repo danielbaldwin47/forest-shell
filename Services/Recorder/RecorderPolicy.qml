@@ -318,6 +318,13 @@ QtObject {
         return Math.min(240, n);
     }
 
+    /// Repeated rather than imported, the way ClaudePolicy.qml repeats its own:
+    /// `Core/SettingsSchema.qml` owns `recordingQualities`, `recordingContainers`
+    /// and `recordingAudio`, and importing Core from here would put a Quickshell
+    /// import on the far side of the seam-1 line and make this file unreachable
+    /// from `tests/`. The schema clamps what reaches settings; these clamp what
+    /// reaches a command line, and a value that got past both is a value that
+    /// was written to the file by hand.
     readonly property var qualities: ["medium", "high", "very_high", "ultra"]
 
     function quality(value: var): string {
@@ -530,11 +537,13 @@ QtObject {
         return "no focused monitor — nothing to record";
     }
 
-    function startingWith(engine: string, file: string, region: var): string {
+    function startingWith(engine: string, file: string, region: var, reason: string): string {
         const where = region
             ? (policy.rect(region).width + "x" + policy.rect(region).height + " region")
             : "the whole screen";
-        return "recording " + where + " with " + engine + " to " + file;
+        const why = String(reason ?? "").trim();
+        return "recording " + where + " with " + engine + " to " + file
+            + (why !== "" ? " (" + why + ")" : "");
     }
 
     function encodingStarted(engine: string): string {
@@ -570,8 +579,37 @@ QtObject {
         return started ? ("failed to initialise (exit " + code + ")") : "is not installed";
     }
 
-    function signalledStop(): string {
-        return "stopping the recorder (SIGINT, so the container gets its index)";
+    function signalledStop(reason: string): string {
+        const why = String(reason ?? "").trim();
+        return "stopping the recorder (SIGINT, so the container gets its index)"
+            + (why !== "" ? " (" + why + ")" : "");
+    }
+
+    /// The last engine on the list would not start. Distinct from `noEngine()`,
+    /// which is "nothing is installed" — this one is "the thing we probed as
+    /// present did not run", and saying the wrong one of those contradicts the
+    /// probe line three lines above it in the log.
+    function engineGone(engine: string): string {
+        return engine + " would not start — nothing was recorded";
+    }
+
+    /// A fast non-zero exit with nowhere left to fall back to. Not `failed()`:
+    /// nothing was recorded, so "the file may be truncated" would be pointing
+    /// at a file that does not exist.
+    function initFailed(engine: string, code: int): string {
+        return engine + " exited " + code + " during init — nothing was recorded";
+    }
+
+    /// The encoder went away without being asked to. The file is finished, so
+    /// this is not a failure — but it is not a stop the user pressed either,
+    /// and the two look identical without a line.
+    function endedOnItsOwn(engine: string): string {
+        return engine + " exited on its own — the recording stopped without being asked";
+    }
+
+    /// A start that arrived while the picker was still up for the last one.
+    function alreadyPicking(): string {
+        return "already waiting on a region — ignoring start";
     }
 
     function stopped(file: string, ms: var): string {

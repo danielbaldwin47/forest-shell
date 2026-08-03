@@ -143,8 +143,16 @@ ARGV_LOG="$NESTED_WORK/argv.log"
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$CLIPS" "$FAKEBIN"
 : > "$ARGV_LOG"
 
+# The optional dot is off by default (a module that is off is one no cluster
+# names), so the scratch config names it — otherwise nothing here would load it
+# and check 0 below would be asserting on a module that was never asked for.
 cat > "$SCRATCH/config/forest-shell/settings.json" <<EOF
 {
+  "bar": {
+    "modules": {
+      "right": ["recorder", "clock"]
+    }
+  },
   "system": {
     "recording": {
       "directory": "$CLIPS",
@@ -258,6 +266,15 @@ expect_reply "$(ipc using)" 'gpu-screen-recorder' \
 expect_reply "$(ipc isRecording)" 'false' 'nothing is recording at rest'
 refute_since 0 'recorder: env --default-signal=INT is unavailable' \
     'this machine can hand the encoder a working SIGINT'
+
+# The bar dot. It draws nothing until something records, so its one log line is
+# the only proof it resolved its imports and loaded at all — #73's caveat, that
+# a directory reached by file URL is not a QML module, fails silently otherwise.
+# What it *looks* like is seam 3 and not reachable from here.
+expect_since 0 'bar: recorder dot on the bar' \
+    'the optional bar dot loads when a cluster names it'
+refute_since 0 'bar: no such module: recorder' \
+    'the registry knows the module name the config used'
 
 # --- 1. a whole-screen recording starts, and says what it is doing -----------
 mark=$(log_lines)

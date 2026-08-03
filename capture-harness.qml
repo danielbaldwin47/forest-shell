@@ -612,6 +612,11 @@ ShellRoot {
                     volume: { available: true, percent: 45, muted: false },
                     mic: { available: true, percent: 80, muted: true },
                     brightness: { available: true, percent: 60 },
+                    // #52's tenth tile, posed idle. It is what makes the grid
+                    // 3x3 plus one, so leaving it out of this fixture would
+                    // mean the short last row — the only #80-class question
+                    // this change raises — was never in a picture.
+                    recording: { available: true, on: false, detail: "GPU" },
                     battery: { hasBattery: true, label: "84%",
                                state: "discharging", timeRemaining: "3h 20m" }
                 })

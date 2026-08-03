@@ -31,6 +31,7 @@ pragma Singleton
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Mpris as Mp
 import qs.Core
 
@@ -218,6 +219,39 @@ Singleton {
             return;
         }
         root.player.previous();
+    }
+
+    // --- the door ------------------------------------------------------------
+    //
+    // One verb, and it exists for one reason: **a progress bar is a drag target
+    // inside a drawer, and this repo has no pointer-injection tool it may
+    // assume** (tools/drawer-harness.sh says so at length about Escape). Without
+    // it, #49's "seek if the player allows" would be a claim with no seam under
+    // it at all.
+    //
+    //     qs ipc call media seek 50        # half way through the track
+    //
+    // On the *service* and not on the dashboard's target, though the dashboard
+    // is what grew the card: the player is this file's, seeking works whether or
+    // not a surface showing it is open, and a `dashboard seek` would be a verb
+    // on a drawer that answers when the drawer is closed and when the media card
+    // is not even in `dashboard.cards`.
+    //
+    // The transport needs no door of its own: play, pause, next and previous are
+    // driven from the *player's* side of the bus with `busctl`, which is what
+    // tools/services-harness.sh already does. Seeking is the one gesture with no
+    // such equivalent — a player cannot be told to seek itself from outside.
+    //
+    // `media` and not `mpris`: it is the word the rest of the shell uses for
+    // this service (the log tag above, the bar module, the card), and a target
+    // is a thing a person types into a keybind.
+    IpcHandler {
+        target: "media"
+
+        /// Where along the track, as a percentage — which is what a pointer on
+        /// a progress bar knows, and what a script can write without asking how
+        /// long the track is.
+        function seek(percent: int): void { root.seekToFraction(percent / 100); }
     }
 
     // --- what a harness reads ------------------------------------------------

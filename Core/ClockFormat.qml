@@ -41,6 +41,18 @@ QtObject {
         return use24Hour ? "HH:mm" : "h:mm AP";
     }
 
+    /// The two above, composed — and what every surface actually calls. The
+    /// pair is kept apart because they are two decisions and `tests/` checks
+    /// them separately (and because LockPolicy holds its own copy of both while
+    /// #93 is open); a surface has no business knowing that, and a triple-nested
+    /// call at three call sites is three chances to nest it differently.
+    ///
+    ///     Qt.formatDateTime(Time.now, ClockFormat.timeFormatFor(
+    ///         Qt.locale().timeFormat(Locale.ShortFormat)))
+    function timeFormatFor(localeTimeFormat: string): string {
+        return policy.timeFormat(policy.use24Hour(localeTimeFormat));
+    }
+
     /// The date under a clock that has room for one — the lock's, and the
     /// dashboard header's.
     readonly property string dateFormat: "dddd, d MMMM"

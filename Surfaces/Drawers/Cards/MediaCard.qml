@@ -36,6 +36,9 @@ import qs.Widgets
 // resolution — without this line `CardFrame` is "not a type" and the card
 // drops out of the dashboard with one warning (#73).
 import qs.Surfaces.Drawers.Cards
+// And the directory above it, for the round icon button the transport is made
+// of — shared with the control centre's strip (Surfaces/Drawers/RoundIconButton.qml).
+import qs.Surfaces.Drawers
 import qs.Services.Media
 
 CardFrame {
@@ -247,21 +250,28 @@ CardFrame {
 
         Item { Layout.fillWidth: true }
 
-        TransportButton {
+        RoundIconButton {
             glyph: "skip-back"
+            size: 18
+            diameter: 34
             dimmed: card.state.canGoBack !== true
             onPressed: Mpris.previous()
         }
 
-        TransportButton {
+        RoundIconButton {
             glyph: card.state.playing === true ? "pause" : "play"
+            // The one bigger glyph in the row: the control you reach for
+            // without looking is the one that stops the music.
             size: 22
+            diameter: 34
             dimmed: card.state.canToggle !== true
             onPressed: Mpris.togglePlaying()
         }
 
-        TransportButton {
+        RoundIconButton {
             glyph: "skip-forward"
+            size: 18
+            diameter: 34
             dimmed: card.state.canSkip !== true
             onPressed: Mpris.next()
         }
@@ -305,55 +315,5 @@ CardFrame {
         target: card.posed ? null : Mpris
         function onPlayingChanged() { Mpris.refresh(); }
         function onChosenIdChanged() { Mpris.refresh(); }
-    }
-
-    // A transport button. Local rather than in Widgets/, for the reason the
-    // control centre's is: the shell's icon buttons are each shaped by their own
-    // surface, and this one is bigger than the strip's because the card is
-    // something you reach for rather than glance at.
-    component TransportButton: Item {
-        id: button
-
-        required property string glyph
-        property int size: 18
-        property bool dimmed: false
-
-        signal pressed
-
-        implicitWidth: 34
-        implicitHeight: 34
-
-        HoverHandler {
-            id: buttonHover
-            cursorShape: Qt.PointingHandCursor
-        }
-
-        TapHandler {
-            onTapped: button.pressed()
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            radius: width / 2
-            color: buttonHover.hovered ? Theme.surfaceOverlay : "transparent"
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.duration(Theme.motionFast)
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
-        }
-
-        Icon {
-            anchors.centerIn: parent
-            name: button.glyph
-            size: button.size
-            // Dimmed rather than hidden: a player that will not skip is worth
-            // showing as a player that will not skip.
-            color: button.dimmed ? Theme.textMuted
-                 : buttonHover.hovered ? Theme.accentPrimary : Theme.textSecondary
-        }
     }
 }

@@ -376,19 +376,19 @@ FocusScope {
                     }
                 }
 
-                IconButton {
+                RoundIconButton {
                     glyph: "skip-back"
                     dimmed: !Mpris.canGoBack
                     onPressed: Mpris.previous()
                 }
 
-                IconButton {
+                RoundIconButton {
                     glyph: Mpris.playing ? "pause" : "play"
                     dimmed: !Mpris.canToggle
                     onPressed: Mpris.togglePlaying()
                 }
 
-                IconButton {
+                RoundIconButton {
                     glyph: "skip-forward"
                     dimmed: !Mpris.canSkip
                     onPressed: Mpris.next()
@@ -435,7 +435,7 @@ FocusScope {
                 // the keybind land in the same place — on the tab it was left
                 // on. Direct rather than over IPC: the window is a singleton in
                 // this process.
-                IconButton {
+                RoundIconButton {
                     glyph: "settings"
                     onPressed: {
                         root.closeRequested("settings");
@@ -447,7 +447,7 @@ FocusScope {
                 // closes nothing itself and lets the open replace it, which is
                 // #27's cross-drawer transition rather than a close and an open
                 // (DrawerSlot.qml runs the overlap).
-                IconButton {
+                RoundIconButton {
                     glyph: "power"
                     onPressed: Drawers.open("session")
                 }
@@ -589,55 +589,6 @@ FocusScope {
     // nobody released is a wakeup every few seconds that nothing on screen
     // would show (#22 §5).
     Component.onDestruction: ControlCenterActions.back("drawer")
-
-    // A small round icon button, three of them in the media card and two in the
-    // power line. Local rather than in Widgets/: it is this panel's strip
-    // furniture, and the shell's other icon-buttons (the bar's modules, the
-    // notification centre's dismiss) are each shaped by their own surface.
-    component IconButton: Item {
-        id: button
-
-        required property string glyph
-        property bool dimmed: false
-
-        signal pressed
-
-        implicitWidth: 28
-        implicitHeight: 28
-
-        HoverHandler {
-            id: buttonHover
-            cursorShape: Qt.PointingHandCursor
-        }
-
-        TapHandler {
-            onTapped: button.pressed()
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            radius: width / 2
-            color: buttonHover.hovered ? Theme.surfaceOverlay : "transparent"
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.duration(Theme.motionFast)
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
-        }
-
-        Icon {
-            anchors.centerIn: parent
-            name: button.glyph
-            size: 16
-            // Dimmed rather than hidden: a player that will not skip is worth
-            // showing as a player that will not skip.
-            color: button.dimmed ? Theme.textMuted
-                 : buttonHover.hovered ? Theme.accentPrimary : Theme.textSecondary
-        }
-    }
 
     Component.onCompleted: Logger.log("control-centre",
         root.tiles.length + " tile(s), " + root.sliderRows.length + " slider(s)")

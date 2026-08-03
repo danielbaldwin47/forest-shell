@@ -10,13 +10,13 @@
 // to redraw a glyph nobody is watching, they would cost most of the idle budget
 // (#22 §5) on their own.
 //
-// The format is fixed here rather than in settings.json because the clock
-// format key belongs to the weather & time ticket (#50), along with the
-// 12/24-hour choice and the locale question underneath it. Naming it now would
-// commit a key that ticket would have to migrate away from. #93 is the other
-// half of that: this module and the lock screen still answer the question
-// differently, and Core/ClockFormat.qml is where the single answer now lives —
-// the dashboard reads it, and #93 is what moves these two onto it.
+// The format is not fixed here and no longer decided here either. It was, and
+// that was #93: this module hardcoded 24-hour while the lock followed the
+// locale, so the same shell read `19:26` on the bar and `7:30 PM` on the lock.
+// The rule is Core/ClockFormat.qml now — a file that is not a surface, so
+// three surfaces can share one answer — and the dashboard (#49) reads it too.
+// The *setting* still belongs to the weather & time ticket (#50); naming a key
+// here would commit one that ticket would have to migrate away from.
 //
 // **It is also a door** (#49). The clock is what opens the dashboard, which is
 // why that surface has no bar module of its own: the time is the thing you look
@@ -30,7 +30,13 @@ import qs.Core
 Text {
     id: clock
 
-    text: Qt.formatDateTime(Time.now, "ddd d MMM   HH:mm")
+    readonly property ClockFormat format: ClockFormat {}
+
+    // Date and time in one line, which is the bar's own shape: three spaces
+    // between them rather than a separator, because the pair reads as one
+    // object at 13pt and a middot would make it two readouts.
+    text: Qt.formatDateTime(Time.now, clock.format.dateFormatCompact + "   "
+        + clock.format.timeFormatFor(Qt.locale().timeFormat(Locale.ShortFormat)))
 
     // Lit under the pointer, which is the whole of "this is pressable" on a
     // module that must not grow a button's chrome — the clock is the bar's one

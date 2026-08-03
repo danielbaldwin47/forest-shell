@@ -38,6 +38,30 @@ QtObject {
         return root.cards[name] !== undefined;
     }
 
+    /// Whether two resolved lists are the same dashboard.
+    ///
+    /// This exists because of what a config reload *is* (#75): Core/SpecFile.qml
+    /// replaces `Config.values` wholesale on every reload and every `set()`, so
+    /// a binding that resolves the card list hands back a new array identity
+    /// when any key in the file changes — the bar's blur, a notification
+    /// timeout, anything. A `Repeater` does not diff a JS array, so that
+    /// identity change destroys and rebuilds every card: the calendar loses the
+    /// month you paged to and the media card remounts under your hand.
+    ///
+    /// So the dashboard compares before it assigns, and this is the comparison.
+    /// Order is part of it — reordering the cards *is* a change — which is why
+    /// this is not a set difference.
+    function same(before: var, after: var): bool {
+        const a = Array.isArray(before) ? before : [];
+        const b = Array.isArray(after) ? after : [];
+        if (a.length !== b.length)
+            return false;
+        for (let i = 0; i < a.length; i++)
+            if (a[i] !== b[i])
+                return false;
+        return true;
+    }
+
     /// The list, cleaned: unknown names dropped, repeats dropped, order
     /// preserved.
     ///

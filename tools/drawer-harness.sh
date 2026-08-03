@@ -514,13 +514,22 @@ if [[ -n "$FAKE_CLIENTS_PID" ]]; then
     expect_since "$mark" 'dashboard: media Test Track' \
         'the media card was built from the player on the bus'
 
-    # The seek, over the one door the panel has beyond the four every drawer
-    # gets (#49): a drag on the progress bar is not reachable from here, and
-    # without this the ticket's "seek if the player allows" would have no seam
-    # under it at all. Both halves are checked — the shell's arithmetic, and
-    # the player receiving the position it computed.
+    # The seek. A drag on the progress bar is not reachable from here, so the
+    # gesture is driven through the door the media service owns (#49) — without
+    # it the ticket's "seek if the player allows" would have no seam under it at
+    # all. Both halves are checked: the shell's arithmetic, and the player
+    # receiving the position it computed.
+    #
+    # `media` and not `dashboard`, because the player is the service's and not
+    # the drawer's — a verb on the drawer would answer with the drawer shut.
+    if nested_ipc show | grep -qa '^target media$'; then
+        nested_pass 'the media facade owns the `media` ipc target'
+    else
+        nested_fail 'there is no `media` ipc target for the card to be driven through'
+    fi
+
     seek_mark=$(log_lines)
-    nested_ipc call dashboard seek 50 > /dev/null
+    nested_ipc call media seek 50 > /dev/null
     expect_since "$seek_mark" 'media: seek to 1:30' \
         'the dashboard seeks the player to half way through a 3:00 track'
     if nested_await "$NESTED_WORK/fake-clients.log" 'seeked to 90' 5; then
@@ -532,6 +541,19 @@ else
     expect_since "$mark" 'dashboard: media no player' \
         'the media card is absent with nothing playing'
 fi
+
+# The cards survive a settings write that is not about them (#75). This is the
+# check for a failure with no visible symptom until you meet it: Core/SpecFile.qml
+# replaces `Config.values` whole on every reload, so a dashboard that *bound* its
+# card list would hand the Repeater a new array on any key changing — and every
+# card would be destroyed and rebuilt, losing the month you had paged to and
+# remounting the media card mid-track. The evidence is an absence: no card
+# announces itself a second time.
+cards_mark=$(log_lines)
+printf '{ "notifications": { "maxVisible": 4 } }\n' > "$SETTINGS_FILE"
+expect_since "$cards_mark" 'config: reloaded ' 'an unrelated settings write reaches the shell'
+expect_quiet_since "$cards_mark" 'dashboard: calendar [0-9]' \
+    'the cards are not rebuilt by a settings write that is not about them'
 
 # Cross-drawer, from the middle of the bar to its right-hand corner: the
 # dashboard hangs off the clock in the centre cluster and the control centre off

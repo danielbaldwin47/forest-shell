@@ -94,20 +94,26 @@ CardFrame {
         // Back to the month the clock is in. Absent while it is already there,
         // rather than greyed: a control that does nothing is furniture, and this
         // one has a perfectly good absence to fall back on.
-        PageButton {
+        RoundIconButton {
             glyph: "rotate-ccw"
+            size: 14
+            diameter: 24
             visible: card.shownYear !== card.today.getFullYear()
                      || card.shownMonth !== card.today.getMonth() + 1
             onPressed: card.page(0)
         }
 
-        PageButton {
+        RoundIconButton {
             glyph: "chevron-left"
+            size: 14
+            diameter: 24
             onPressed: card.page(-1)
         }
 
-        PageButton {
+        RoundIconButton {
             glyph: "chevron-right"
+            size: 14
+            diameter: 24
             onPressed: card.page(1)
         }
     }
@@ -216,47 +222,4 @@ CardFrame {
     Component.onCompleted: Logger.log("dashboard",
         "calendar " + card.shownMonth + "/" + card.shownYear
         + " (" + card.weeks.length + " rows, week starts " + card.firstDay + ")")
-
-    // A chevron, three of them in the header. Local rather than in Widgets/, for
-    // the reason the control centre's is: it is this card's header furniture.
-    component PageButton: Item {
-        id: button
-
-        required property string glyph
-
-        signal pressed
-
-        implicitWidth: 24
-        implicitHeight: 24
-
-        HoverHandler {
-            id: buttonHover
-            cursorShape: Qt.PointingHandCursor
-        }
-
-        TapHandler {
-            onTapped: button.pressed()
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            radius: width / 2
-            color: buttonHover.hovered ? Theme.surfaceOverlay : "transparent"
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: Theme.duration(Theme.motionFast)
-                    easing.type: Easing.Bezier
-                    easing.bezierCurve: Theme.fogEase
-                }
-            }
-        }
-
-        Icon {
-            anchors.centerIn: parent
-            name: button.glyph
-            size: 14
-            color: buttonHover.hovered ? Theme.accentPrimary : Theme.textSecondary
-        }
-    }
 }

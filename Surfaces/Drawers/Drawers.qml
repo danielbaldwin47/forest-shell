@@ -32,9 +32,6 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Core
 import qs.Services.Compositor
-// For the dashboard's `seek` door alone (#49) — the media card itself reaches
-// the facade directly.
-import qs.Services.Media
 
 Singleton {
     id: root
@@ -337,19 +334,13 @@ Singleton {
     //
     //     bind = SUPER, D, exec, qs ipc call dashboard toggle
     //
-    // The four doors every drawer has, and one more — for the reason the control
-    // centre has eight of its own: **a card is a drag target inside a drawer,
-    // and this repo has no pointer-injection tool it may assume**, so "seek if
-    // the player allows" would otherwise be a claim with no seam under it at
-    // all. The percentage is where along the track, which is what a pointer on
-    // the bar knows:
-    //
-    //     qs ipc call dashboard seek 50
-    //
-    // The transport needs no door of its own: play, pause, next and previous are
-    // driven from the *player's* side of the bus with `busctl`, which is what
-    // tools/services-harness.sh already does. Seeking is the one gesture with no
-    // such equivalent — a player cannot be told to seek itself from outside.
+    // The four doors and no more, unlike the control centre's twelve. The
+    // dashboard's cards have nothing to press that a door would have to reach:
+    // the calendar's paging is arithmetic `tests/` drives directly
+    // (Surfaces/Drawers/CalendarPolicy.qml), and the media card's transport and
+    // seek are the *player's*, so they are driven where the player is —
+    // `busctl` from the fixture's side, and `qs ipc call media seek` from the
+    // service that owns it (Services/Media/Mpris.qml).
     IpcHandler {
         target: "dashboard"
 
@@ -357,8 +348,6 @@ Singleton {
         function close(): void { root.close("ipc"); }
         function toggle(): void { root.toggle("dashboard"); }
         function isOpen(): bool { return root.current === "dashboard"; }
-
-        function seek(percent: int): void { Mpris.seekToFraction(percent / 100); }
     }
 
     // --- Super+Space ---------------------------------------------------------

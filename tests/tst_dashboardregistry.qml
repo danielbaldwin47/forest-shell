@@ -84,6 +84,31 @@ TestCase {
         }
     }
 
+    // --- what counts as a change (#75) ---------------------------------------
+
+    function test_the_same_cards_in_the_same_order_are_the_same_dashboard() {
+        // The check that keeps a `Repeater` from rebuilding every card when an
+        // unrelated key is written: a config reload replaces `Config.values`
+        // whole, so the resolved list arrives as a new array with the same names
+        // in it on every save of anything.
+        verify(registry.same(["calendar", "media"], ["calendar", "media"]));
+        verify(registry.same([], []));
+    }
+
+    function test_reordering_is_a_change_and_so_is_adding_or_removing() {
+        verify(!registry.same(["calendar", "media"], ["media", "calendar"]));
+        verify(!registry.same(["calendar"], ["calendar", "media"]));
+        verify(!registry.same(["calendar", "media"], ["calendar"]));
+    }
+
+    function test_a_missing_list_compares_as_an_empty_dashboard() {
+        // `same` is asked before the first resolution has happened, so it has to
+        // answer about a list that is not there yet rather than throwing.
+        verify(registry.same(null, []));
+        verify(registry.same(undefined, null));
+        verify(!registry.same(null, ["calendar"]));
+    }
+
     function test_the_two_cards_this_ticket_ships_are_both_here() {
         verify(registry.known("calendar"));
         verify(registry.known("media"));

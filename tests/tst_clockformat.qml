@@ -62,6 +62,15 @@ TestCase {
         compare(clock.timeFormat(false), "h:mm AP");
     }
 
+    function test_the_composed_call_is_the_two_decisions_in_order() {
+        // What the surfaces call, so that none of them nests the pair itself.
+        for (const format of testCase.localeFormats)
+            compare(clock.timeFormatFor(format),
+                    clock.timeFormat(clock.use24Hour(format)), format);
+        compare(clock.timeFormatFor("HH:mm"), "HH:mm");
+        compare(clock.timeFormatFor("h:mm AP"), "h:mm AP");
+    }
+
     function test_the_date_formats_say_the_date_and_not_the_time() {
         for (const format of [clock.dateFormat, clock.dateFormatCompact]) {
             verify(format.indexOf("m") < 0, format + " carries minutes");

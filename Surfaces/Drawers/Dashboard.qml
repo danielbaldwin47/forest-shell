@@ -79,9 +79,30 @@ FocusScope {
     /// average is a number about a pairing that exists.
     readonly property alias panelItem: panel
 
-    /// Unknown and repeated names are dropped here, with a warning naming each
-    /// one, so a typo costs one card instead of the dashboard.
-    readonly property var cards: root.registry.resolve(Config.values.dashboard.cards)
+    /// The cards on screen, in order. Unknown and repeated names are dropped as
+    /// this is resolved, with a warning naming each one, so a typo costs one
+    /// card instead of the dashboard.
+    ///
+    /// **Written rather than bound**, which is #75's rule and the one thing
+    /// about this panel that is not obvious: Core/SpecFile.qml replaces
+    /// `Config.values` whole on every reload and every `set()`, so a binding
+    /// here would hand the `Repeater` below a new array identity when *any* key
+    /// in settings.json changed. A `Repeater` does not diff a JS array, so the
+    /// bar's blur toggle would destroy and rebuild every card — the calendar
+    /// would snap back from the month you paged to, and the media card would
+    /// remount mid-track.
+    ///
+    /// So the resolution is a binding and the assignment is not: `configured`
+    /// changes with the file, and `cards` changes only when the dashboard
+    /// actually differs (DashboardRegistry.same).
+    property var cards: []
+
+    readonly property var configured: root.registry.resolve(Config.values.dashboard.cards)
+
+    onConfiguredChanged: {
+        if (!root.registry.same(root.cards, root.configured))
+            root.cards = root.configured;
+    }
 
     /// The clock this panel reads. One tick a minute, shell-wide (Core/Time.qml)
     /// — the header is the third surface to show the time and the first that did
@@ -166,9 +187,8 @@ FocusScope {
 
                         Text {
                             Layout.fillWidth: true
-                            text: Qt.formatDateTime(root.now, root.clockFormat.timeFormat(
-                                root.clockFormat.use24Hour(
-                                    Qt.locale().timeFormat(Locale.ShortFormat))))
+                            text: Qt.formatDateTime(root.now, root.clockFormat.timeFormatFor(
+                                Qt.locale().timeFormat(Locale.ShortFormat)))
                             color: Theme.textPrimary
                             // The display serif, which the brief allows "clock
                             // only, once, never twice" — this and the bar's
@@ -297,8 +317,19 @@ FocusScope {
         }
     }
 
-    // The panel's own line, and the evidence a harness reads that the stack was
-    // assembled from the config rather than drawn empty (#81).
-    Component.onCompleted: Logger.log("dashboard", root.cards.length + " card(s): "
-        + (root.cards.length > 0 ? root.cards.join(", ") : "none"))
+    // The first resolution, and the panel's own line — the evidence a harness
+    // reads that the stack was assembled from the config rather than drawn
+    // empty (#81).
+    //
+    // The assignment is here as well as in the handler above because a property
+    // that evaluates its initial binding before anything is listening has
+    // already had its one change signal: a panel built with `cards` still empty
+    // is a dashboard that draws nothing at all.
+    Component.onCompleted: {
+        if (!root.registry.same(root.cards, root.configured))
+            root.cards = root.configured;
+
+        Logger.log("dashboard", root.cards.length + " card(s): "
+                   + (root.cards.length > 0 ? root.cards.join(", ") : "none"));
+    }
 }

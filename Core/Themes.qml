@@ -47,25 +47,53 @@ Singleton {
 
     readonly property ThemePolicy policy: ThemePolicy {}
 
+    /// The safe parse the config engine reads its own files with — `{ ok, value,
+    /// error }`, so a hand-written theme fails the way a hand-written
+    /// settings.json does. Named here rather than walked to at each call site,
+    /// which is three objects deep.
+    readonly property QtObject json: root.policy.store.json
+
     /// The saved themes, ready to draw. The two built-in entries — "Forest
     /// (default)" and "Previous settings" — are not in here: they are not files,
     /// and the surface draws them as what they are.
     property var entries: []
 
-    /// Which preset was last applied, or "" when the shell has never been told.
-    /// A breadcrumb in the state file, not a link (see the header).
-    readonly property string applied: ShellState.values.theme?.lastApplied ?? ""
+    /// Which preset the shell is wearing. A breadcrumb in the state file, not a
+    /// link (see the header).
+    ///
+    /// A shell that has never been told reads as the shipped look, which is what
+    /// it is: nothing named it, so the only theme it can be wearing is the one
+    /// that is the absence of the others — and if it has drifted from that, the
+    /// drift mark below is exactly the right thing to say about it.
+    readonly property string applied: {
+        const name = ShellState.values.theme?.lastApplied ?? "";
+        return name === "" ? root.policy.defaultName : name;
+    }
+
+    /// What applying the current theme would do — held so that the drift check
+    /// below does not re-migrate and re-plan the same file on every keystroke a
+    /// settings control writes.
+    readonly property var appliedPlan: {
+        if (root.applied === root.policy.defaultName)
+            return root.policy.plan(Config.schema, root.policy.defaultFile(Config.schema));
+        if (root.appliedText === "")
+            return null;   // the theme was deleted, or is not readable
+        const parsed = root.json.parse(root.appliedText);
+        return parsed.ok ? root.policy.plan(Config.schema, parsed.value) : null;
+    }
 
     /// Whether the settings have moved since that theme was applied. What keeps
     /// the tick honest: a knob nudged afterwards — in the GUI or by hand — means
-    /// the file is no longer that theme.
+    /// the shell is no longer wearing that theme.
+    ///
+    /// Judged against the shell's *resolved* values, which is the only reading
+    /// that survives an apply: a theme is copied through the config engine, so
+    /// what lands is coerced and written sparsely and is not the theme file byte
+    /// for byte (Core/ThemePolicy.qml `wears`).
     readonly property bool drifted: {
-        if (root.applied === "" || root.appliedText === "")
+        if (root.appliedPlan === null)
             return false;
-        const parsed = root.policy.store.json.parse(root.appliedText);
-        if (!parsed.ok)
-            return false;
-        return !root.policy.matches(Config.schema, root.current(), parsed.value);
+        return !root.policy.wears(Config.schema, Config.values, root.appliedPlan);
     }
 
     /// Whether there is anything to undo. The slot is written on every apply, so
@@ -92,11 +120,9 @@ Singleton {
 
         const clean = String(name).trim();
         const file = root.current();
-        // The stamp is not a key of the skin, and neither is the label a saved
-        // theme has no business carrying.
-        const keys = Object.keys(file).length - 1;
         root.writeFile(root.themePath(clean), file);
-        Logger.log("theme", root.policy.savedLine(clean, keys));
+        Logger.log("theme", root.policy.savedLine(clean,
+                                                  root.policy.carriedCount(Config.schema, file)));
 
         // Saving the current look *is* being on that theme: the file and the
         // settings are identical by construction at this instant.
@@ -148,15 +174,19 @@ Singleton {
                                                          "nothing has been applied yet"));
             return false;
         }
-        const parsed = root.policy.store.json.parse(root.undoText);
+        const parsed = root.json.parse(root.undoText);
         if (!parsed.ok) {
             Logger.warn("theme", root.policy.refusedLine(root.policy.undoName, parsed.error));
             return false;
         }
         // The slot carries the label the shell wore at the time, so undoing an
-        // apply puts the *name* back as well as the keys.
+        // apply puts the *name* back as well as the keys. A slot hand-edited to
+        // carry something that is not a name falls back to the shipped look's,
+        // which is what an unnamed skin is.
         const was = typeof parsed.value.themeName === "string" ? parsed.value.themeName : "";
-        return root.applyFile(parsed.value, was, root.policy.undoName);
+        return root.applyFile(parsed.value,
+                              was === "" ? root.policy.defaultName : was,
+                              root.policy.undoName);
     }
 
     /// The one path every apply takes: snapshot, plan, write, breadcrumb, log.
@@ -193,7 +223,11 @@ Singleton {
         Logger.log("theme", root.policy.appliedLine(spokenAs ? spokenAs : label, writes, resets)
                    + (refused > 0 ? " — " + refused + " key(s) the config refused" : ""));
 
-        ShellState.set("theme.lastApplied", label === root.policy.defaultName ? "" : label);
+        // The shipped look is written out by name rather than as an empty
+        // string: "I chose the default" and "nobody has ever chosen" are the
+        // same look and read the same in the list, but only one of them is a
+        // thing the user did, and the state file is where that is recorded.
+        ShellState.set("theme.lastApplied", label);
         return true;
     }
 
@@ -203,15 +237,7 @@ Singleton {
         // only ever reads the paths the schema flags, so this rides along
         // without being applied to anything.
         file.themeName = root.applied;
-
-        // Held here as well as written, because the watcher below cannot see a
-        // file that did not exist when it started: on a machine whose first
-        // apply *creates* the slot, `undoFile` has already failed to load and
-        // nothing brings it back — so the undo button would stay dead for the
-        // rest of the session, which is the #81 shape (measured in
-        // tools/theme-harness.sh before this line existed).
-        root.undoText = root.encode(file);
-        root.writeFile(Paths.previousThemeFile, file);
+        root.writeUndoFile(file);
     }
 
     // --- deleting -------------------------------------------------------------
@@ -226,7 +252,10 @@ Singleton {
         }
 
         const clean = String(name).trim();
-        remover.command = ["rm", "-f", "--", root.themePath(clean)];
+        // No `-f`: a delete that removed nothing must not report a deletion.
+        // `rm` answers non-zero for a file that was not there, and that answer
+        // is the difference between "gone" and "was never here" (#78).
+        remover.command = ["rm", "--", root.themePath(clean)];
         remover.removing = clean;
         remover.running = true;
         return true;
@@ -234,8 +263,13 @@ Singleton {
 
     // --- files ----------------------------------------------------------------
 
+    /// Where a theme lives, or "" for a name that has no file — which is what a
+    /// refused name is. Never `themesDir + "/"`: pointing a FileView at the
+    /// directory itself is a read that fails in a way that reads like a missing
+    /// theme, and a write that fails in a way that reads like nothing at all.
     function themePath(name: string): string {
-        return Paths.themesDir + "/" + root.policy.fileName(name);
+        const file = root.policy.fileName(name);
+        return file === "" ? "" : Paths.themesDir + "/" + file;
     }
 
     /// `{ ok, value, error }`, the same shape the config engine's parse returns.
@@ -249,7 +283,7 @@ Singleton {
         const text = reader.text();
         if (!reader.loaded)
             return { ok: false, value: null, error: "cannot read " + path };
-        return root.policy.store.json.parse(text);
+        return root.json.parse(text);
     }
 
     /// A theme on disk, formatted like every other file the shell writes:
@@ -259,25 +293,67 @@ Singleton {
         return JSON.stringify(object, null, 2) + "\n";
     }
 
+    /// Writes a theme file, once there is a directory to write it into. The
+    /// directories are made at construction, so the queue below only ever holds
+    /// a press made in the first frames of a session.
+    ///
+    /// Deliberately not the path the undo slot takes: that has a `FileView` of
+    /// its own, so the two writes an apply issues in the same tick are never two
+    /// paths through one view. Core/SpecFile.qml draws the same line in its own
+    /// words — *"writing the backup through `file` would point the watcher at
+    /// the wrong path"*.
     function writeFile(path: string, object: var): void {
-        root.pending.push({ path: path, text: root.encode(object) });
-        if (root.dirsMade)
-            root.flushPending();
-        else
-            makeDirs.running = true;
+        if (path === "")
+            return;
+        if (!root.dirsMade) {
+            root.pending.push({ path: path, text: root.encode(object) });
+            return;
+        }
+        writer.path = path;
+        writer.setText(root.encode(object));
+        root.refreshListing();
+    }
+
+    function writeUndoFile(object: var): void {
+        const text = root.encode(object);
+        // Held as well as written, because the watcher cannot see a file that
+        // did not exist when it started: on a machine whose first apply
+        // *creates* the slot, `undoFile` has already failed to load and nothing
+        // brings it back — so the undo button would stay dead for the rest of
+        // the session, which is the #81 shape (measured in
+        // tools/theme-harness.sh before this line existed).
+        root.undoText = text;
+        if (!root.dirsMade) {
+            root.pendingUndo = text;
+            return;
+        }
+        undoFile.setText(text);
     }
 
     function flushPending(): void {
-        const queued = root.pending;
-        root.pending = [];
-        for (const item of queued) {
+        for (const item of root.pending) {
             writer.path = item.path;
             writer.setText(item.text);
         }
-        listing.rebuild();
+        root.pending = [];
+        if (root.pendingUndo !== "") {
+            undoFile.setText(root.pendingUndo);
+            root.pendingUndo = "";
+        }
+        root.refreshListing();
+    }
+
+    /// Re-scans the themes directory. Needed because the model cannot watch a
+    /// directory that does not exist, and on a fresh machine it does not: the
+    /// folder is made by the first save, and without this the theme that made it
+    /// would not appear in the list until the next start.
+    function refreshListing(): void {
+        listing.folder = "";
+        listing.folder = Paths.fileUrl(Paths.themesDir);
     }
 
     property var pending: []
+    property string pendingUndo: ""
     property bool dirsMade: false
 
     // The undo slot's text, kept live so the button knows whether there is
@@ -336,21 +412,28 @@ Singleton {
                                            + FileViewError.toString(error))
     }
 
+    // The slot's own view, which is also the one that writes it — its path never
+    // moves, so it is the one file in here a shared writer could not serve.
     FileView {
         id: undoFile
 
         path: Paths.previousThemeFile
+        atomicWrites: true
         watchChanges: true
         printErrors: false   // absent until the first apply
 
         onLoaded: root.undoText = undoFile.text()
         onLoadFailed: root.undoText = ""
+        onSaveFailed: error => Logger.warn("theme", "could not write " + undoFile.path + ": "
+                                           + FileViewError.toString(error))
     }
 
     FileView {
         id: appliedFile
 
-        path: root.applied === "" ? "" : root.themePath(root.applied)
+        // Empty for the shipped look, which is not a file — and for a breadcrumb
+        // hand-edited into something that is not a name.
+        path: root.applied === root.policy.defaultName ? "" : root.themePath(root.applied)
         watchChanges: true
         printErrors: false
 
@@ -385,10 +468,11 @@ Singleton {
             Logger.log("theme", root.policy.deletedLine(remover.removing));
             // The label would otherwise go on naming a theme that is not there.
             // The look stays exactly as it is — deleting a theme is not undoing
-            // it.
+            // it, so what the shell is wearing becomes an unnamed skin, which is
+            // the shipped look's row saying "modified since".
             if (root.applied === remover.removing)
-                ShellState.set("theme.lastApplied", "");
-            listing.rebuild();
+                ShellState.set("theme.lastApplied", root.policy.defaultName);
+            root.refreshListing();
         }
     }
 
@@ -423,5 +507,11 @@ Singleton {
         }
     }
 
-    Component.onCompleted: Logger.stage("themes armed (ipc target: theme)")
+    // Made once per session rather than on the first save: a `mkdir` in front of
+    // a press is a press that does nothing until a subprocess comes back, and
+    // this one costs nothing on a machine that already has the directories.
+    Component.onCompleted: {
+        makeDirs.running = true;
+        Logger.stage("themes armed (ipc target: theme)");
+    }
 }

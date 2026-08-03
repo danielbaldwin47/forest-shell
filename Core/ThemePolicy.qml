@@ -165,26 +165,51 @@ QtObject {
         return out;
     }
 
-    /// Whether the settings file still looks like this theme.
+    /// Whether the shell is still wearing this theme, given the plan that
+    /// applying it produces and the shell's **resolved** values.
     ///
     /// The breadcrumb says which theme was applied, and this is what keeps it
     /// honest: a knob moved afterwards — in the GUI or by hand — means the file
     /// is no longer that theme, and the list says so rather than ticking a row
     /// the shell has since departed from.
-    function matches(schema: var, raw: var, file: var): bool {
-        const planned = policy.plan(schema, file);
+    ///
+    /// Resolved values and not the file, and the theme's values put through the
+    /// same coercers, because applying is not a byte copy. A theme carrying a
+    /// bar opacity of 0.2 is applied at the 0.65 floor (#79) and a theme
+    /// spelling out a knob at its default has that knob dropped from the sparse
+    /// file — compared raw, both would read as drift the instant they were
+    /// applied, and the tick would never survive its own apply.
+    function wears(schema: var, values: var, planned: var): bool {
         if (!planned.ok)
             return false;
         for (const op of planned.ops) {
-            const current = policy.store.getPath(raw, op.path);
-            if (op.reset) {
-                if (current !== undefined)
-                    return false;
-            } else if (!policy.store.equals(current, op.value)) {
+            const leaf = policy.store.leafAt(schema.spec, op.path);
+            if (!leaf)
                 return false;
-            }
+            const current = policy.store.getPath(values, op.path);
+            const wanted = op.reset ? leaf.def
+                                    : (leaf.coerce ? leaf.coerce(op.value) : op.value);
+            if (wanted === undefined || !policy.store.equals(current, wanted))
+                return false;
         }
         return true;
+    }
+
+    /// The same question asked of a theme file rather than a plan, for a caller
+    /// with no reason to hold one.
+    function matches(schema: var, values: var, file: var): bool {
+        return policy.wears(schema, values, policy.plan(schema, file));
+    }
+
+    /// How many of the flagged keys a theme actually carries — the number in the
+    /// log line, and not `Object.keys(file).length`, which counts the sections
+    /// the keys are nested in plus the version stamp.
+    function carriedCount(schema: var, file: var): int {
+        let count = 0;
+        for (const path of policy.carriedPaths(schema.spec))
+            if (policy.store.getPath(file, path) !== undefined)
+                count++;
+        return count;
     }
 
     // --- names ----------------------------------------------------------------
@@ -206,7 +231,6 @@ QtObject {
             return "a name cannot contain a slash";
         if (text.startsWith("."))
             return "a name cannot start with a dot";
-        // eslint-disable-next-line no-control-regex
         if (/[\x00-\x1f]/.test(text))
             return "a name cannot contain control characters";
         if (text.length > 64)

@@ -296,31 +296,83 @@ TestCase {
 
     // --- the breadcrumb -------------------------------------------------------
 
-    function test_a_file_that_still_matches_its_theme() {
-        const raw = sampleRaw();
-        verify(policy.matches(schema, raw, policy.themeFile(schema, raw)));
+    /// What the shell holds after a theme has been applied: the plan run through
+    /// the config engine's own coercers, over resolved defaults. The same thing
+    /// `Config.set` does, which is what makes the drift answers below true of a
+    /// running shell rather than of an idealised one.
+    function applied(file) {
+        const values = store.resolve(schema.spec, {}).values;
+        for (const op of policy.plan(schema, file).ops) {
+            const leaf = store.leafAt(schema.spec, op.path);
+            store.setPath(values, op.path,
+                          op.reset ? leaf.def : leaf.coerce(op.value));
+        }
+        return values;
+    }
+
+    function test_a_shell_still_wears_the_theme_it_applied() {
+        const theme = policy.themeFile(schema, sampleRaw());
+        verify(policy.matches(schema, applied(theme), theme));
     }
 
     function test_a_knob_moved_afterwards_is_a_drift() {
-        const raw = sampleRaw();
-        const theme = policy.themeFile(schema, raw);
-        raw.bar.surface.opacity = 0.9;
-        verify(!policy.matches(schema, raw, theme));
+        const theme = policy.themeFile(schema, sampleRaw());
+        const values = applied(theme);
+        values.bar.surface.opacity = 0.9;
+        verify(!policy.matches(schema, values, theme));
     }
 
     function test_a_layout_change_afterwards_is_not_a_drift() {
         // Layout is not part of the skin, so moving the bar does not stop the
         // theme from being the theme.
-        const raw = sampleRaw();
-        const theme = policy.themeFile(schema, raw);
-        raw.bar.height = 28;
-        raw.bar.modules.left = ["workspaces"];
-        verify(policy.matches(schema, raw, theme));
+        const theme = policy.themeFile(schema, sampleRaw());
+        const values = applied(theme);
+        values.bar.height = 28;
+        values.bar.modules.left = ["workspaces"];
+        verify(policy.matches(schema, values, theme));
     }
 
-    function test_an_untouched_shell_matches_forest_default() {
-        verify(policy.matches(schema, { settingsVersion: 2 }, policy.defaultFile(schema)));
-        verify(!policy.matches(schema, sampleRaw(), policy.defaultFile(schema)));
+    function test_a_theme_that_was_coerced_on_the_way_in_is_not_instantly_drifted() {
+        // The regression this reading exists for: a theme carrying an opacity
+        // under #79's floor is applied *at* the floor, so a drift check that
+        // compared the file byte for byte would flag the row it had just ticked.
+        const theme = {
+            settingsVersion: schema.version,
+            bar: { surface: { opacity: 0.2 } }
+        };
+        verify(policy.matches(schema, applied(theme), theme));
+    }
+
+    function test_a_theme_that_spells_out_a_default_is_not_instantly_drifted() {
+        // The same bug from the other side: the config engine writes sparsely,
+        // so a knob a theme spells out at its shipped value never reaches the
+        // file at all.
+        const leaf = store.leafAt(schema.spec, "bar.ridgeline");
+        const theme = {
+            settingsVersion: schema.version,
+            bar: { ridgeline: { gap: leaf.def.gap } }
+        };
+        verify(policy.matches(schema, applied(theme), theme));
+    }
+
+    function test_an_untouched_shell_wears_forest_default() {
+        const shipped = policy.defaultFile(schema);
+        verify(policy.matches(schema, store.resolve(schema.spec, {}).values, shipped));
+        verify(!policy.matches(schema, store.resolve(schema.spec, sampleRaw()).values, shipped));
+    }
+
+    function test_a_theme_the_config_would_refuse_outright_is_never_worn() {
+        // `bar.surface` as a string is refused by the group's coercer, so
+        // nothing was applied and nothing can be wearing it.
+        const theme = { settingsVersion: schema.version, bar: { surface: "nord" } };
+        verify(!policy.matches(schema, store.resolve(schema.spec, {}).values, theme));
+    }
+
+    function test_the_key_count_in_the_log_counts_keys_and_not_sections() {
+        // Two carried keys in two sections, plus the version stamp.
+        const file = policy.themeFile(schema, sampleRaw());
+        compare(policy.carriedCount(schema, file), 3);
+        compare(policy.carriedCount(schema, policy.defaultFile(schema)), 0);
     }
 
     // --- names ----------------------------------------------------------------

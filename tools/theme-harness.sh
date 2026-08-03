@@ -137,6 +137,21 @@ await_json "$THEMES/Moss.json" '.settingsVersion == 2' \
 await_json "$THEMES/Moss.json" '(.bar.surface | has("grain")) == false' \
     'a saved theme is sparse — an untouched knob is not frozen into it'
 
+# The themes directory did not exist when the shell started, so the model behind
+# the list could not have been watching it. A save that does not appear in the
+# list until the next restart is the shape of bug this check exists for.
+listed=$(ipc names)
+if grep -qa 'Moss' <<< "$listed"; then
+    nested_pass 'the theme the first save created appears in the list'
+else
+    nested_fail "the list does not hold the theme that was just saved: $listed"
+fi
+if grep -qaE '^\* Moss' <<< "$listed"; then
+    nested_pass 'saving the current skin marks you as wearing it, unmodified'
+else
+    nested_fail "the saved theme is not marked as worn: $listed"
+fi
+
 # --- 3. a second theme, and applying it --------------------------------------
 
 cat > "$THEMES/Ridge.json" <<'EOF'
@@ -179,6 +194,30 @@ ipc apply Faint > /dev/null
 expect_since "$mark" 'theme: applied "Faint"' 'a theme from under the floor still applies'
 await_json "$SETTINGS" '.bar.surface.opacity == 0.65' \
     'an out-of-range opacity is applied at the floor, not raw'
+
+# ...and the theme is still the theme afterwards. What lands is coerced, so a
+# drift check comparing the settings against the theme file byte for byte would
+# report the row it had just ticked as modified.
+current=$(ipc current)
+if [[ "$current" == "Faint" ]]; then
+    nested_pass 'a coerced theme is worn rather than instantly modified'
+else
+    nested_fail "the shell does not report wearing the theme it just applied: $current"
+fi
+
+# A knob moved afterwards *is* a drift: applying is a copy and never a link, so
+# a hand edit to settings.json is an edit to the settings and not to the theme.
+jq '.bar.surface.grain = 0.09' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+for _ in $(seq 1 40); do
+    [[ "$(ipc current)" == "Faint (modified)" ]] && break
+    sleep 0.1
+done
+if [[ "$(ipc current)" == "Faint (modified)" ]]; then
+    nested_pass 'a knob moved after the apply is reported as a drift'
+else
+    nested_fail "a hand edit after the apply was not noticed: $(ipc current)"
+fi
+jq 'del(.bar.surface.grain)' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
 # --- 6. the shipped look is the deletion of the flagged keys -----------------
 
@@ -234,6 +273,12 @@ else
 fi
 await_json "$SETTINGS" '.bar.surface.opacity == 0.9' \
     'deleting a theme does not undress the shell'
+
+# A delete that removed nothing must not report a deletion.
+mark=$(log_lines)
+ipc remove Moss > /dev/null
+expect_since "$mark" 'theme: refusing "Moss": rm exited' \
+    'deleting a theme that is not there says so rather than reporting a deletion'
 
 # --- 10. a refused name is refused out loud ----------------------------------
 

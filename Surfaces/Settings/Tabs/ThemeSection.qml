@@ -34,11 +34,11 @@ ColumnLayout {
         const out = [{
             name: Themes.policy.defaultName,
             icon: "leaf",
-            applied: Themes.applied === "",
-            // No theme is named *and* the file is not the shipped look: the
-            // user has drifted from the default rather than from a preset,
-            // which is the same thing said about the same row.
-            drifted: Themes.applied === "" && !root.isDefault,
+            // The shipped look is a row like any other: it is what the shell is
+            // wearing when nothing else has been applied, and a knob moved
+            // afterwards drifts *from* it exactly as it would from a preset.
+            applied: Themes.applied === Themes.policy.defaultName,
+            drifted: Themes.applied === Themes.policy.defaultName && Themes.drifted,
             removable: false,
             note: "The shipped forest palette — applying it clears every themed key."
         }];
@@ -65,22 +65,6 @@ ColumnLayout {
         return out;
     }
 
-    /// Whether the shell is currently wearing nothing but the shipped defaults.
-    /// The tick on the first row is this and not the breadcrumb: a shell that
-    /// has never applied anything is on the default look, and one that has since
-    /// moved a knob is not.
-    readonly property bool isDefault: {
-        // Named so the binding has real dependencies: `Themes.current()` is a
-        // function call, and a binding that only calls a function does not
-        // re-evaluate when the function's data moves (Controls/ConfigBinding.qml
-        // says the same thing about `Config.get`).
-        const values = Config.values;
-        const raw = Config.raw;
-        return values !== undefined && raw !== undefined
-            && Themes.policy.matches(Config.schema, Themes.current(),
-                                     Themes.policy.defaultFile(Config.schema));
-    }
-
     /// What is typed into the name field. Held here rather than read off the
     /// field so the Save button and the refusal line see the same string.
     property string typedName: ""
@@ -102,12 +86,8 @@ ColumnLayout {
 
             required property var modelData
 
-            readonly property bool isDefaultRow:
-                themeRow.modelData.name === Themes.policy.defaultName
-
-            readonly property bool ticked: themeRow.isDefaultRow
-                ? (Themes.applied === "" && root.isDefault)
-                : (themeRow.modelData.applied && !themeRow.modelData.drifted)
+            readonly property bool ticked:
+                themeRow.modelData.applied && !themeRow.modelData.drifted
 
             Layout.fillWidth: true
             implicitHeight: rowBody.implicitHeight + Theme.space3 * 2

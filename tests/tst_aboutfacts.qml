@@ -46,12 +46,11 @@ TestCase {
         verify(!about.changelogSeen("0.0.1"));
     }
 
-    function test_a_newer_version_in_the_state_file_still_reads_as_seen() {
-        // Downgrading is not the case this flag exists for, and a shell that
-        // re-announced an older changelog because the state file had run ahead
-        // would be announcing news the user has already had. Any non-empty
-        // string that is not *this* version is unseen — except the equality
-        // above — so this is stated rather than assumed.
+    function test_a_newer_version_in_the_state_file_reads_as_unseen() {
+        // The comparison is equality and not ordering, so a state file that has
+        // run ahead of the build — a downgrade — reads as unread. That is the
+        // conservative direction: showing notes twice costs a dismissal, and
+        // the alternative is a version whose notes are never shown at all.
         verify(!about.changelogSeen("99.0.0"));
     }
 

@@ -209,6 +209,8 @@ TabPage {
     }
 
     IdleStage {
+        id: dimStage
+
         stage: "dim"
         title: "Dim the screen"
         hint: "Down to the level below, restored on the first activity."
@@ -216,6 +218,7 @@ TabPage {
         SettingRow {
             label: "Dim level"
             hint: "Percent of the backlight, not a fraction of the current brightness."
+            enabled: dimStage.on
             binding: dimLevelBinding
 
             ConfigBinding { id: dimLevelBinding; path: "system.idle.dim.level" }

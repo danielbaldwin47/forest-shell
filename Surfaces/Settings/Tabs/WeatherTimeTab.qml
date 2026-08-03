@@ -34,17 +34,41 @@ TabPage {
     }
 
     SettingRow {
-        label: "Place"
-        hint: "A place name, geocoded once and cached. Blank means *neither*: the card "
-              + "says it has not been told where it is and no request is made. `auto` is "
-              + "the opt-in that asks a geolocation service what this IP looks like — the "
-              + "one request this shell makes that tells a third party something rather "
-              + "than only asking it something."
+        label: "Where"
+        hint: "Blank is *neither*: the card says it has not been told where it is and no "
+              + "request is made. **This IP address** is the opt-in that asks a "
+              + "geolocation service what this address looks like — the one request this "
+              + "shell makes that tells a third party something rather than only asking "
+              + "it something, which is why it is a choice and not a fallback."
         binding: placeBinding
 
         ConfigBinding { id: placeBinding; path: "weatherTime.weather.place" }
 
-        SettingText { binding: placeBinding; placeholder: "Lisbon, or auto" }
+        SettingChoice {
+            binding: placeBinding
+            // One key, three states, and only two of them are words: these
+            // chips write those two and the field below writes the third. With
+            // a place name in the key neither chip is current, which is the
+            // honest reading — the answer is in the box under them.
+            //
+            // `auto` was reachable before this by typing it into the field and
+            // no other way, which is a mode nothing on the page mentioned. The
+            // ticket names it as a thing of its own, and a mode you have to
+            // know the magic word for is not one the GUI offers.
+            options: [
+                { value: "", label: "Not set" },
+                { value: "auto", label: "This IP address" }
+            ]
+        }
+    }
+
+    SettingRow {
+        label: "Place"
+        hint: "A place name, geocoded once and then cached with the reading. Typing one "
+              + "replaces whichever of the two above is set."
+        binding: placeBinding
+
+        SettingText { binding: placeBinding; placeholder: "Lisbon" }
     }
 
     SettingRow {

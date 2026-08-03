@@ -330,6 +330,19 @@ QtObject {
         },
 
         weatherTime: {
+            // **Still no clock-format key here, and that is now the only thing
+            // this section is missing.** This stub used to say it landed with
+            // #50; #50 built the weather half and left the clock alone, because
+            // its acceptance criteria are four and none of them is a clock —
+            // the ownership gap its own maintenance comment raised was never
+            // resolved either way. The interim rule lives in
+            // Core/ClockFormat.qml (locale-derived, no seconds) and is read by
+            // the bar and the dashboard header; Surfaces/Lock/LockPolicy.qml
+            // still holds a duplicate of it, pinned to that one by
+            // tests/tst_clockformat.qml. Collapsing the two and giving the
+            // format a key is what #93 has left, and #55's Weather & Time tab
+            // is where the control would go.
+
             // The weather card (#50). Open-Meteo, keyless, and asked about one
             // place — Services/Weather/WeatherPolicy.qml builds every URL these
             // keys turn into.

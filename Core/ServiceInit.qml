@@ -21,6 +21,10 @@ import qs.Services.Networking
 import qs.Services.Hardware
 import qs.Services.System
 import qs.Services.Launcher
+import qs.Services.Screenshot
+import qs.Services.Recorder
+import qs.Services.Weather
+import qs.Services.Theming
 
 Singleton {
     id: root
@@ -115,14 +119,56 @@ Singleton {
         // silent in the worst possible way — a machine that never locks, and a
         // suspend that never waits for the lock it did not take.
         //
+        // Weather (#50) is here for what it does *not* do. Naming it constructs
+        // it, and construction reads the cached forecast out of `state.json` —
+        // a file read, no network. The first request waits for the card to
+        // appear over a stale reading, which is what keeps the shell's startup
+        // free of network cost and keeps a poll from running behind a closed
+        // drawer (#22 §5). Without a line here the cache would only be read the
+        // first time a dashboard opened, so the first open of every session
+        // would show an empty card while a fetch was in flight.
+        //
+        // Services/System/SystemStats.qml is deliberately *not* on this list,
+        // and it is the sharpest case for the rule cutting the other way: it is
+        // the one service in this shell that costs something continuously, it
+        // does nothing at all until a surface subscribes, and there is no
+        // startup work for a force-touch to bring forward. The dashboard card
+        // and the optional bar module construct it by using it.
+        //
         // Deferred rather than sync, because the first stage is minutes away and
         // the wallpaper is not: the only cost of arriving a frame late is a
         // ladder that starts counting a frame late.
-        report("deferred", [ShellState, Notifications, Compositor,
+        // Screenshot (#51) is here for the same reason the lock is: nothing in
+        // the shell reads it, and naming it is what registers `qs ipc call
+        // screenshot …` and probes for `wl-copy`. A keybind aimed at a target
+        // that was never constructed is the #81 shape — a key that does
+        // nothing, with no line in the log saying why.
+        //
+        // Recorder (#52) is here for that reason and one more: naming it is
+        // what runs the two encoder probes, so the control centre can say
+        // whether this machine records on the GPU or in software before
+        // anybody presses the tile.
+        // Themes (#56) is Screenshot's argument in Core: nothing in the shell
+        // reads it until the Appearance tab is opened, and naming it is what
+        // registers `qs ipc call theme …` — the door a keybind that swaps skins
+        // goes through, and the one tools/theme-harness.sh drives. It reads the
+        // undo slot on construction, which is a file read and no more.
+        // Theming (#58) is the list's original argument in its purest form:
+        // *nothing* references it. It publishes through the settings file, so
+        // no surface has a reason to name it, and without a line here the
+        // wallpaper-coupled accent would simply never be computed — the mode
+        // would be selectable in the settings window and do nothing.
+        //
+        // Deferred and not sync on purpose. The first frame paints the accent
+        // already in the settings file, which is the one this machine sampled
+        // last session; quantizing the wallpaper to confirm it is not worth a
+        // frame, and doing it before the wallpaper would delay the thing it is
+        // reading.
+        report("deferred", [ShellState, Themes, Theming, Notifications, Compositor,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude,
                             PowerProfiles, NightLight, Vpn,
-                            LogindBridge, Idle]);
+                            LogindBridge, Idle, Weather, Screenshot, Recorder]);
     }
 
     // Surfaces have the same problem for a different reason: a window nothing

@@ -10,20 +10,59 @@
 // to redraw a glyph nobody is watching, they would cost most of the idle budget
 // (#22 §5) on their own.
 //
-// The format is fixed here rather than in settings.json because the clock
-// format key belongs to the weather & time ticket (#50), along with the
-// 12/24-hour choice and the locale question underneath it. Naming it now would
-// commit a key that ticket would have to migrate away from.
+// The format is not fixed here and no longer decided here either. It was, and
+// that was #93: this module hardcoded 24-hour while the lock followed the
+// locale, so the same shell read `19:26` on the bar and `7:30 PM` on the lock.
+// The rule is Core/ClockFormat.qml now — a file that is not a surface, so
+// three surfaces can share one answer — and the dashboard (#49) reads it too.
+// The *setting* still belongs to the weather & time ticket (#50); naming a key
+// here would commit one that ticket would have to migrate away from.
+//
+// **It is also a door** (#49). The clock is what opens the dashboard, which is
+// why that surface has no bar module of its own: the time is the thing you look
+// at when you want to know what today is, and #9 hangs the day's panel off it.
+// Dispatched through Core/SurfaceBus.qml like the launcher and control-centre
+// buttons, so the module holds no reference to a surface that may not have
+// loaded yet.
 import QtQuick
 import qs.Core
 
 Text {
-    text: Qt.formatDateTime(Time.now, "ddd d MMM   HH:mm")
+    id: clock
 
-    color: Theme.textSecondary
+    readonly property ClockFormat format: ClockFormat {}
+
+    // Date and time in one line, which is the bar's own shape: three spaces
+    // between them rather than a separator, because the pair reads as one
+    // object at 13pt and a middot would make it two readouts.
+    text: Qt.formatDateTime(Time.now, clock.format.dateFormatCompact + "   "
+        + clock.format.timeFormatFor(Qt.locale().timeFormat(Locale.ShortFormat)))
+
+    // Lit under the pointer, which is the whole of "this is pressable" on a
+    // module that must not grow a button's chrome — the clock is the bar's one
+    // considered object, and a hover fill around it would make it a control
+    // among controls.
+    color: hover.hovered ? Theme.accentPrimary : Theme.textSecondary
     font.family: Theme.fontDisplay
     font.weight: Theme.weightDisplay
     // pointSize, not pixelSize: the type scale has half-pixel steps and
     // `font.pixelSize` is an int (measured in #10, the hard way).
     font.pointSize: Theme.pt(13)
+
+    Behavior on color {
+        ColorAnimation {
+            duration: Theme.duration(Theme.motionFast)
+            easing.type: Easing.Bezier
+            easing.bezierCurve: Theme.fogEase
+        }
+    }
+
+    HoverHandler {
+        id: hover
+        cursorShape: Qt.PointingHandCursor
+    }
+
+    TapHandler {
+        onTapped: SurfaceBus.toggle("dashboard")
+    }
 }

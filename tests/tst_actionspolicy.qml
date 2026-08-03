@@ -114,6 +114,64 @@ TestCase {
         verify(bus.known(testCase.find("session.menu").arg));
     }
 
+    function test_the_screenshot_row_goes_direct_rather_than_through_the_bus() {
+        // #51. Like `session.lock` and unlike the surface rows: every verb the
+        // bus dispatches is `toggle()`, and asking a picker to toggle mid-drag
+        // would throw the drag away.
+        const row = testCase.find("screenshot.region");
+        verify(row !== null);
+        compare(row.kind, "screenshot");
+        compare(row.target, "");
+        compare(row.verb, "");
+        // Not a bus name either, which is the mistake the empty verb prevents.
+        verify(!bus.known("screenshot"));
+    }
+
+    function test_the_words_people_reach_for_a_screenshot_by_all_find_it() {
+        // "print" is on the list because the key is called Print Screen, and
+        // "snip" because that is what the other desktop calls it.
+        for (const word of ["screenshot", "capture", "region", "snip", "print"])
+            compare(policy.rows(word, testCase.dark)[0].run.id, "screenshot.region");
+    }
+
+    // --- recording (#52) -----------------------------------------------------
+
+    function test_both_recording_rows_go_direct_rather_than_through_the_bus() {
+        for (const id of ["recording.toggle", "recording.region"]) {
+            const row = testCase.find(id);
+            verify(row !== null);
+            compare(row.kind, "recording");
+            compare(row.target, "");
+            compare(row.verb, "");
+        }
+        verify(!bus.known("recording"));
+    }
+
+    /// The two rows share a kind and are told apart by `arg` — the whole reason
+    /// Actions.qml has one `case` for both.
+    function test_the_two_recording_rows_differ_only_in_their_argument() {
+        compare(testCase.find("recording.toggle").arg, "screen");
+        compare(testCase.find("recording.region").arg, "region");
+    }
+
+    /// One toggle row and not a start row plus a stop row: the catalogue is
+    /// built before the query is typed and cannot know the recorder's state,
+    /// so two rows would put the wrong one in front of the user most of the
+    /// time.
+    function test_recording_is_one_toggle_row_and_a_region_row() {
+        const ids = policy.catalogue(testCase.dark)
+                          .map(r => r.id)
+                          .filter(id => id.startsWith("recording."));
+        compare(ids.length, 2);
+    }
+
+    function test_the_words_people_reach_for_a_recording_by_all_find_one() {
+        for (const word of ["record", "screencast", "video"]) {
+            const first = policy.rows(word, testCase.dark)[0];
+            verify(String(first.run.id).startsWith("recording."));
+        }
+    }
+
     // --- matching ------------------------------------------------------------
 
     function test_an_empty_query_is_the_whole_table_in_table_order() {

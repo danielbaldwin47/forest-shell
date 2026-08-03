@@ -48,7 +48,7 @@
 // the config root, and only from here does `qs.Services.Launcher` resolve to
 // the real provider.
 //
-//   qs-upstream -p launcher-harness.qml   # inside the nested display
+//   qs -p launcher-harness.qml   # inside the nested display
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell

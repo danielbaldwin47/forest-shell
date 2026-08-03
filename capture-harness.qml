@@ -36,7 +36,8 @@
 //
 // Environment, all set by tools/capture-harness.sh:
 //   CAPTURE_OUT          where to save the PNG (required)
-//   CAPTURE_SURFACE      bar | bar-full | lock | settings | drawer  (default bar)
+//   CAPTURE_SURFACE      bar | bar-full | lock | settings | drawer | launcher |
+//                        center | controlcenter | dashboard | osd  (default bar)
 //   CAPTURE_W/CAPTURE_H  scene size in logical px (default 1280x800)
 //   CAPTURE_BAR_OPACITY  override for the bar fill opacity, e.g. "0.65"
 //                        (defaults to the configured bar.surface.opacity)
@@ -56,6 +57,7 @@ import qs.Surfaces.Lock
 import qs.Surfaces.Settings
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
+import qs.Surfaces.Screenshot
 import qs.Services.Launcher
 import qs.Services.Notifications
 import qs.Services.System
@@ -70,6 +72,15 @@ ShellRoot {
     readonly property string opacityOverride: Quickshell.env("CAPTURE_BAR_OPACITY") ?? ""
     readonly property string settingsTab: Quickshell.env("CAPTURE_SETTINGS_TAB") ?? ""
 
+    /// How far down the settings page to scroll before grabbing, in px. The
+    /// System tab (#55) is several windows tall and its lower half — the idle
+    /// ladder and the session commands — is exactly the #80 class this seam
+    /// exists to catch, so "the top of the page" is not the whole surface.
+    /// Clamped to what there is to scroll, so a number past the bottom lands on
+    /// the bottom rather than on blank.
+    readonly property int settingsScroll:
+        Number(Quickshell.env("CAPTURE_SETTINGS_SCROLL") ?? "0") || 0
+
     /// Which control-centre detail view to open before the grab (#45), or "" for
     /// the grid. `wifi`, `bluetooth`, `audio`, `vpn`, `wallpaper`.
     readonly property string drillPanel: Quickshell.env("CAPTURE_DRILL") ?? ""
@@ -78,6 +89,14 @@ ShellRoot {
     /// fact here is: a capture driven by the real services is a picture of
     /// whatever this laptop's volume happened to be.
     readonly property var osdState: (Quickshell.env("CAPTURE_OSD") || "volume:45").split(":")
+
+    /// What the region picker is doing (#51): `region` is a drawn selection
+    /// with its readout, `window` is the hover state a click would take. Posed
+    /// rather than driven, for the reason everything else here is — a capture
+    /// that ran the real picker would photograph whatever this laptop's desktop
+    /// happened to be, and could not run offscreen at all, since the freeze is
+    /// a `grim` capture of a session this mode does not have.
+    readonly property string pickState: Quickshell.env("CAPTURE_PICK") || "region"
 
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
@@ -158,7 +177,9 @@ ShellRoot {
                     case "launcher": return launcherScene;
                     case "center":   return centerScene;
                     case "controlcenter": return controlCenterScene;
+                    case "dashboard": return dashboardScene;
                     case "osd":      return osdScene;
+                    case "screenshot": return screenshotScene;
                     default:         return barScene;
                     }
                 }
@@ -600,6 +621,11 @@ ShellRoot {
                     volume: { available: true, percent: 45, muted: false },
                     mic: { available: true, percent: 80, muted: true },
                     brightness: { available: true, percent: 60 },
+                    // #52's tenth tile, posed idle. It is what makes the grid
+                    // 3x3 plus one, so leaving it out of this fixture would
+                    // mean the short last row — the only #80-class question
+                    // this change raises — was never in a picture.
+                    recording: { available: true, on: false, detail: "GPU" },
                     battery: { hasBattery: true, label: "84%",
                                state: "discharging", timeRemaining: "3h 20m" }
                 })
@@ -641,6 +667,160 @@ ShellRoot {
             // Left at the root again, so a harness run cannot leave a scanner
             // running on the machine that ran it.
             Component.onDestruction: ControlCenterActions.back("capture")
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+        }
+    }
+
+    /// The dashboard (#49), hanging from the bar's clock, posed with a day and
+    /// a player.
+    ///
+    ///     tools/capture-harness.sh out.png --surface dashboard --session
+    ///     tools/capture-harness.sh out.png --surface dashboard --light
+    ///
+    /// `--session` for the picture: the transport buttons, the calendar's
+    /// chevrons and the cover-art placeholder are all Lucide glyphs, and
+    /// `MultiEffect` draws nothing on the offscreen scenegraph
+    /// (Widgets/Icon.qml). Offscreen still measures the fills and the layout,
+    /// which is what this surface is captured for — a seven-column grid inside a
+    /// 380px panel and a track title of arbitrary length beside it are both the
+    /// #80 shape waiting to happen.
+    ///
+    /// Everything is *posed*, and this surface needs it more than any other:
+    /// the calendar draws today, so an unposed capture is a different picture
+    /// every day and the same one is never taken twice; the media card draws
+    /// whatever this machine is playing, which on the machine running a capture
+    /// is usually nothing at all — and "nothing" removes the card entirely.
+    /// The date is #93's own example minute, so a dashboard capture and a
+    /// bar-full one can be read side by side.
+    ///
+    /// The two images are the scratch wallpaper the harness generated, used as
+    /// cover art and as the account picture. A real file rather than a
+    /// placeholder, because what is being judged is the *clipping* — album art
+    /// is the one arbitrary image this shell puts on screen, and a square
+    /// corner poking out of a rounded card is only visible with something in
+    /// it.
+    Component {
+        id: dashboardScene
+
+        Backdrop {
+            id: dashboardBackdrop
+
+            FogScrim {
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                shown: true
+            }
+
+            Dashboard {
+                id: dash
+
+                anchors {
+                    top: parent.top
+                    topMargin: Config.values.bar.height
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+
+                facts: ({
+                    now: new Date(2026, 7, 1, 19, 26),
+                    profile: { name: "Daniel",
+                               avatar: Config.values.wallpaper.path },
+                    // The weather (#50), posed for the same reason the calendar
+                    // is: the live card is a picture of the sky over whoever
+                    // ran the capture, on the day they ran it, and on a machine
+                    // with no network it is a line of small print. An overcast
+                    // afternoon with rain coming is the layout worth
+                    // photographing — four columns of two temperatures each
+                    // inside a 380px panel is the #80 shape.
+                    weather: {
+                        status: "ready",
+                        label: "Boston, Massachusetts, US",
+                        message: "",
+                        // Posed with the rest of the reading rather than read
+                        // from the settings: a capture taken on a machine
+                        // configured in Fahrenheit would otherwise draw "12
+                        // mph" under these Celsius numbers.
+                        units: "metric",
+                        current: { temperature: 24.3, feelsLike: 25.1,
+                                   humidity: 61, wind: 12.4, code: 3, day: true },
+                        days: [
+                            { date: "2026-08-01", code: 3, high: 26.4, low: 18.2 },
+                            { date: "2026-08-02", code: 61, high: 22.1, low: 17.0 },
+                            { date: "2026-08-03", code: 0, high: 27.9, low: 19.4 },
+                            { date: "2026-08-04", code: 95, high: 24.6, low: 18.8 }
+                        ]
+                    },
+                    // The machine, posed as the sampler's own two values rather
+                    // than as finished rows — the card runs them through the
+                    // same policy the live one does, so a capture cannot pass
+                    // against row rules the shell does not use.
+                    system: {
+                        sample: { cpu: 0.42, memory: 0.61, disk: 0.53,
+                                  temperature: 62.5,
+                                  memoryUsedKb: 9993420, memoryTotalKb: 16384000,
+                                  diskUsedKb: 491470000, diskTotalKb: 982940000 },
+                        history: {
+                            cpu: root.wave(0.42, 0.30, 7),
+                            memory: root.wave(0.61, 0.05, 3),
+                            disk: root.wave(0.53, 0.00, 1),
+                            // A machine whose first samples are missing, which
+                            // is what every freshly-opened card looks like —
+                            // the gap at the left of the row is in the picture
+                            // on purpose.
+                            temperature: root.wave(0.50, 0.18, 5, 12)
+                        }
+                    },
+                    media: {
+                        showing: true,
+                        // The longest thing this row ever carries, which is the
+                        // overflow worth photographing: a title from another
+                        // application, next to a 64px cover.
+                        title: "It's Not Just Me, It's Everybody",
+                        artist: "Weyes Blood",
+                        art: Config.values.wallpaper.path,
+                        playing: true,
+                        canGoBack: true,
+                        canToggle: true,
+                        // A player that will not skip, so the dimmed state of a
+                        // transport button is in the picture too.
+                        canSkip: false,
+                        position: 128,
+                        length: 372,
+                        scrubbable: true
+                    }
+                })
+            }
+
+            function describe(): void {
+                root.sceneDescription =
+                    "cards=" + dash.cards.length
+                    + " (" + (dash.cards.join(",") || "none") + ")"
+                    + " mode=" + (Theme.dark ? "dark" : "light")
+                    + " panel=" + root.region(dash.panelItem, dashboardBackdrop)
+                    + " bar=" + Config.values.bar.height;
+            }
+
+            // Deferred, like the control centre's: the panel is sized from a
+            // column of cards that are still loading at `onCompleted`, so a
+            // region reported there is the header's alone.
+            Component.onCompleted: root.describeScene = dashboardBackdrop.describe
 
             BarSurface {
                 anchors {
@@ -730,6 +910,74 @@ ShellRoot {
         }
     }
 
+    /// #51: the region picker over a frozen screen — the veil, the marquee and
+    /// its readout, or the window highlight a click would take.
+    ///
+    /// The wallpaper stands in for the freeze, which is the honest substitution
+    /// rather than a convenient one: on a real session the freeze is a PNG of
+    /// the whole output and the overlay stretches it edge to edge, which is
+    /// exactly what `Backdrop`'s `Wallpaper` does here. What is being judged is
+    /// the picker's own chrome against a photograph — whether the veil is dark
+    /// enough to read the selection out of, and whether the readout stays
+    /// legible over an arbitrary picture.
+    ///
+    /// Every part of it is Rectangle, Image and Text, so this is one of the
+    /// surfaces the default offscreen mode judges completely — there is no
+    /// glyph in the picker to lose.
+    Component {
+        id: screenshotScene
+
+        Backdrop {
+            id: pickBackdrop
+
+            // A posed desktop, in the same logical coordinates the real picker
+            // works in. Two windows, one inside the other, so the hover state
+            // shows the smallest-wins rule rather than a single obvious box.
+            readonly property var posedWindows: [
+                { x: 40, y: 60, width: 620, height: 460, title: "kitty", appId: "kitty" },
+                { x: 700, y: 60, width: 540, height: 680, title: "Firefox", appId: "firefox" },
+                { x: 160, y: 180, width: 300, height: 200, title: "Preferences", appId: "kitty" }
+            ]
+
+            readonly property bool hovering: root.pickState === "window"
+
+            BarSurface {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                }
+                height: Config.values.bar.height
+                settings: Config.values.bar.surface
+                fillOpacity: Config.values.bar.surface.opacity
+                hairlineAtBottom: true
+            }
+
+            PickerOverlay {
+                id: picker
+                anchors.fill: parent
+
+                // Not `freezeSource`: the wallpaper behind this item is already
+                // standing in for the freeze, and pointing the overlay at it a
+                // second time would composite the picture over itself.
+                freezeSource: ""
+
+                windows: pickBackdrop.posedWindows
+                outputScale: 1.5
+
+                selection: pickBackdrop.hovering
+                    ? Qt.rect(0, 0, 0, 0)
+                    : Qt.rect(160, 180, 500, 340)
+                hovered: pickBackdrop.hovering ? pickBackdrop.posedWindows[2] : null
+            }
+
+            Component.onCompleted: root.sceneDescription =
+                "pick=" + root.pickState
+                + " selection=" + picker.selection.width + "x" + picker.selection.height
+                + " windows=" + pickBackdrop.posedWindows.length
+        }
+    }
+
     /// #73: the lock's status strip is one of the two `MultiEffect` surfaces
     /// the ticket says have never rendered anywhere. The real LockSurface and
     /// the real shared LockAuth — what stands in for the session is the state
@@ -800,6 +1048,17 @@ ShellRoot {
             page.parent = settingsBacking;
             page.anchors.fill = settingsBacking;
 
+            // Applied just before the grab and not here: the page is a
+            // Flickable whose `contentHeight` is the sum of a column that has
+            // not been laid out yet at `onLoaded`, so a clamp computed now
+            // would clamp against zero.
+            root.describeScene = function () {
+                if (root.settingsScroll > 0)
+                    settingsLoader.item.scrollPageTo(root.settingsScroll);
+                const at = settingsLoader.item.pageScroll;
+                root.sceneDescription = "tab=" + settingsLoader.item.currentTab
+                                      + (at > 0 ? "+scroll=" + Math.round(at) : "");
+            };
             root.sceneDescription = "tab=" + settingsLoader.item.currentTab;
         }
     }
@@ -810,6 +1069,23 @@ ShellRoot {
     /// desktop-entry scan streams in, so its height at `Component.onCompleted`
     /// is the height of an empty card.
     property var describeScene: null
+
+    /// A sparkline's worth of samples, generated rather than typed out: sixty
+    /// numbers written into the pose above would be sixty numbers to read past
+    /// (#50). Deterministic — a sine and not a random walk — because the whole
+    /// point of a posed capture is that the same picture is taken twice.
+    ///
+    /// `gap` leading samples come back as NaN, which is what a card that has
+    /// only just opened actually holds.
+    function wave(centre: real, swing: real, period: int, gap: int): var {
+        const out = [];
+        const missing = gap === undefined ? 0 : gap;
+        for (let i = 0; i < 60; i++)
+            out.push(i < missing
+                     ? NaN
+                     : Math.max(0, Math.min(1, centre + swing * Math.sin(i / period))));
+        return out;
+    }
 
     /// An item's bounds in the grabbed scene's coordinates, as `x,y,WxH` —
     /// the spelling tools/measure-contrast.py takes for `--region`.

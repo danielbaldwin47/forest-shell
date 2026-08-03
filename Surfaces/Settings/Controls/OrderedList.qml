@@ -1,44 +1,67 @@
-// One cluster of the bar's module registry (#54, for #35).
+// A config key that is an ordered list of names, edited in place (#54, #55).
 //
-// The registry is three ordered lists — left, centre, right — and membership is
-// the enable flag: a module that is in no cluster is off. That is why there is
-// no separate switch per module, and why removing one here is not destructive:
-// the id goes back to the pool below and can be dropped into any cluster.
+// Three keys have this exact shape, which is what moved this file up from
+// `Tabs/` where it was `BarModuleCluster.qml`: the bar's three module clusters,
+// the dashboard's cards, and the control centre's tile and slider grids. In all
+// of them **membership is the enable flag** — a name that is in no list is off
+// — which is why there is no separate switch per entry and why removing one is
+// not destructive: the id goes back to the pool below and can be dropped in
+// again.
 //
-// Reordering is buttons rather than drag-and-drop. The list is short, the order
-// is a rarely-touched setting, and a drag target inside a scrolling settings
-// page fights the scroll — arrows say what they do and cost nothing to hit.
+// Reordering is buttons rather than drag-and-drop. The lists are short, the
+// order is a rarely-touched setting, and a drag target inside a scrolling
+// settings page fights the scroll — arrows say what they do and cost nothing to
+// hit.
+//
+// This is not in a `SettingRow` slot, so it obeys the #80 rule itself: the text
+// column is the one on `Layout.fillWidth` and it elides, which keeps the arrows
+// and the remove button on screen at any window width.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.Core
 import qs.Widgets
-import qs.Surfaces.Settings.Controls
 
 ColumnLayout {
     id: root
 
-    /// `left`, `center` or `right`.
-    required property string cluster
+    /// The config key holding the list.
+    required property string path
 
-    required property string label
+    /// What the list is called, above it. Empty draws no heading, which is what
+    /// a tab with one list of its kind wants.
+    property string label: ""
 
-    /// Module ids that are in no cluster at all — the pool this one can take
-    /// from. Computed by the tab, because it spans all three lists.
+    /// Names that are not in *any* list of this kind — the pool this one can
+    /// take from. Computed by the tab, because for the bar it spans three keys
+    /// and only the tab can see all of them.
     required property var pool
 
-    readonly property var modules: Array.isArray(binding.value) ? binding.value : []
+    /// id → what to call it on screen. The identity by default, which is right
+    /// for the bar's modules: those ids *are* the vocabulary the user
+    /// hand-edits. A dashboard card has a name of its own and passes one.
+    property var labelFor: id => id
+
+    /// Whether entries are drawn in the mono face. True where the text on
+    /// screen is the literal id in the file, false where it is a title.
+    property bool mono: true
+
+    /// What the heading says when the list is empty. A list a user emptied on
+    /// purpose is a legal state, and silence would read as a rendering bug.
+    property string emptyNote: "empty"
+
+    readonly property var entries: Array.isArray(binding.value) ? binding.value : []
 
     Layout.fillWidth: true
     spacing: Theme.space2
 
     ConfigBinding {
         id: binding
-        path: "bar.modules." + root.cluster
+        path: root.path
     }
 
     function move(index: int, delta: int): void {
-        const next = root.modules.slice();
+        const next = root.entries.slice();
         const target = index + delta;
         if (target < 0 || target >= next.length)
             return;
@@ -49,21 +72,23 @@ ColumnLayout {
     }
 
     function remove(index: int): void {
-        const next = root.modules.slice();
+        const next = root.entries.slice();
         next.splice(index, 1);
         binding.commit(next);
     }
 
     function add(id: string): void {
-        binding.commit(root.modules.concat([id]));
+        binding.commit(root.entries.concat([id]));
     }
 
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.space3
+        visible: root.label !== "" || root.entries.length === 0
 
         Text {
             text: root.label
+            visible: root.label !== ""
             color: Theme.textSecondary
             font.family: Theme.fontUi
             font.pointSize: Theme.pt(12)
@@ -72,18 +97,19 @@ ColumnLayout {
 
         Text {
             Layout.fillWidth: true
-            text: root.modules.length === 0 ? "empty" : ""
+            text: root.entries.length === 0 ? root.emptyNote : ""
             color: Theme.textMuted
             font.family: Theme.fontUi
             font.pointSize: Theme.pt(11.5)
+            elide: Text.ElideRight
         }
     }
 
     Repeater {
-        model: root.modules
+        model: root.entries
 
         Rectangle {
-            id: moduleRow
+            id: entryRow
 
             required property string modelData
             required property int index
@@ -109,9 +135,9 @@ ColumnLayout {
 
                 Text {
                     Layout.fillWidth: true
-                    text: moduleRow.modelData
+                    text: root.labelFor(entryRow.modelData)
                     color: Theme.textPrimary
-                    font.family: Theme.fontMono
+                    font.family: root.mono ? Theme.fontMono : Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     elide: Text.ElideRight
                 }
@@ -128,24 +154,24 @@ ColumnLayout {
                         name: modelData.icon
                         color: Theme.textSecondary
                         possible: {
-                            const target = moduleRow.index + modelData.delta;
-                            return target >= 0 && target < root.modules.length;
+                            const target = entryRow.index + modelData.delta;
+                            return target >= 0 && target < root.entries.length;
                         }
-                        onTapped: root.move(moduleRow.index, modelData.delta)
+                        onTapped: root.move(entryRow.index, modelData.delta)
                     }
                 }
 
                 IconButton {
                     name: "x"
                     hoverColor: Theme.accentEmber
-                    onTapped: root.remove(moduleRow.index)
+                    onTapped: root.remove(entryRow.index)
                 }
             }
         }
     }
 
-    // The pool. Present on every cluster rather than once per tab, so adding a
-    // module is one tap next to where it will land.
+    // The pool. Drawn under each list rather than once per tab, so adding an
+    // entry is one tap next to where it will land.
     Flow {
         Layout.fillWidth: true
         Layout.topMargin: Theme.space1
@@ -180,9 +206,9 @@ ColumnLayout {
                     }
 
                     Text {
-                        text: poolChip.modelData
+                        text: root.labelFor(poolChip.modelData)
                         color: Theme.textMuted
-                        font.family: Theme.fontMono
+                        font.family: root.mono ? Theme.fontMono : Theme.fontUi
                         font.pointSize: Theme.pt(10.5)
                     }
                 }

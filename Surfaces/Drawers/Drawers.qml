@@ -207,6 +207,12 @@ Singleton {
         function toggle(): void { root.toggle("controlcenter"); }
     }
 
+    /// The dashboard's (#49). Its button is the bar's *clock* — the one module
+    /// that was a readout until this ticket and is now also a door.
+    readonly property QtObject dashboardHandle: QtObject {
+        function toggle(): void { root.toggle("dashboard"); }
+    }
+
     // Functions need explicit signatures to be callable over IPC. No `show`:
     // `qs ipc call session show` is parsed as `qs ipc show` and prints the
     // target listing instead (#77, and Core/SurfaceBusPolicy.qml).
@@ -322,6 +328,28 @@ Singleton {
         function wallpaper(path: string): void { ControlCenterActions.wallpaper(path); }
     }
 
+    // The dashboard's door (#49). `dashboard`, lowercase and one word, which is
+    // the spelling Core/SurfaceBusPolicy.qml wrote down for the clock that
+    // dispatches to it.
+    //
+    //     bind = SUPER, D, exec, qs ipc call dashboard toggle
+    //
+    // The four doors and no more, unlike the control centre's twelve. The
+    // dashboard's cards have nothing to press that a door would have to reach:
+    // the calendar's paging is arithmetic `tests/` drives directly
+    // (Surfaces/Drawers/CalendarPolicy.qml), and the media card's transport and
+    // seek are the *player's*, so they are driven where the player is —
+    // `busctl` from the fixture's side, and `qs ipc call media seek` from the
+    // service that owns it (Services/Media/Mpris.qml).
+    IpcHandler {
+        target: "dashboard"
+
+        function open(): void { root.open("dashboard"); }
+        function close(): void { root.close("ipc"); }
+        function toggle(): void { root.toggle("dashboard"); }
+        function isOpen(): bool { return root.current === "dashboard"; }
+    }
+
     // --- Super+Space ---------------------------------------------------------
     //
     // The summon (#39), registered from QML rather than shelled out to. In the
@@ -353,8 +381,9 @@ Singleton {
         SurfaceBus.register("launcher", root.launcherHandle);
         SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
         SurfaceBus.register("controlcenter", root.controlCenterHandle);
+        SurfaceBus.register("dashboard", root.dashboardHandle);
         Logger.stage("drawers armed (ipc targets: session, launcher, "
-                     + "notificationcenter, controlcenter)");
+                     + "notificationcenter, controlcenter, dashboard)");
         if (Startup.deferredRan)
             root.applyBlurRule();
     }

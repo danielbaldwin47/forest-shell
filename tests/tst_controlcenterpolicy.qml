@@ -29,7 +29,8 @@ TestCase {
             vpn: { available: true, on: false, name: "" },
             volume: { available: true, percent: 45, muted: false },
             mic: { available: true, percent: 80, muted: false },
-            brightness: { available: true, percent: 60 }
+            brightness: { available: true, percent: 60 },
+            recording: { available: true, on: false, detail: "GPU" }
         };
     }
 
@@ -43,13 +44,17 @@ TestCase {
 
     // --- the grid ------------------------------------------------------------
 
-    function test_the_grid_is_nine_tiles_in_a_fixed_order() {
+    function test_the_grid_is_ten_tiles_in_a_fixed_order() {
         // Fixed, because grid position is muscle memory: the tile you reach for
         // without looking must not move because a radio came up.
+        //
+        // Ten since #52, which is 3x3 plus one rather than the 3x3 #44 asked
+        // for. The tenth is last for that reason — it lands in a short row of
+        // its own instead of pushing anything sideways.
         compare(policy.columns, 3);
         compare(ids(policy.tiles(fullFacts())),
                 ["wifi", "bluetooth", "dnd", "nightlight", "keepawake",
-                 "mode", "powerprofile", "vpn", "wallpaper"]);
+                 "mode", "powerprofile", "vpn", "wallpaper", "recording"]);
     }
 
     function test_hardware_that_is_not_there_has_no_tile() {
@@ -62,6 +67,7 @@ TestCase {
         facts.vpn.available = false;
         facts.nightlight.available = false;
         facts.powerprofile.available = false;
+        facts.recording.available = false;
 
         compare(ids(policy.tiles(facts)),
                 ["wifi", "dnd", "keepawake", "mode", "wallpaper"]);
@@ -77,14 +83,24 @@ TestCase {
     }
 
     function test_the_grid_reflows_rather_than_leaving_a_hole() {
-        // Nine tiles is three rows; eight is 3-3-2 and not 3-3-1-with-a-gap.
+        // Ten tiles is 3-3-3-1, and the 1 is a short row rather than a row with
+        // two invisible pressable holes in it. Nine is three full rows, which
+        // is what a machine without an encoder gets back.
         const rows = policy.rows(policy.tiles(fullFacts()));
-        compare(rows.length, 3);
+        compare(rows.length, 4);
         compare(rows[0].length, 3);
         compare(rows[2].length, 3);
+        compare(rows[3].length, 1);
 
+        const noEncoder = fullFacts();
+        noEncoder.recording.available = false;
+        compare(policy.rows(policy.tiles(noEncoder)).length, 3);
+
+        // Eight is 3-3-2 and not 3-3-1-with-a-gap: the layout left-aligns a
+        // short row rather than padding it with pressable holes.
         const facts = fullFacts();
         facts.bluetooth.present = false;
+        facts.recording.available = false;
         const short = policy.rows(policy.tiles(facts));
         compare(short.length, 3);
         compare(short[2].length, 2);
@@ -210,6 +226,48 @@ TestCase {
         facts.keepawake.on = true;
         compare(byId(policy.tiles(facts), "keepawake").on, true);
         compare(byId(policy.tiles(facts), "keepawake").detail, "On");
+    }
+
+    // --- recording (#52) -----------------------------------------------------
+
+    /// The same rule the hardware tiles follow: a control that cannot do the
+    /// thing is worse than no control. Here it means a machine with neither
+    /// encoder installed is back to the nine tiles it had before #52.
+    function test_the_recording_tile_is_absent_without_an_encoder() {
+        const facts = fullFacts();
+        facts.recording.available = false;
+        compare(byId(policy.tiles(facts), "recording"), null);
+        verify(ids(policy.tiles(fullFacts())).indexOf("recording") >= 0);
+    }
+
+    /// The detail line is the tile's whole argument for existing before you
+    /// press it: it says whether this machine encodes on the GPU or in
+    /// software, which nothing else in the shell can answer.
+    function test_the_idle_recording_tile_names_the_engine() {
+        const tile = byId(policy.tiles(fullFacts()), "recording");
+        compare(tile.on, false);
+        compare(tile.detail, "GPU");
+        compare(tile.icon, "circle-dot");
+        compare(tile.label, "Recording");
+    }
+
+    /// The glyph changes and the label does not — "Recording" reading "Stop"
+    /// would describe the press where every other tile describes the subject.
+    function test_a_running_recording_lights_the_tile_and_shows_a_stop_glyph() {
+        const facts = fullFacts();
+        facts.recording.on = true;
+        facts.recording.detail = "0:12";
+        const tile = byId(policy.tiles(facts), "recording");
+        compare(tile.on, true);
+        compare(tile.icon, "square");
+        compare(tile.label, "Recording");
+        compare(tile.detail, "0:12");
+    }
+
+    /// Last, so the short row it creates is at the bottom — see `tileOrder`.
+    function test_the_recording_tile_is_last_in_the_grid() {
+        const list = ids(policy.tiles(fullFacts()));
+        compare(list[list.length - 1], "recording");
     }
 
     function test_the_wallpaper_tile_is_a_door_and_never_lit() {
@@ -389,4 +447,68 @@ TestCase {
     function test_a_slider_logs_where_it_landed() {
         compare(policy.moved("brightness", 60), "brightness 60%");
     }
+
+    // --- what the Control Center tab edits (#55) -----------------------------
+    //
+    // The grid, the sliders, the column count and the step are settings now,
+    // and this policy is where a configured list becomes a drawn one. The
+    // panel binds these four properties to `Config.values.controlCenter`; the
+    // defaults above are what the file says when nobody has touched it, which
+    // tests/tst_schemas.qml pins against the schema.
+
+    ControlCenterPolicy {
+        id: configured
+        tileOrder: ["dnd", "nonesuch", "wifi"]
+        sliderOrder: ["brightness", "volume"]
+        columns: 2
+        step: 10
+    }
+
+    function test_a_configured_grid_is_drawn_in_the_order_it_names() {
+        // Grid position is muscle memory, so the order is fixed — but it is the
+        // *user's* fixed order now rather than this file's, which is the whole
+        // of what the tab edits.
+        const tiles = configured.tiles(fullFacts()).map(tile => tile.id);
+        compare(tiles, ["dnd", "wifi"]);
+    }
+
+    function test_a_tile_this_shell_cannot_draw_is_dropped_rather_than_refused() {
+        // Same rule Surfaces/Drawers/DashboardRegistry.qml follows, and the
+        // reason the schema coerces this list to plain strings rather than a
+        // closed enum: a config written by a newer shell keeps its tile, and
+        // this one leaves a gap-free grid instead of a hole or a crash.
+        verify(configured.tile("nonesuch", fullFacts()) === null);
+        compare(configured.tiles(fullFacts()).length, 2);
+    }
+
+    function test_a_configured_slider_list_is_honoured_the_same_way() {
+        const sliders = configured.sliders(fullFacts()).map(slider => slider.id);
+        compare(sliders, ["brightness", "volume"]);
+    }
+
+    function test_the_column_count_is_what_chunks_the_rows() {
+        // Two columns is three rows of the six tiles a two-column grid gets,
+        // and the short last row is still short rather than padded.
+        const rows = configured.rows(["a", "b", "c"]);
+        compare(rows.length, 2);
+        compare(rows[0], ["a", "b"]);
+        compare(rows[1], ["c"]);
+    }
+
+    function test_a_configured_step_is_the_notch_the_arrows_move() {
+        // The nudge still lands *on* the step grid rather than adding to
+        // wherever a drag left the value — at 10, 43 up is 50 and not 53.
+        compare(configured.nudge(43, 1), 50);
+        compare(configured.nudge(43, -1), 40);
+    }
+
+    function test_an_empty_grid_in_the_file_is_an_empty_grid() {
+        // Not a fallback to the default list: emptying the grid is a thing the
+        // tab lets you do, and quietly restoring ten tiles would be the panel
+        // ignoring the file.
+        empty.tileOrder = [];
+        compare(empty.tiles(fullFacts()).length, 0);
+    }
+
+    ControlCenterPolicy { id: empty }
 }

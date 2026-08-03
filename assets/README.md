@@ -117,7 +117,7 @@ there is no manifest to keep in step:
 Icon { name: "wifi"; size: 16; color: Theme.textSecondary }
 ```
 
-The `gallery.qml` entry point (`qs-upstream -p ~/repos/forest-shell/gallery.qml`)
+The `gallery.qml` entry point (`qs -p ~/repos/forest-shell/gallery.qml`)
 renders the size ramp, the token roles and the oversample comparison on a real
 session — which is where fractional scale and `MultiEffect` can actually be
 judged.

@@ -11,10 +11,11 @@
 // pure views over `Config` — leaving a tab and coming back rebuilds it from the
 // file, which is the same thing it showed.
 //
-// The rail is the navigation *skeleton*: all ten tabs are here from the first
-// release, and the six #55 has not built yet open a page that says so and lists
-// what the section already holds. Hiding them would make the window's shape a
-// surprise later.
+// The rail is the navigation *skeleton*: all ten tabs were here from the first
+// release, the six #55 had not built yet opened a page that said so and listed
+// what the section already held, and #55 has since filled all six in. That
+// fallback is still what an unbuilt tab reaches — hiding one would make the
+// window's shape a surprise later.
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
@@ -59,6 +60,24 @@ FloatingWindow {
     }
 
     SettingsTabs { id: tabs }
+
+    /// Scroll the current page, in px from the top, clamped to what there is.
+    ///
+    /// Nothing in the shell calls this: it exists for
+    /// tools/capture-harness.sh's `--scroll`, because the System tab (#55) is
+    /// several windows tall and a capture of its first screen is not a capture
+    /// of the tab. The alternative was for the harness to reach through the
+    /// page `Loader` from outside, which makes the harness depend on this
+    /// file's internal layout — the thing it broke on the first time.
+    function scrollPageTo(y: real): void {
+        const view = page.item;
+        if (!view)
+            return;
+        view.contentY = Math.max(0, Math.min(y, view.contentHeight - view.height));
+    }
+
+    /// Where the current page is scrolled to, for the harness to report.
+    readonly property real pageScroll: page.item?.contentY ?? 0
 
     function selectTab(id: string): void {
         const resolved = tabs.resolve(id);
@@ -317,7 +336,13 @@ FloatingWindow {
         case "appearance": return appearancePage;
         case "bar": return barPage;
         case "launcher": return launcherPage;
+        case "controlCenter": return controlCenterPage;
+        case "dashboard": return dashboardPage;
         case "notifications": return notificationsPage;
+        case "weatherTime": return weatherTimePage;
+        case "wallpaper": return wallpaperPage;
+        case "system": return systemPage;
+        case "about": return aboutPage;
         default: return placeholderPage;
         }
     }
@@ -325,7 +350,13 @@ FloatingWindow {
     Component { id: appearancePage; AppearanceTab {} }
     Component { id: barPage; BarTab {} }
     Component { id: launcherPage; LauncherTab {} }
+    Component { id: controlCenterPage; ControlCenterTab {} }
+    Component { id: dashboardPage; DashboardTab {} }
     Component { id: notificationsPage; NotificationsTab {} }
+    Component { id: weatherTimePage; WeatherTimeTab {} }
+    Component { id: wallpaperPage; WallpaperTab {} }
+    Component { id: systemPage; SystemTab {} }
+    Component { id: aboutPage; AboutTab {} }
 
     Component {
         id: placeholderPage

@@ -37,6 +37,8 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import qs.Core
+import qs.Services.Screenshot
+import qs.Services.Recorder
 import qs.Services.System
 import qs.Surfaces.Settings
 
@@ -86,6 +88,32 @@ Singleton {
             Logger.log("launcher", root.policy.ran(id, "the shell's own lock"));
             SessionLock.lock("launcher action");
             return true;
+        case "screenshot":
+            // Held back by the drawer's own close duration, because the freeze
+            // is a photograph of the screen and the launcher is still on it:
+            // opened immediately, the shot contains the surface that asked for
+            // it, half-faded. The number is the drawer's, which is why it is
+            // passed from here rather than assumed over there.
+            Logger.log("launcher", root.policy.ran(id, "the region picker"));
+            Screenshot.openAfter("launcher action", Theme.motionFast);
+            return true;
+        case "recording": {
+            // The region variant carries the launcher's own close duration for
+            // the same reason the screenshot row does — the picker's freeze is
+            // a photograph, and the launcher is still on the screen. The
+            // whole-screen variant needs no delay: both encoders capture the
+            // output live, so a launcher halfway through its fade is a fraction
+            // of a second at the head of the file rather than a surface baked
+            // into a still.
+            if (String(it.arg ?? "") === "region") {
+                Logger.log("launcher", root.policy.ran(id, "a recorded region"));
+                Recorder.startRegionAfter("launcher action", Theme.motionFast);
+                return true;
+            }
+            Logger.log("launcher", root.policy.ran(id, "the screen recorder"));
+            Recorder.toggle("launcher action");
+            return true;
+        }
         case "surface":
             // Through the bus, not through `Drawers` directly: the bus is what
             // keeps "which surfaces may be asked for" a table rather than an

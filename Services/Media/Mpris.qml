@@ -31,6 +31,7 @@ pragma Singleton
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Mpris as Mp
 import qs.Core
 
@@ -119,6 +120,71 @@ Singleton {
     readonly property string trackTitle: root.player?.trackTitle ?? ""
     readonly property string trackArtist: root.player?.trackArtist ?? ""
 
+    // --- the dashboard's card (#49) ------------------------------------------
+    //
+    // The bar's pill is a title and a glyph; the dashboard's card is the player
+    // — cover art, and a position you can drag. Both arrive here rather than in
+    // the card, because "which player" is this file's whole job and a card that
+    // reached for `Mp.Mpris.players` itself would be a second answer to it.
+
+    /// The cover, as whatever URL the client gave — usually a `file://` into a
+    /// cache directory, sometimes an `https://`, often nothing at all. The card
+    /// draws a placeholder rather than a hole when it is empty or does not load,
+    /// because "no art" is the common case and not an error.
+    readonly property string artUrl: root.player?.trackArtUrl ?? ""
+
+    /// How long the track is, in seconds. 0 for a player that does not say —
+    /// a live stream, or a client that reports length only once it feels like
+    /// it — which is what takes the progress bar's fill and its scrubbing away
+    /// (Services/Media/MprisPolicy.qml).
+    readonly property real length: root.player?.length ?? 0
+
+    /// Where the track is up to, in seconds.
+    ///
+    /// **This does not tick on its own, and that is upstream's design and this
+    /// shell's requirement at once**: MPRIS position "usually will not update
+    /// reactively", so a consumer that wants a moving number asks for one by
+    /// calling `refresh()` on a timer of its own. That keeps the cost where
+    /// #22 §5 wants it — a progress bar costs one wakeup a second *while a card
+    /// showing it is on screen*, and nothing at all the rest of the time, which
+    /// is why the bar's pill has never shown elapsed time.
+    readonly property real position: root.player?.position ?? 0
+
+    readonly property bool positionSupported: root.player?.positionSupported === true
+
+    /// Whether the position can be *set* — dragged to a point in the track.
+    /// A player can allow seeking and still refuse to say where it is, so this
+    /// is three questions and MprisPolicy asks all of them.
+    readonly property bool scrubbable: root.policy.scrubbable(
+        root.player?.canSeek === true, root.positionSupported, root.length)
+
+    /// Ask the player where it is again. The whole of the polling mechanism:
+    /// re-emitting the signal is what makes every binding on `position` above
+    /// re-read it.
+    function refresh(): void {
+        if (root.player !== null)
+            root.player.positionChanged();
+    }
+
+    /// Jump to a point in the track, given as a fraction of it — which is what
+    /// a pointer on a progress bar knows, and the one form that needs no length
+    /// arithmetic at the call site (MprisPolicy does it, and clamps).
+    ///
+    /// Refuses loudly rather than silently, like the transport calls above: a
+    /// bar that swallows a drag is #81 with a pointer on it.
+    function seekToFraction(fraction: real): void {
+        if (!root.scrubbable) {
+            Logger.warn("media", root.player === null
+                ? "no player — ignoring seek"
+                : root.player.identity + " cannot be seeked from here");
+            return;
+        }
+
+        const target = root.policy.seekTarget(fraction, root.length);
+        root.player.position = target;
+        Logger.log("media", "seek to " + root.policy.clock(target));
+    }
+
     // --- driving it ----------------------------------------------------------
 
     function togglePlaying() {
@@ -153,6 +219,39 @@ Singleton {
             return;
         }
         root.player.previous();
+    }
+
+    // --- the door ------------------------------------------------------------
+    //
+    // One verb, and it exists for one reason: **a progress bar is a drag target
+    // inside a drawer, and this repo has no pointer-injection tool it may
+    // assume** (tools/drawer-harness.sh says so at length about Escape). Without
+    // it, #49's "seek if the player allows" would be a claim with no seam under
+    // it at all.
+    //
+    //     qs ipc call media seek 50        # half way through the track
+    //
+    // On the *service* and not on the dashboard's target, though the dashboard
+    // is what grew the card: the player is this file's, seeking works whether or
+    // not a surface showing it is open, and a `dashboard seek` would be a verb
+    // on a drawer that answers when the drawer is closed and when the media card
+    // is not even in `dashboard.cards`.
+    //
+    // The transport needs no door of its own: play, pause, next and previous are
+    // driven from the *player's* side of the bus with `busctl`, which is what
+    // tools/services-harness.sh already does. Seeking is the one gesture with no
+    // such equivalent — a player cannot be told to seek itself from outside.
+    //
+    // `media` and not `mpris`: it is the word the rest of the shell uses for
+    // this service (the log tag above, the bar module, the card), and a target
+    // is a thing a person types into a keybind.
+    IpcHandler {
+        target: "media"
+
+        /// Where along the track, as a percentage — which is what a pointer on
+        /// a progress bar knows, and what a script can write without asking how
+        /// long the track is.
+        function seek(percent: int): void { root.seekToFraction(percent / 100); }
     }
 
     // --- what a harness reads ------------------------------------------------

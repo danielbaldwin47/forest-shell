@@ -69,6 +69,17 @@ QtObject {
             verb: "toggle",
             label: "Notification centre"
         },
+        // The dashboard (#49), opened from the bar's clock rather than from a
+        // button of its own — the clock *is* the door, which is #9's "the
+        // dashboard hangs off the time" and the reason there is no
+        // `dashboard` module in the bar's registry to go looking for.
+        //
+        //     bind = SUPER, D, exec, qs ipc call dashboard toggle
+        dashboard: {
+            target: "dashboard",
+            verb: "toggle",
+            label: "Dashboard"
+        },
         // The first surface in this table that actually exists (#38). It
         // registers a handler on construction like the rest will, so nothing
         // about the bus changes when a name stops being a promise — which is

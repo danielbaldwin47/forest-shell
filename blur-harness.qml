@@ -17,7 +17,7 @@
 // the config root, and only from here does `qs.Surfaces.Bar` resolve to the
 // real bar.
 //
-//   qs-upstream -p blur-harness.qml   # inside the nested display
+//   qs -p blur-harness.qml   # inside the nested display
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell

@@ -39,6 +39,20 @@
 // binding would have animated it back down.
 import QtQuick
 import qs.Core
+// Nothing here names a type from `Cards/`, and the import still has to be in
+// *this* file rather than only in the one that needs it. Quickshell turns a
+// directory into a `qs.` module while it scans the directory above it, and the
+// scan reads the imports of every file except the one whose compilation is
+// asking — so `Surfaces/Drawers/Dashboard.qml` cannot register its own
+// subdirectory by importing it, and fails with "module qs.Surfaces.Drawers.Cards
+// is not installed" (measured against 0.3.0; the sibling case is the half of #73
+// the bar's `Modules/` never hit, because BarContent.qml is a sibling of the bar
+// window rather than the file the window names).
+//
+// This line is that sibling. The dashboard imports the directory again for the
+// reader's sake, and the cards import it a third time because a file loaded by
+// URL gets no implicit sibling resolution at all.
+import qs.Surfaces.Drawers.Cards
 
 Item {
     id: slot
@@ -153,14 +167,20 @@ Item {
         // instead, which for a tenant that fills the slot means the corner it
         // hangs from: scaling a screen-sized item about its top-right leaves
         // that corner still and grows the panel out of the icon above it.
+        // The dashboard is the third anchored tenant and the only one anchored
+        // to the *middle* of the bar: the clock is in the centre cluster, so the
+        // panel hangs from the top edge with its own centre under it and grows
+        // out of the time (#27, "each drawer is anchored to what opened it").
         transformOrigin: slot.name === "notificationcenter"
                          || slot.name === "controlcenter" ? Item.TopRight
-                                                          : Item.Center
+                       : slot.name === "dashboard" ? Item.Top
+                                                   : Item.Center
 
         sourceComponent: slot.name === "session" ? sessionMenu
                        : slot.name === "launcher" ? launcher
                        : slot.name === "notificationcenter" ? notificationCenter
                        : slot.name === "controlcenter" ? controlCenter
+                       : slot.name === "dashboard" ? dashboard
                        : null
     }
 
@@ -195,6 +215,19 @@ Item {
     Component {
         id: notificationCenter
         NotificationCenter {
+            implicitWidth: slot.width
+            implicitHeight: slot.height
+            onCloseRequested: reason => Drawers.close(reason)
+        }
+    }
+
+    // The dashboard (#49), which takes the whole slot for the same reason the
+    // three above it do — it places itself against the top edge under the
+    // clock, and an item centred in the slot cannot be told to hang from an
+    // edge instead.
+    Component {
+        id: dashboard
+        Dashboard {
             implicitWidth: slot.width
             implicitHeight: slot.height
             onCloseRequested: reason => Drawers.close(reason)

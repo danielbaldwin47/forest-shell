@@ -103,6 +103,61 @@ QtObject {
                 verb: ""
             },
             {
+                id: "screenshot.region",
+                title: "Take a screenshot",
+                subtitle: "Select a region or click a window",
+                icon: "crop",
+                keywords: ["screenshot", "screen", "shot", "capture", "grab",
+                           "region", "snip", "crop", "print"],
+                // Not `surface`, and for the reason `session.lock` is not
+                // either: the bus is the door for *panels* a bar button opens,
+                // and every verb it dispatches is `toggle()`. Asking a picker
+                // to toggle mid-drag would throw the drag away, so this goes
+                // straight to the service the same way the lock row does.
+                kind: "screenshot",
+                arg: "",
+                // Empty, like `session.lock` above and unlike the surface rows:
+                // these two are the IPC door a *bus* surface advertises, and
+                // this action does not go through the bus. The picker does have
+                // an IPC target of its own — `qs ipc call screenshot open` —
+                // but it is not what this row dispatches through, and naming it
+                // here would be a claim the reserved-verb test cannot check.
+                target: "",
+                verb: ""
+            },
+            {
+                id: "recording.toggle",
+                // One row and not two. "Start recording" and "Stop recording"
+                // as separate rows would put the wrong one in front of the user
+                // most of the time — the launcher's list is built before the
+                // query is typed and does not know the recorder's state — and a
+                // toggle is what the tile and the keybind do anyway.
+                title: "Record the screen",
+                subtitle: "Start or stop a full-screen recording",
+                icon: "video",
+                keywords: ["record", "recording", "screen", "capture", "video",
+                           "screencast", "cast", "stop"],
+                // Direct to the service, like `screenshot.region` and
+                // `session.lock` above: the bus dispatches `toggle()` to
+                // *panels*, and this is not one.
+                kind: "recording",
+                arg: "screen",
+                target: "",
+                verb: ""
+            },
+            {
+                id: "recording.region",
+                title: "Record a region",
+                subtitle: "Select a region, then record it",
+                icon: "video",
+                keywords: ["record", "recording", "region", "area", "crop",
+                           "video", "screencast", "part"],
+                kind: "recording",
+                arg: "region",
+                target: "",
+                verb: ""
+            },
+            {
                 id: "session.menu",
                 title: "Session menu",
                 // Names what is behind it, because the four verbs that are not

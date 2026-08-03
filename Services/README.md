@@ -11,8 +11,11 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Hardware/` | Battery, brightness, sensors, input devices |
 | `Networking/` | Wi-Fi, Bluetooth, VPN |
 | `Launcher/` | The launcher's providers and the dispatcher that routes to them |
-| `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47) |
-| `Theming/` | The three palette modes behind `Core/Theme.qml` |
+| `System/` | Session, logind, updates, disk, the tray — `SessionLock` (#47), `SystemStats` (#50) |
+| `Weather/` | The forecast behind the dashboard's weather card (#50) |
+| `Screenshot/` | The region picker's freeze, selection, save and handoff (#51) |
+| `Recorder/` | Screen recording over the two encoders, and the fallback between them (#52) |
+| `Theming/` | The three palette modes behind `Core/Theme.qml` — the constrained accent (#58) is built, the full dynamic one (#59) is not |
 | `Claude/` | The Claude CLI subprocess and its session state |
 
 Two rules that hold across all of them:
@@ -37,7 +40,7 @@ the upstream module they wrap:
   facade is `Backlight`, because `Surfaces/Bar/Modules/Brightness.qml` is
   already `Brightness`.
 
-Fourteen of them exist so far:
+Nineteen of them exist so far:
 
 - `Notifications/` (#42) — `NotificationServer`, the live popup list,
   do-not-disturb and the persisted history. The rules about an arriving
@@ -159,6 +162,76 @@ Fourteen of them exist so far:
   surface. That is the thing to re-check before another import is added at
   either end: the invariant is that the arrows do not close, not that they
   never leave `Services/`.
+
+- `System/SystemStats.qml` and `Weather/Weather.qml` (#50) — the dashboard's two
+  data cards, and between them the two ends of the force-touch rule.
+
+  `Weather` is on the deferred list for what it does *not* do there: naming it
+  constructs it, and construction reads the cached forecast out of `state.json`
+  — a file read, no network. Without the line the cache would only be read the
+  first time a dashboard opened, so every session's first open would show an
+  empty card while a request was in flight. The request itself waits for a card
+  to appear over a stale reading, and the refresh timer runs only while one is
+  on screen; a shell nobody has opened the dashboard on makes no HTTP at all.
+  It is also the one service here that speaks to the network, and the one place
+  the shell uses `XMLHttpRequest` rather than a subprocess — there is no tool to
+  wrap, so there is no exit status to read and no missing binary to report.
+
+  `SystemStats` is deliberately **not** named in `Core/ServiceInit.qml`, and it
+  is the sharpest case for the rule cutting the other way. It is the one service
+  that costs something continuously — four file reads a second — so it samples
+  only while something holds a subscription (`watch()` / `release()`), which the
+  dashboard card takes while it is on screen and the optional bar module takes
+  for the session. Nothing to force-touch: there is no startup work, and a
+  singleton nobody has subscribed to has nothing to start. Both edges are
+  logged, because "sampling stopped when the drawer closed" is an acceptance
+  criterion and a lifecycle nothing logs has two candidate causes (#81);
+  `tools/drawer-harness.sh` reads those two lines.
+
+- `Screenshot/Screenshot.qml` (#51) and `Recorder/Recorder.qml` (#52) — the two
+  services that own a rectangle, and the one place a service hands work to
+  another one.
+
+  The picker grew a mode rather than the recorder growing a second selection
+  UI: `Screenshot.pickRegion()` runs the same freeze, the same window snapping
+  and the same Escape, and `commit()` emits `regionPicked` instead of writing a
+  file. `slurp` would have been a second overlay with different keys and no
+  snapping. `regionCancelled` exists for the same reason both edges of
+  `SystemStats`' subscription are logged: a consumer waiting on a rectangle has
+  to be told when one is not coming, or it stays armed until an unrelated pick
+  answers it.
+
+  The recorder is the sharpest case in the shell for the CLI-wrapper rule below.
+  Its preferred encoder can be *absent* and it can be *present and unable to
+  initialise* — `gpu-screen-recorder` needs a working VA-API driver underneath
+  it, and that is a separate package. The first has no exit code to read at all
+  (a `Process` whose binary is missing emits no `exited`, only `running` going
+  false — #40); the second exits non-zero in about 200ms. `RecorderPolicy.
+  shouldFallback` takes both facts and answers once, and the fallback is exactly
+  one hop to `wf-recorder`, because a machine that records in software is a
+  better outcome than one that does not record.
+
+  Stopping is `SIGINT` and never `SIGTERM`: both tools flush the muxer and write
+  the container index on the former and neither does on the latter, so a
+  `SIGTERM` leaves an mp4 that exists, is the right size, and will not play.
+
+- `Theming/Theming.qml` (#58) — the palette-mode switch, and the one service in
+  the shell that publishes nothing. It computes the wallpaper-coupled accent and
+  writes it to `appearance.dynamic`; `Core/Theme.qml` reads that key back and
+  layers it under the user's own overrides.
+
+  A settings key and not a property on the singleton, for three reasons that
+  each hold on their own. Core cannot import upwards, and `Core/Theme.qml` is
+  what every surface reads. Consumers stay mode-blind — a surface reads
+  `Theme.accentPrimary` and has no way to discover that a mode produced it,
+  which is what keeps a global feature from becoming a per-surface one. And the
+  quantizer answers off-thread, so a property would start empty and the first
+  frame would paint the shipped teal and then jump; a file that survived the
+  last session does not.
+
+  It is therefore also the purest case for the `ServiceInit` rule: *nothing*
+  references it, so without a line in the deferred list the mode would be
+  selectable in the settings window and simply never run.
 
 [#30]: https://github.com/danielbaldwin47/forest-shell/issues/30
 

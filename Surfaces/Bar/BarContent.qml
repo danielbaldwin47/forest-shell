@@ -67,8 +67,20 @@ Item {
     // at the setting, which is exactly what shipped before #79.
     Loader {
         id: legibility
+
         Component.onCompleted: setSource(Qt.resolvedUrl("BarLegibility.qml"),
                                          { screen: root.screen })
+
+        // Losing this is a *quiet* degradation — the bar goes on painting at
+        // the setting and looks entirely correct on the dark wallpaper the
+        // author happens to have — so it says so. Without the line, a runtime
+        // with no `ColorQuantizer` is indistinguishable from a working clamp
+        // that had nothing to do.
+        onStatusChanged: {
+            if (status === Loader.Error)
+                Logger.warn("bar", "legibility clamp unavailable, the fill will paint at "
+                            + "the setting whatever the wallpaper does: " + source);
+        }
     }
 
     // One Repeater over the three clusters rather than three hand-written rows:

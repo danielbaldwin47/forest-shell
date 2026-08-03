@@ -215,7 +215,11 @@ TestCase {
     function test_the_strip_rect_never_leaves_the_image() {
         // Every rect the shell can ask for has to sit inside the file, whatever
         // the aspect ratio, or the quantizer pads it with black.
-        for (const size of [[800, 600], [3840, 1080], [1080, 3840], [1920, 1080]]) {
+        // Including sizes where the bar is taller than the whole file, or the
+        // file is one pixel: an overhang here is padded with black, and black
+        // is the reading that says "no clamp needed".
+        for (const size of [[800, 600], [3840, 1080], [1080, 3840], [1920, 1080],
+                            [1, 1], [64, 64], [5000, 40], [40, 5000], [3, 2000]]) {
             for (const edge of ["top", "bottom"]) {
                 const r = surface.stripRect(size[0], size[1], 1920, 1080, 32, edge);
                 verify(r.x >= 0 && r.y >= 0, size + " " + edge + ": rect starts outside");

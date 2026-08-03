@@ -1,16 +1,14 @@
-// Weather & Time — where the weather card is about, and how warm the screen
-// goes at night (#55, for #50, #44).
+// Weather & Time — where the weather card is about, how the clock is written,
+// and how warm the screen goes at night (#55, for #50, #93, #44).
 //
-// ## The clock row that is not here
+// ## The clock row
 //
-// This tab is where a clock-format control belongs and there is deliberately no
-// key behind one yet. The format is derived from the locale today
-// (Core/ClockFormat.qml), the bar and the lock screen still hold two copies of
-// that rule, and collapsing them is #93's — a key invented here would be a key
-// #93 has to migrate away from. So the section states the rule, shows what this
-// machine currently resolves to, and says where the switch is going. A tab that
-// silently omitted the row would leave a user hunting for a setting nobody has
-// written yet.
+// This tab held a disabled row saying the switch was coming; #93 brought the
+// key, so it is a switch. Three chips rather than a toggle because the answer
+// is three-valued: `auto` is the locale's, and the other two are a user
+// overriding it. The row underneath still shows the format string this machine
+// resolves to, because "auto" is not an answer to "why is my clock in 12-hour"
+// and `h:mm AP` is.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -112,20 +110,40 @@ TabPage {
     SectionHeader { text: "Clock" }
 
     SectionNote {
-        note: "There is no 12/24-hour switch yet, and this is where it will be. The format "
-              + "follows this machine's locale today, and the bar and the lock screen each "
-              + "hold their own copy of that rule — collapsing the two and giving the "
-              + "format a key is #93."
+        note: "One format, everywhere a clock is drawn — the bar strip, the lock screen and "
+              + "the dashboard header all read this key. Seconds are not offered at any "
+              + "width: a clock redrawing sixty times a minute for a glyph nobody watches "
+              + "is most of the idle budget."
     }
 
     SettingRow {
-        label: "Current format"
-        hint: "Derived from the locale, not stored. The date reads " + page.clock.dateFormat
+        label: "Format"
+        hint: "**Locale** is this machine's own convention and the default. The other two "
+              + "are for a locale that is not the clock you read — changing your system "
+              + "language is not a clock setting."
+        binding: clockBinding
+
+        ConfigBinding { id: clockBinding; path: "weatherTime.clock.format" }
+
+        SettingChoice {
+            binding: clockBinding
+            options: fields.options(Config.schema.clockFormats,
+                                    { "auto": "Locale", "12h": "12-hour", "24h": "24-hour" })
+        }
+    }
+
+    SettingRow {
+        label: "Resolves to"
+        hint: "The Qt format string the choice above resolves to on this machine — shown "
+              + "rather than described, because *Locale* is not an answer to \"why is my "
+              + "clock in 12-hour\". The date reads " + TimeFormat.date
               + " on the dashboard header."
         enabled: false
 
         Text {
-            text: page.timeFormat
+            // The very string the bar and the lock are drawing with — this row
+            // is a reader of the one answer, not a fifth copy of the rule.
+            text: TimeFormat.time
             color: Theme.textSecondary
             font.family: Theme.fontMono
             font.pointSize: Theme.pt(11.5)
@@ -181,13 +199,4 @@ TabPage {
         }
     }
 
-    // --- the interim clock rule (#93) ----------------------------------------
-
-    readonly property ClockFormat clock: ClockFormat {}
-
-    /// What the bar is actually drawing, worked out the same way it works it
-    /// out. Read-only and shown rather than described: "follows the locale" is
-    /// not an answer to "why is my clock in 12-hour", and the format string is.
-    readonly property string timeFormat:
-        page.clock.timeFormatFor(Qt.locale().timeFormat(Locale.ShortFormat))
 }

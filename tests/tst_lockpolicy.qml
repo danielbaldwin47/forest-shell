@@ -188,22 +188,14 @@ TestCase {
 
     // --- clock ---------------------------------------------------------------
 
-    function test_the_clock_follows_the_locale_rather_than_a_setting() {
-        // #50 owns clock formatting for real; until it lands the locale is a
-        // better answer than a key that would have to be migrated away.
-        verify(policy.use24Hour("HH:mm"));
-        verify(policy.use24Hour("hh:mm:ss"));
-        verify(!policy.use24Hour("h:mm AP"));
-        verify(!policy.use24Hour("h:mm ap"));
-    }
-
-    function test_the_two_clock_formats() {
-        compare(policy.timeFormat(true), "HH:mm");
-        compare(policy.timeFormat(false), "h:mm AP");
-        // Rendered by Qt, not by us — this only checks the format is one Qt
-        // reads as time and date rather than something literal.
-        const noon = new Date(2026, 7, 1, 12, 34);
-        compare(Qt.formatDateTime(noon, policy.timeFormat(true)), "12:34");
-        compare(Qt.formatDateTime(noon, policy.dateFormat), "Saturday, 1 August");
+    function test_the_lock_holds_no_clock_format_of_its_own() {
+        // This file used to check `use24Hour`/`timeFormat`/`dateFormat` here,
+        // and the bar answered differently — which is #93. The rule moved to
+        // Core/ClockFormat.qml and tst_clockformat.qml covers it; what is left
+        // to check on this side is that it did not quietly grow back, because a
+        // second copy is the bug rather than a wrong one.
+        compare(typeof policy.use24Hour, "undefined");
+        compare(typeof policy.timeFormat, "undefined");
+        compare(typeof policy.dateFormat, "undefined");
     }
 }

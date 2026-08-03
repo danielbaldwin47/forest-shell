@@ -279,13 +279,30 @@ TestCase {
         // a key nobody finds. #50 brought that location: the weather card's
         // four keys are its neighbours here.
         compare(store.leafPathsUnder(settings.spec, "weatherTime").sort(),
-                ["weatherTime.nightLight.command",
+                ["weatherTime.clock.format",
+                 "weatherTime.nightLight.command",
                  "weatherTime.nightLight.offCommand",
                  "weatherTime.nightLight.temperature",
                  "weatherTime.weather.days",
                  "weatherTime.weather.place",
                  "weatherTime.weather.refreshMinutes",
                  "weatherTime.weather.units"]);
+    }
+
+    function test_one_clock_key_for_every_surface_that_draws_a_clock() {
+        // #93: the bar hardcoded 24-hour and the lock followed the locale, so
+        // one shell showed `19:26` and `7:30 PM` minutes apart. There is one
+        // key now, and `auto` is its default — a shell nobody has told anything
+        // reads the time the way the rest of the machine does.
+        compare(store.defaults(settings.spec).weatherTime.clock.format, "auto");
+        // The three words are the whole of the choice, and the list here is the
+        // one Core/ClockFormat.qml reads (tst_clockformat.qml checks that end).
+        compare(settings.clockFormats, ["auto", "12h", "24h"]);
+        // A hand-edited clock this shell cannot write falls back rather than
+        // reaching Qt.formatDateTime as a format string.
+        const clock = settings.spec.weatherTime.clock;
+        compare(clock.format.coerce("12"), undefined);
+        compare(clock.format.coerce("24h"), "24h");
     }
 
     function test_the_weather_card_is_not_configured_into_a_location_lookup() {

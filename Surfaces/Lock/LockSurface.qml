@@ -172,6 +172,10 @@ Item {
         precision: SystemClock.Minutes
     }
 
+    // *How* it is written is not the lock's to decide (#93). The lock used to
+    // follow the locale while the bar hardcoded 24-hour, so one shell showed
+    // two clocks; both read Core/TimeFormat.qml now.
+
     Column {
         id: clockBlock
 
@@ -184,9 +188,7 @@ Item {
         // used once and never twice).
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Qt.formatDateTime(clock.date,
-                                    policy.timeFormat(policy.use24Hour(
-                                        Qt.locale().timeFormat(Locale.ShortFormat))))
+            text: Qt.formatDateTime(clock.date, TimeFormat.time)
             color: Theme.textPrimary
             font.family: Theme.fontDisplay
             font.weight: Theme.weightDisplay
@@ -197,7 +199,7 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Qt.formatDateTime(clock.date, policy.dateFormat)
+            text: Qt.formatDateTime(clock.date, TimeFormat.date)
             color: Theme.textSecondary
             font.family: Theme.fontUi
             font.weight: Theme.weightRegular

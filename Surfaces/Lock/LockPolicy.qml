@@ -233,25 +233,16 @@ QtObject {
     }
 
     // --- clock ---------------------------------------------------------------
-
-    // The one serif touch in the shell (#8: Newsreader Light, clock only, used
-    // once and never twice). Format strings live here rather than at the call
-    // site so they are testable, and because the weather-and-time ticket (#50)
-    // owns clock formatting for real — when it lands with a `weatherTime` key
-    // it replaces `use24Hour` below, and nothing else about this file changes.
-    function timeFormat(use24Hour: bool): string {
-        return use24Hour ? "HH:mm" : "h:mm AP";
-    }
-
-    readonly property string dateFormat: "dddd, d MMMM"
-
-    /// Whether the user's locale writes time on a 24-hour clock, read off the
-    /// locale's own short-time format rather than a config key we would then
-    /// have to migrate when #50 adds the real one.
-    ///
-    /// Qt time formats are built from h/H/m/s/z, t for the zone and AP/ap for
-    /// the meridiem, so the presence of an `a` is exactly the 12-hour signal.
-    function use24Hour(localeTimeFormat: string): bool {
-        return !localeTimeFormat || localeTimeFormat.toLowerCase().indexOf("a") < 0;
-    }
+    //
+    // Not here any more, and deliberately not here again. This file used to hold
+    // `timeFormat`/`use24Hour`/`dateFormat` of its own while the bar held a
+    // different rule, which is exactly #93: the same shell read `19:26` on the
+    // bar and `7:30 PM` on the lock. Core/ClockFormat.qml is the rule now,
+    // `weatherTime.clock.format` is the choice, and Core/TimeFormat.qml resolves
+    // the pair for every surface — LockSurface.qml reads a property.
+    //
+    // The line worth keeping is why the formats were ever here: a format string
+    // at a call site is untestable. That argument holds — it just points at a
+    // file the whole shell shares rather than at this one, and tst_lockpolicy
+    // checks the copy has not grown back.
 }

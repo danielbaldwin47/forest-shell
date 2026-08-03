@@ -1,37 +1,54 @@
-// How this shell writes the time (#49, and the half of #93 a new surface can
-// settle for itself).
+// How this shell writes the time — the whole shell, one answer (#49, #93).
 //
-// Three surfaces show a clock — the bar, the lock and now the dashboard's
-// header — and #93 is what happens when each decides for itself: the bar reads
-// `19:26` while the lock reads `7:30 PM`, on the same machine, minutes apart.
-// The dashboard would have been the third such decision, so the decision moved
-// here instead: this file is a home for it that is not any one surface's, and it
-// imports nothing but QtQuick, so `tests/` reaches it.
+// Four surfaces show a clock — the bar, the lock, the dashboard's header and
+// the settings tab that describes it — and #93 is what happens when each
+// decides for itself: the bar read `19:26` while the lock read `7:30 PM`, on
+// the same machine, minutes apart. Every one of them now asks this file, which
+// is a home for the decision that is not any one surface's, and which imports
+// nothing but QtQuick, so `tests/` reaches it.
 //
-// **It does not own a setting, and deliberately does not invent one.** #50 owns
-// `weatherTime`'s clock keys, and a key named here would be a key that ticket
-// has to migrate away from. What this file holds is the *interim rule* — follow
-// the locale — stated once, so that when #50 lands it replaces one function
-// rather than three surfaces.
+// **This file holds the rule; `weatherTime.clock.format` holds the choice.**
+// The key is three-valued — `auto`, `12h`, `24h` — and `auto` is the default,
+// because a shell that has not been told anything should read the time the way
+// the rest of the machine does. The locale reading and the key are kept as two
+// functions rather than one because they are two decisions: `localeIs24Hour` is
+// what the machine says, `is24Hour` is what the shell shows, and `tests/`
+// checks them separately.
 //
-// #93 remains open after this, and the remaining work is small and named: the
-// bar's Clock.qml and the lock's LockSurface.qml both still answer for
-// themselves (`Surfaces/Lock/LockPolicy.qml` holds the lock's copy of the rule,
-// which `tests/tst_clockformat.qml` pins to this one so the two cannot drift
-// while both exist).
+// Nothing here reads `Config` itself. A file that imported `qs.Core`'s
+// singletons would be a file `qmltestrunner` cannot load (see CLAUDE.md's first
+// seam), so the key's value is passed in — and Core/TimeFormat.qml is the
+// singleton that passes it, so the surfaces see a format string and this
+// argument reaches exactly one caller.
 import QtQuick
 
 QtObject {
     id: policy
 
-    /// Whether the user's locale writes time on a 24-hour clock, read off the
-    /// locale's own short-time format rather than a config key we would then
-    /// have to migrate when #50 adds the real one.
+    /// Whether the user's *locale* writes time on a 24-hour clock, read off the
+    /// locale's own short-time format. This is what `auto` resolves to and
+    /// nothing else — the shell's actual answer is `is24Hour` below.
     ///
     /// Qt time formats are built from h/H/m/s/z, `t` for the zone and AP/ap for
     /// the meridiem, so the presence of an `a` is exactly the 12-hour signal.
-    function use24Hour(localeTimeFormat: string): bool {
+    function localeIs24Hour(localeTimeFormat: string): bool {
         return !localeTimeFormat || localeTimeFormat.toLowerCase().indexOf("a") < 0;
+    }
+
+    /// The shell's answer: the key when it names a clock, the locale when it
+    /// says `auto`.
+    ///
+    /// Anything unrecognised falls to the locale rather than to a hardcoded
+    /// clock. `Coerce.oneOf` already keeps `Config.values` inside
+    /// `schema.clockFormats`, so an unknown string here means a caller that
+    /// bypassed the schema — and the locale is a better answer for one of those
+    /// than 24-hour is for a user in Chicago.
+    function is24Hour(preference: string, localeTimeFormat: string): bool {
+        if (preference === "24h")
+            return true;
+        if (preference === "12h")
+            return false;
+        return policy.localeIs24Hour(localeTimeFormat);
     }
 
     /// The clock itself. No seconds at any size: they are a wakeup a minute
@@ -41,16 +58,16 @@ QtObject {
         return use24Hour ? "HH:mm" : "h:mm AP";
     }
 
-    /// The two above, composed — and what every surface actually calls. The
-    /// pair is kept apart because they are two decisions and `tests/` checks
-    /// them separately (and because LockPolicy holds its own copy of both while
-    /// #93 is open); a surface has no business knowing that, and a triple-nested
-    /// call at three call sites is three chances to nest it differently.
+    /// The two above, composed — and the only one of the four anything outside
+    /// this file calls. The parts are kept apart because they are separate
+    /// decisions that `tests/` checks separately; a caller has no business
+    /// knowing that, and a nested call once per clock is one chance per clock
+    /// to nest it differently, which is precisely how #93 happened.
     ///
-    ///     Qt.formatDateTime(Time.now, ClockFormat.timeFormatFor(
-    ///         Qt.locale().timeFormat(Locale.ShortFormat)))
-    function timeFormatFor(localeTimeFormat: string): string {
-        return policy.timeFormat(policy.use24Hour(localeTimeFormat));
+    /// Core/TimeFormat.qml is that one caller, and surfaces read it rather than
+    /// this — the key and the locale meet the rule in one place.
+    function timeFormatFor(preference: string, localeTimeFormat: string): string {
+        return policy.timeFormat(policy.is24Hour(preference, localeTimeFormat));
     }
 
     /// The date under a clock that has room for one — the lock's, and the

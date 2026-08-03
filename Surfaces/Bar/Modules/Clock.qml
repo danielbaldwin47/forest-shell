@@ -10,13 +10,11 @@
 // to redraw a glyph nobody is watching, they would cost most of the idle budget
 // (#22 §5) on their own.
 //
-// The format is not fixed here and no longer decided here either. It was, and
-// that was #93: this module hardcoded 24-hour while the lock followed the
-// locale, so the same shell read `19:26` on the bar and `7:30 PM` on the lock.
-// The rule is Core/ClockFormat.qml now — a file that is not a surface, so
-// three surfaces can share one answer — and the dashboard (#49) reads it too.
-// The *setting* still belongs to the weather & time ticket (#50); naming a key
-// here would commit one that ticket would have to migrate away from.
+// The format is not decided here. It was, and that was #93: this module
+// hardcoded 24-hour while the lock followed the locale, so the same shell read
+// `19:26` on the bar and `7:30 PM` on the lock. Core/TimeFormat.qml answers
+// that for every surface with a clock — the rule is Core/ClockFormat.qml and
+// the choice is `weatherTime.clock.format`, and this module sees neither.
 //
 // **It is also a door** (#49). The clock is what opens the dashboard, which is
 // why that surface has no bar module of its own: the time is the thing you look
@@ -30,13 +28,12 @@ import qs.Core
 Text {
     id: clock
 
-    readonly property ClockFormat format: ClockFormat {}
-
     // Date and time in one line, which is the bar's own shape: three spaces
     // between them rather than a separator, because the pair reads as one
-    // object at 13pt and a middot would make it two readouts.
-    text: Qt.formatDateTime(Time.now, clock.format.dateFormatCompact + "   "
-        + clock.format.timeFormatFor(Qt.locale().timeFormat(Locale.ShortFormat)))
+    // object at 13pt and a middot would make it two readouts. The shape is the
+    // bar's; the two format strings in it are not.
+    text: Qt.formatDateTime(Time.now,
+                            TimeFormat.dateCompact + "   " + TimeFormat.time)
 
     // Lit under the pointer, which is the whole of "this is pressable" on a
     // module that must not grow a button's chrome — the clock is the bar's one

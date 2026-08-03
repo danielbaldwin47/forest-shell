@@ -106,6 +106,15 @@
 # What neither mode judges: compositor composition — blur behind the bar, layer
 # stacking, frame pacing (#78). Those are the compositor's pixels, not the
 # client's.
+#
+# --clock writes `weatherTime.clock.format` into the scratch config: `auto`,
+# `12h` or `24h`. #93 was the bar and the lock reading the same minute two ways,
+# and the check that it is one decision now is two captures side by side — a
+# default pair agrees because both follow the locale, so the pair that proves
+# the *key* reaches both surfaces is the one taken with it set:
+#
+#   tools/capture-harness.sh bar.png  --surface bar-full --clock 24h
+#   tools/capture-harness.sh lock.png --surface lock     --clock 24h
 
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -135,6 +144,7 @@ DELAY_MS=600
 REDUCED=0
 LIGHT=0
 UNCLAMPED=0
+CLOCK=""
 
 while (( $# )); do
     case "$1" in
@@ -157,9 +167,10 @@ while (( $# )); do
         --osd)         OSD_STATE="$2"; OSD_SET=1; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
+        --clock)       CLOCK="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
-        --help|-h)     sed -n '2,108p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,117p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -208,6 +219,16 @@ if [[ -n "$PICK" ]]; then
     case "$PICK" in
         region|window) ;;
         *) echo "unknown pick state: $PICK (region, window)" >&2; exit 2 ;;
+    esac
+fi
+
+# The three words Core/SettingsSchema.qml's `clockFormats` accepts. Checked here
+# rather than left to the shell because `--clock 12` would otherwise be coerced
+# back to the default and photographed as if it were the thing asked for.
+if [[ -n "$CLOCK" ]]; then
+    case "$CLOCK" in
+        auto|12h|24h) ;;
+        *) echo "unknown clock format: $CLOCK (auto, 12h, 24h)" >&2; exit 2 ;;
     esac
 fi
 
@@ -286,10 +307,17 @@ mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state" "$SCRATCH/cache"
 # is a scratch directory, so this cannot pick up whatever the caller happens to
 # keep in ~/Pictures.
 : "${WALLPAPER_FOLDER:=$(dirname "$WALLPAPER")}"
-printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s } }\n' \
+# `weatherTime.clock.format` only when asked for, so an unset --clock renders
+# the default (`auto`) rather than a value this harness chose (#93).
+CLOCK_JSON=""
+if [[ -n "$CLOCK" ]]; then
+    CLOCK_JSON=$(printf ', "weatherTime": { "clock": { "format": "%s" } }' "$CLOCK")
+fi
+printf '{ "wallpaper": { "path": "%s", "folder": "%s" }, "appearance": { "reducedEffects": %s, "darkMode": %s }%s }\n' \
     "$WALLPAPER" "$WALLPAPER_FOLDER" \
     "$( ((REDUCED)) && echo true || echo false )" \
     "$( ((LIGHT)) && echo false || echo true )" \
+    "$CLOCK_JSON" \
     > "$SCRATCH/config/forest-shell/settings.json"
 
 # The offscreen platform takes its screen list from a config file; this is

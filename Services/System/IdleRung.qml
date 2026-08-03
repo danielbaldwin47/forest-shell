@@ -11,6 +11,12 @@
 // rebound, and #139 is what that cost: every rung on the System tab (#55)
 // silently kept its old timeout until the shell was restarted.
 //
+// Filed upstream as quickshell-mirror/quickshell#938 (#151), with a standalone
+// probe verified on Quickshell 0.3.0 — whose idle_notify sources are identical
+// to master at filing time. If upstream makes a `timeout` write re-register,
+// this wrapper can shed the pulse and become a plain `IdleMonitor` alias; the
+// `rearmed()` signal and its log line are the only other thing callers use.
+//
 // The fix is one pulse. A timeout change disables the monitor for a tick, which
 // is the one thing that does re-register it, and the binding brings it back
 // with the new value already in place. A rung that is off does not pulse: it

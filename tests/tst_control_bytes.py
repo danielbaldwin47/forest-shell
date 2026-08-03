@@ -32,7 +32,12 @@ NAMES = {0x00: "NUL", 0x01: "SOH", 0x07: "BEL", 0x08: "BS", 0x0B: "VT",
 
 
 def offenders(data: bytes) -> list:
-    """(line, column, byte) for every disallowed control byte in `data`."""
+    """(line, column, byte) for every disallowed control byte in `data`.
+
+    The column counts characters rather than bytes — a UTF-8 continuation byte
+    is the back half of a character an editor already showed — so an address
+    here is the one the editor puts the cursor on.
+    """
     found = []
     line, column = 1, 1
     for byte in data:
@@ -41,7 +46,7 @@ def offenders(data: bytes) -> list:
                 found.append((line, column, byte))
         if byte == 0x0A:
             line, column = line + 1, 1
-        else:
+        elif byte & 0xC0 != 0x80:
             column += 1
     return found
 
@@ -62,12 +67,12 @@ def describe(byte: int) -> str:
 
 
 def main() -> int:
-    failures = []
+    problems = []
 
-    def check(name, ok, detail=""):
-        print(("ok   " if ok else "FAIL ") + name + (f"  {detail}" if detail and not ok else ""))
+    def check(name, ok):
+        print(("ok   " if ok else "FAIL ") + name)
         if not ok:
-            failures.append(name)
+            problems.append(name)
 
     # The guard's own redness, checked here rather than by hand: a reintroduced
     # NUL has to be caught, and the bytes a source file legitimately holds have
@@ -78,6 +83,8 @@ def main() -> int:
     check("tabs and newlines are fine", offenders(b"a\tb\r\nc\n") == [])
     check("escape sequences are fine", offenders(rb'join("\x00")') == [])
     check("UTF-8 is fine", offenders("row … end\n".encode()) == [])
+    check("the column counts characters, not bytes",
+          offenders("row … \x01".encode()) == [(1, 7, 0x01)])
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -96,11 +103,11 @@ def main() -> int:
             line, column, byte = found[0]
             where = f"{path.relative_to(root)}:{line}:{column}"
             extra = f" (+{len(found) - 1} more)" if len(found) > 1 else ""
-            failures.append(where)
+            problems.append(where)
             print(f"FAIL raw {describe(byte)} at {where}{extra} — write it as an escape sequence")
 
-    if failures:
-        print(f"{len(failures)} check(s) failed")
+    if problems:
+        print(f"{len(problems)} problem(s): {', '.join(problems)}")
         return 1
     print(f"control bytes: {len(scanned)} QML files clean")
     return 0

@@ -1,7 +1,7 @@
 pragma Singleton
 
 // The idle ladder (#48; the ladder itself is #30's resolution) — four stages,
-// four `IdleMonitor`s, and what each one does when the machine goes quiet.
+// four `IdleRung`s, and what each one does when the machine goes quiet.
 //
 //     dim      2.5 min battery / 5 min ac    backlight down to 10%
 //     lock     5 / 10                        SessionLock.lock("idle")
@@ -43,7 +43,6 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
 import qs.Core
 import qs.Services.Hardware
 import qs.Services.Media
@@ -90,14 +89,15 @@ Singleton {
 
     // --- dim ------------------------------------------------------------------
 
-    IdleMonitor {
+    IdleRung {
         id: dimStage
 
-        enabled: root.dimRow.enabled
-        timeout: root.dimRow.seconds
+        armed: root.dimRow.enabled
+        seconds: root.dimRow.seconds
         respectInhibitors: root.policy.respectInhibitors
 
         onIsIdleChanged: dimStage.isIdle ? root.dim() : root.undim()
+        onRearmed: Logger.log("idle", root.policy.armed("dim", dimStage.seconds))
     }
 
     function dim(): void {
@@ -129,11 +129,11 @@ Singleton {
 
     // --- lock -----------------------------------------------------------------
 
-    IdleMonitor {
+    IdleRung {
         id: lockStage
 
-        enabled: root.lockRow.enabled
-        timeout: root.lockRow.seconds
+        armed: root.lockRow.enabled
+        seconds: root.lockRow.seconds
         respectInhibitors: root.policy.respectInhibitors
 
         onIsIdleChanged: {
@@ -146,6 +146,8 @@ Singleton {
             // Lock is the case that wants the round trip (LogindBridge.qml).
             SessionLock.lock("idle");
         }
+
+        onRearmed: Logger.log("idle", root.policy.armed("lock", lockStage.seconds))
     }
 
     // --- dpms -----------------------------------------------------------------
@@ -155,20 +157,22 @@ Singleton {
     // blanks a screen differs by compositor, which is the same argument
     // `system.session.commands` and the night light's commands make.
 
-    IdleMonitor {
+    IdleRung {
         id: dpmsStage
 
-        enabled: root.dpmsRow.enabled
+        armed: root.dpmsRow.enabled
         // The one stage whose timeout depends on something other than the power
         // source: a locked screen has nothing on it worth keeping lit, so #30
-        // tightens this to 30 s while locked. Re-binding the timeout re-arms the
-        // monitor, which is exactly the wanted behaviour — the tighter clock
-        // starts when the lock goes up.
-        timeout: root.policy.dpmsSeconds(root.settings, root.onBattery,
+        // tightens this to 30 s while locked, and the tighter clock starts when
+        // the lock goes up. That re-arm is IdleRung's doing, not the monitor's —
+        // a bare `IdleMonitor` ignores a new timeout (#139), so this stage was
+        // keeping the unlocked clock through a lock until that was fixed.
+        seconds: root.policy.dpmsSeconds(root.settings, root.onBattery,
                                          SessionLock.locked)
         respectInhibitors: root.policy.respectInhibitors
 
         onIsIdleChanged: dpmsStage.isIdle ? root.blank() : root.unblank("activity")
+        onRearmed: Logger.log("idle", root.policy.armed("dpms", dpmsStage.seconds))
     }
 
     function blank(): void {
@@ -236,11 +240,11 @@ Singleton {
 
     // --- suspend --------------------------------------------------------------
 
-    IdleMonitor {
+    IdleRung {
         id: suspendStage
 
-        enabled: root.suspendRow.enabled
-        timeout: root.suspendRow.seconds
+        armed: root.suspendRow.enabled
+        seconds: root.suspendRow.seconds
         respectInhibitors: root.policy.respectInhibitors
 
         // Activity cancels a suspend that is still waiting for the compositor to
@@ -250,6 +254,7 @@ Singleton {
         // not outlive that.
         onIsIdleChanged: suspendStage.isIdle ? root.suspend()
                                              : root.cancelSuspend("activity")
+        onRearmed: Logger.log("idle", root.policy.armed("suspend", suspendStage.seconds))
     }
 
     /// Whether a suspend is waiting for the compositor to confirm the lock.

@@ -69,7 +69,9 @@ Scope {
             // hands the surface its output *after* the component is built
             // (measured — completion sees `screen` null), and takes it away
             // before destruction, so neither end of the lifetime can read the
-            // name at the moment it needs it.
+            // name at the moment it needs it. Written once and kept: a surface
+            // belongs to the output it was built for, and one moved to another
+            // would be a surface the compositor never announced arriving.
             property string screenName: ""
 
             onScreenChanged: {

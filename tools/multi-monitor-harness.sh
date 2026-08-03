@@ -15,9 +15,12 @@
 # the size and scale asserted on below are the ones this file chose.
 #
 #   tools/multi-monitor-harness.sh            # the checks, PASS/FAIL, exit 0/1
-#   tools/multi-monitor-harness.sh --keep     # leave the session up afterwards
 #   tools/multi-monitor-harness.sh --attempt  # submit to the real login stack
 #                                             # instead, at one faillock try
+#   tools/multi-monitor-harness.sh --keep     # leave the session up afterwards,
+#                                             # for `hyprctl -i` to poke at.
+#                                             # There is nothing to *look* at:
+#                                             # the outputs are all headless
 #
 # What it asserts:
 #
@@ -34,12 +37,13 @@
 #      and leaves with it, without taking the lock or the shell down
 #
 # 5 submits, which lock-harness.sh will not do without being asked, and the
-# difference is the stack: the shell under test is pointed at `other`
-# (/etc/pam.d/other — pam_deny and nothing else), so the refusal is free and
-# pam_faillock never hears about it. What that skips is the login stack itself,
-# which `--attempt` puts back at the cost lock-harness.sh's `--attempt` charges.
-# The claim being tested is about two surfaces and one conversation, and it is
-# the same claim either way.
+# difference is the stack: the shell under test is pointed at one whose auth is
+# a bare `pam_unix.so` (`vlock`, `cups`), which prompts and refuses exactly as
+# the login stack does with pam_faillock nowhere in it, so the refusal costs the
+# account nothing. What that skips is the login stack itself, which `--attempt`
+# puts back at the cost lock-harness.sh's `--attempt` charges. The claim being
+# tested is about two surfaces and one conversation, and it is the same claim
+# either way.
 set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
@@ -71,32 +75,48 @@ NESTED_MONITORS=("WAYLAND-1, 1280x800@60, 0x0, 1"
                  "$PRIMARY, 1280x800@60, 0x0, 1"
                  "$SECOND, 1920x1080@60, 1280x0, 1.5")
 NESTED_HEADLESS_ONLY=1
-PRIMARY_GEOMETRY="1280x800 0x0 1.00"
-SECOND_GEOMETRY="1920x1080 1280x0 1.50"
 HOTPLUG_SPEC="$HOTPLUG, 1024x768@60, 3200x0, 1"
 
 ipc() { nested_ipc call "$@"; }
 
-## How many times a line appears in the shell log. `grep -c` counts lines and
-## returns 1 on none, which under `set -e`-less bash still needs the `|| true`
-## to keep a zero from reading as a failed command substitution.
-log_count() { grep -ac "$1" "$NESTED_SHELL_LOG" 2>/dev/null || true; }
+## What `hyprctl` will report for a `monitor =` rule, so that the rule stays the
+## one place the layout is written down. `1280x800@60, 0x0, 1` reads back as
+## `1280x800 0x0 1.00`.
+rule_geometry() {
+    awk -F, '{ gsub(/ /, ""); split($2, mode, "@"); printf "%s %s %.2f\n", mode[1], $3, $4 }' \
+        <<< "$1"
+}
+
+## How many times a line appears in the shell log. Explicitly zero when there
+## is nothing to count: `grep -c` prints `0` and returns 1 when the pattern is
+## absent, but prints *nothing* and returns 2 when the log is not there yet,
+## and an empty string reaches the arithmetic below as a syntax error.
+log_count() {
+    local count
+    count=$(grep -ac "$1" "$NESTED_SHELL_LOG" 2>/dev/null)
+    printf '%s' "${count:-0}"
+}
+
+## How many of a surface are live: every one announced, less every one that
+## announced it was going. The subtraction is the leak check — a surface that
+## outlives its output never logs the second line.
+live_surfaces() { echo $(( $(log_count "$1") - $(log_count "$2") )); }
 
 nested_up || exit 1
 
 # 1 — the session really has two outputs, and they really are different: a
 # two-screen run where both screens are the same size and scale proves nothing
 # a one-screen run did not.
-outputs=$(nested_outputs | tr '\n' ' ')
+outputs=$(nested_outputs | sort | tr '\n' ' ')
 if [[ "$outputs" == "$PRIMARY $SECOND " ]]; then
     nested_pass "two outputs, and only the two: $outputs"
 else
     nested_fail "the session came up with outputs [$outputs], wanted [$PRIMARY $SECOND]"
 fi
 
-for want in "$PRIMARY|$PRIMARY_GEOMETRY" "$SECOND|$SECOND_GEOMETRY"; do
-    name="${want%%|*}"
-    wanted="${want##*|}"
+for rule in "${NESTED_MONITORS[@]:1}"; do
+    name=$(nested_output_name "$rule")
+    wanted=$(rule_geometry "$rule")
     got=$(nested_output_geometry "$name")
     if [[ "$got" == "$wanted" ]]; then
         nested_pass "$name is $wanted (logical $(nested_output_logical "$name"))"
@@ -104,6 +124,13 @@ for want in "$PRIMARY|$PRIMARY_GEOMETRY" "$SECOND|$SECOND_GEOMETRY"; do
         nested_fail "$name came up as '$got', wanted '$wanted'"
     fi
 done
+
+# The scale gap, quoted rather than asserted, because it is a *measurement* and
+# the number is Qt's: `devicePixelRatio` reports 2 on a 1.5-scale output (#73's
+# footnote, and the reason Surfaces/Background/Wallpaper.qml clamps it to an
+# oversample bound instead of treating it as a raster size). With two outputs it
+# stops being a footnote — the lines below say what each screen reported, and
+# what the surfaces on it did with that.
 
 # The shell under test gets a scratch config, for settings-harness's reason:
 # a harness that runs the real shell must not read or write the files of the
@@ -216,7 +243,8 @@ echo "hotplug, unlocked"
 # must not be touched, because rebuilding a layer surface for an unrelated
 # screen is the compositor-crash class the window discipline exists to avoid.
 before_gone=$(log_count 'bar: window gone from')
-nested_output_add "$HOTPLUG_SPEC" || nested_fail "could not plug $HOTPLUG in"
+nested_output_add "$HOTPLUG_SPEC" \
+    || { nested_fail "could not plug $HOTPLUG in — the checks below have nothing to assert on"; exit 1; }
 
 hotplug_logical=$(nested_output_logical "$HOTPLUG")
 if nested_await "$NESTED_SHELL_LOG" "bar: window up on $HOTPLUG \(${hotplug_logical/x/×} " 15; then
@@ -234,7 +262,8 @@ fi
 # ...and leaves. A window that outlives its screen is the leak half: it is not
 # visible anywhere, and it is still holding a layer surface and a focus-grab
 # registration.
-nested_output_remove "$HOTPLUG" || nested_fail "could not pull $HOTPLUG out"
+nested_output_remove "$HOTPLUG" \
+    || { nested_fail "could not pull $HOTPLUG out — the checks below have nothing to assert on"; exit 1; }
 
 if nested_await "$NESTED_SHELL_LOG" "bar: window gone from $HOTPLUG" 15; then
     nested_pass "the bar went away with its output"
@@ -242,7 +271,7 @@ else
     nested_fail "the bar for $HOTPLUG outlived the output — a leaked layer surface"
 fi
 
-live=$(( $(log_count 'bar: window up on') - $(log_count 'bar: window gone from') ))
+live=$(live_surfaces 'bar: window up on' 'bar: window gone from')
 if [[ "$live" == "2" ]]; then
     nested_pass "back to two bars, one per remaining output"
 else
@@ -262,6 +291,13 @@ echo "the lock, on both outputs"
 # reason: only that root exposes the conversation, and the shared buffer is the
 # thing being asserted on. Everything under test — Lock.qml, LockAuth, the
 # surface — is the real code either way.
+#
+# And it runs last, which is not an ordering preference. `ext-session-lock`
+# keeps the session locked when its client dies — that is the guarantee the
+# protocol exists for — so the nested compositor stays locked after the shell
+# under test is killed, and the next shell to ask for a lock is refused and
+# taken down with a protocol error (measured, by trying to run this phase in
+# the middle). Nothing can follow a lock inside one nested session.
 nested_kill_shell
 mv "$NESTED_SHELL_LOG" "$NESTED_WORK/shell-bar.log" 2>/dev/null
 nested_shell lock-harness.qml 'harness: lock harness ready' || exit 1
@@ -294,6 +330,10 @@ echo "one buffer, two screens"
 # *surfaces* writing one buffer — not the IPC that lock-harness.sh uses, which
 # writes the buffer directly and would pass on a design that gave every screen
 # its own.
+## What the lock currently has in the shared buffer, whichever surface put it
+## there.
+lock_buffer() { ipc locktest state | sed 's/.*"buffer":"\([^"]*\)".*/\1/'; }
+
 typed=""
 for want in "$PRIMARY:f:o:r" "$SECOND:e:s:t"; do
     IFS=: read -r name k1 k2 k3 <<< "$want"
@@ -302,9 +342,17 @@ for want in "$PRIMARY:f:o:r" "$SECOND:e:s:t"; do
         nested_key_focused "$key" > /dev/null
         typed+="$key"
     done
-    sleep 0.5
 
-    buffer=$(ipc locktest state | sed 's/.*"buffer":"\([^"]*\)".*/\1/')
+    # Polled rather than slept on, like every other wait here: a keystroke is
+    # a compositor round trip and a shell round trip, and the fixed delay that
+    # covers both on an idle machine is the one that goes flaky on a loaded
+    # one.
+    for _ in $(seq 1 50); do
+        buffer=$(lock_buffer)
+        [[ "$buffer" == "$typed" ]] && break
+        sleep 0.1
+    done
+
     if [[ "$buffer" == "$typed" ]]; then
         nested_pass "typing on $name reached the shared buffer: '$buffer'"
     else
@@ -315,11 +363,16 @@ done
 
 # 6 — Enter on the *far* screen, submitting what was typed on the near one.
 # One attempt, from two surfaces, which is the whole of what the shared state
-# is for. The refusal comes from the `other` stack by default, so the count is
-# the assertion and the account is untouched; `--attempt` runs the same check
+# is for. The refusal comes from a faillock-free stack, so the count is the
+# assertion and the account is untouched; `--attempt` runs the same check
 # against the login stack.
+#
+# A machine with no such stack fails rather than notes: this is the ticket's
+# headline claim, and a run that skips it while printing that the shell holds
+# up on more than one screen is the empty assertion this harness exists to
+# stop being.
 if [[ -z "$PAM_STACK" ]]; then
-    nested_note "no faillock-free PAM stack on this machine — run with --attempt to submit"
+    nested_fail "no faillock-free PAM stack here to submit against — run with --attempt to use the login stack"
 else
     (( ATTEMPT )) && nested_note "submitting to the login stack — this counts against pam_faillock"
     before_attempts=$(log_count 'lock: password attempt')
@@ -349,7 +402,8 @@ echo "hotplug, locked"
 # white. Seam 2 cannot see the colour — that is seam 3's job — but it can see
 # whether a surface is built for the new output at all, which is the difference
 # between a flash and an uncovered screen.
-nested_output_add "$HOTPLUG_SPEC" || nested_fail "could not plug $HOTPLUG in while locked"
+nested_output_add "$HOTPLUG_SPEC" \
+    || { nested_fail "could not plug $HOTPLUG in while locked"; exit 1; }
 
 if nested_await "$NESTED_SHELL_LOG" "lock: surface up on $HOTPLUG" 15; then
     nested_pass "an output that arrived mid-lock was covered"
@@ -364,7 +418,8 @@ else
     nested_fail "the lock lost 'secure' when an output arrived — state: $state"
 fi
 
-nested_output_remove "$HOTPLUG" || nested_fail "could not pull $HOTPLUG out while locked"
+nested_output_remove "$HOTPLUG" \
+    || { nested_fail "could not pull $HOTPLUG out while locked"; exit 1; }
 
 if nested_await "$NESTED_SHELL_LOG" "lock: surface gone from $HOTPLUG" 15; then
     nested_pass "the surface went away with its output"
@@ -372,7 +427,7 @@ else
     nested_fail "the lock surface for $HOTPLUG outlived the output"
 fi
 
-live=$(( $(log_count 'lock: surface up on') - $(log_count 'lock: surface gone from') ))
+live=$(live_surfaces 'lock: surface up on' 'lock: surface gone from')
 if [[ "$live" == "2" ]]; then
     nested_pass "two lock surfaces left, one per remaining output"
 else

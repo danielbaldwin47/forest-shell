@@ -283,7 +283,13 @@ nested_output_geometry() {
 ## host's tiling — not this file — decides how big it is.
 nested_output_logical() {
     nested_output_geometry "$1" | awk '
-        $3 > 0 { split($1, size, "x"); printf "%dx%d\n", size[1] / $3, size[2] / $3 }
+        $3 > 0 {
+            split($1, size, "x")
+            # Rounded, not truncated: a scale that does not divide the mode
+            # exactly (1.25 on 1920 wide) leaves Qt at the nearest logical
+            # pixel and `%d` alone a pixel short of it.
+            printf "%dx%d\n", int(size[1] / $3 + 0.5), int(size[2] / $3 + 0.5)
+        }
     '
 }
 

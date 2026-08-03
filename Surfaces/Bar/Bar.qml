@@ -14,8 +14,9 @@
 // break and gets no tuning. What holds that tier up is
 // tools/multi-monitor-harness.sh, which runs this file on two headless outputs
 // at different sizes and scales and plugs a third in and out underneath it
-// (#98) — the machines are still single-monitor, the seam no longer is. A "bar on primary only" setting would be a dead
-// setting on every machine this runs on.
+// (#98) — the machines are still single-monitor, the seam no longer is. A "bar
+// on primary only" setting would be a dead setting on every machine this runs
+// on.
 //
 // The bar is on the critical path to the first frame (#22 §4 — "first frame
 // (wallpaper + bar rendered) ≤ 1.5 s"), so it is a direct child of the shell

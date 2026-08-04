@@ -25,15 +25,15 @@
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# shellcheck source=qs-runtime.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
-# shellcheck source=load-window.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-window.sh"
+# Launch, settle, conditions and teardown are the same on both budget harnesses
+# and live in one place (#150); what stays here is the interaction and the
+# verdict.
+# shellcheck source=session-run.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-run.sh"
 
 TARGET_FRAMES=120
 BUDGET_MS=8
 ENTRY="shell.qml"
-KEEP=0
 DRIVE_CAP_SECONDS=90
 
 while (( $# )); do
@@ -41,35 +41,15 @@ while (( $# )); do
         --frames)    TARGET_FRAMES="$2"; shift 2 ;;
         --budget-ms) BUDGET_MS="$2"; shift 2 ;;
         --entry)     ENTRY="$2"; shift 2 ;;
-        --keep)      KEEP=1; shift ;;
+        --keep)      SESSION_RUN_KEEP=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
-[[ -n "${WAYLAND_DISPLAY:-}" ]] || { echo "no WAYLAND_DISPLAY — this needs a real session" >&2; exit 2; }
-command -v hyprctl >/dev/null || { echo "no hyprctl — the interaction is driven over Hyprland's IPC" >&2; exit 2; }
-# A stale HYPRLAND_INSTANCE_SIGNATURE is the failure mode worth naming: it is
-# inherited by anything that outlives a compositor restart, hyprctl then talks
-# to a socket that is not there, and every dispatch below would silently do
-# nothing while the run still reported a frame count.
-hyprctl version >/dev/null 2>&1 || {
-    echo "hyprctl cannot reach the compositor — HYPRLAND_INSTANCE_SIGNATURE is unset or stale" >&2
-    exit 2
-}
+session_run_require_session
+session_run_require_hyprctl
 
-pass_count=0
-fail_count=0
-pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass_count=$((pass_count + 1)); }
-fail() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail_count=$((fail_count + 1)); }
-note() { printf '  ....  %s\n' "$1"; }
-
-LOG=$(mktemp -t forest-frame.XXXXXX.log)
-
-QS_RUNTIME=$(qs_runtime_bin) || exit 1
-
-QSG_RENDER_TIMING=1 QT_ASSUME_STDERR_HAS_CONSOLE=1 \
-    "$QS_RUNTIME" -p "$ENTRY" > "$LOG" 2>&1 &
-SHELL_PID=$!
+session_run_launch forest-frame "$ENTRY" || exit 1
 
 HOME_WORKSPACE=$(hyprctl activeworkspace -j 2>/dev/null | grep -o '"id": *[0-9-]*' | head -1 | grep -o '[0-9-]*$')
 HOME_CURSOR=$(hyprctl cursorpos 2>/dev/null | tr -d ' ')
@@ -83,49 +63,20 @@ restore_session() {
 
 cleanup() {
     local exit_status=$?
+    # The session goes back first, before anything else and on every failure
+    # path — the shared teardown can wait, the caller's pointer cannot.
     restore_session
-    load_window_stop
-    if (( KEEP )); then
-        printf '\nshell left up (pid %s), log: %s\n' "$SHELL_PID" "$LOG"
-        return
-    fi
-    kill "$SHELL_PID" 2>/dev/null
-    wait "$SHELL_PID" 2>/dev/null
-    if (( fail_count )) || (( exit_status )); then
-        printf 'log kept: %s\n' "$LOG"
-    else
-        rm -f "$LOG"
-    fi
+    session_run_teardown "$exit_status"
 }
 trap cleanup EXIT
 
-for _ in $(seq 1 300); do
-    grep -qa 'startup: stage interactive' "$LOG" && break
-    sleep 0.1
-done
-if ! grep -qa 'startup: stage interactive' "$LOG"; then
-    echo "the shell never reached interactive — see $LOG" >&2
-    exit 1
-fi
-note "shell up (pid $SHELL_PID) — settling for 10 s before the run"
+session_run_settle 10 'before the run' || exit 1
 
-# Same reason as the idle harness: the first seconds are startup, not
-# interaction. Every native service's first DBus reply lands in them, and each
-# one that changes a glyph on the bar costs the repaint that draws it — frames
-# that belong to no interaction at all.
-sleep 10
-
-# Everything from here is the measured window. The parser is told to ignore
-# everything above it rather than the log being truncated, so a failed run
-# still has its startup in the file that gets kept.
-start_lines=$(grep -ac '' "$LOG")
+# Everything from here is the measured window.
+start_lines=$(session_run_mark)
 load_window_start
 
-frames_so_far() {
-    local counted
-    counted=$(tail -n +"$((start_lines + 1))" "$LOG" | grep -ac 'frame rendered in')
-    echo "${counted:-0}"
-}
+frames_so_far() { session_run_frames "$SESSION_RUN_LOG" "$start_lines"; }
 
 # The workspaces to cycle. Hyprland destroys an empty workspace as soon as it
 # is left, so a session sitting on one workspace would have this create and
@@ -177,7 +128,7 @@ note "$collected frames over $round round(s) of interaction"
 load_window_report
 printf '\n'
 
-python3 tools/measure-frame-timing.py "$LOG" \
+python3 tools/measure-frame-timing.py "$SESSION_RUN_LOG" \
     --from-line "$start_lines" \
     --budget-ms "$BUDGET_MS" \
     --min-frames "$TARGET_FRAMES"
@@ -192,11 +143,11 @@ printf '\n'
 case "$measured" in
     0) pass "render stayed inside the ${BUDGET_MS}ms budget over $collected interaction frames" ;;
     2) printf '  \033[33m????\033[0m  the run never collected its frames — nothing here judges the budget\n'
-       printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+       session_run_layerrule_note
        exit 2 ;;
     *) fail "render went over the ${BUDGET_MS}ms budget — see the report above" ;;
 esac
 
-printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+session_run_layerrule_note
 (( fail_count )) && exit 1
 exit 0

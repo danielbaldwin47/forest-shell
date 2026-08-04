@@ -46,42 +46,27 @@
 set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# shellcheck source=qs-runtime.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
-# shellcheck source=load-window.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/load-window.sh"
+# Launch, settle, conditions and teardown are the same on both budget harnesses
+# and live in one place (#150); what stays here is the window, the budgets and
+# the three verdicts.
+# shellcheck source=session-run.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-run.sh"
 
 SECONDS_WINDOW=195
 ENTRY="shell.qml"
-KEEP=0
 
 while (( $# )); do
     case "$1" in
         --seconds) SECONDS_WINDOW="$2"; shift 2 ;;
         --entry)   ENTRY="$2"; shift 2 ;;
-        --keep)    KEEP=1; shift ;;
+        --keep)    SESSION_RUN_KEEP=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
-[[ -n "${WAYLAND_DISPLAY:-}" ]] || { echo "no WAYLAND_DISPLAY — this needs a real session" >&2; exit 2; }
+session_run_require_session
 
-pass_count=0
-fail_count=0
-pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass_count=$((pass_count + 1)); }
-fail() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail_count=$((fail_count + 1)); }
-note() { printf '  ....  %s\n' "$1"; }
-
-LOG=$(mktemp -t forest-idle.XXXXXX.log)
-
-# QSG_RENDER_TIMING makes the scenegraph print a line per rendered frame. It is
-# the only way to count repaints from outside, and it costs a printf per frame —
-# which is why it is here and not in the shell.
-QS_RUNTIME=$(qs_runtime_bin) || exit 1
-
-QSG_RENDER_TIMING=1 QT_ASSUME_STDERR_HAS_CONSOLE=1 \
-    "$QS_RUNTIME" -p "$ENTRY" > "$LOG" 2>&1 &
-SHELL_PID=$!
+session_run_launch forest-idle "$ENTRY" || exit 1
 
 # When the repaints happened, and not just how many — the gap list is what says
 # a count of six is the clock rather than three pairs ten seconds apart, and it
@@ -92,77 +77,46 @@ SHELL_PID=$!
 # reader rather than a filter in the pipeline above, so `$!` stays the shell's
 # own pid — /proc/<pid>/stat is where the other two budgets come from.
 STAMPS=$(mktemp -t forest-idle-frames.XXXXXX)
-tail -n0 -F "$LOG" 2>/dev/null \
+tail -n0 -F "$SESSION_RUN_LOG" 2>/dev/null \
     | grep --line-buffered -a 'frame rendered in' \
     | while IFS= read -r _; do printf '%s\n' "$EPOCHREALTIME"; done > "$STAMPS" &
 STAMP_PID=$!
 
 cleanup() {
     local exit_status=$?
-    load_window_stop
+    # The stamp reader is this harness's own; the shell, the conditions sampler
+    # and the log are the shared teardown's.
     pkill -P "$STAMP_PID" 2>/dev/null
     kill "$STAMP_PID" 2>/dev/null
     rm -f "$STAMPS"
-    if (( KEEP )); then
-        printf '\nshell left up (pid %s), log: %s\n' "$SHELL_PID" "$LOG"
-        return
-    fi
-    kill "$SHELL_PID" 2>/dev/null
-    wait "$SHELL_PID" 2>/dev/null
-    # Kept whenever anything went wrong — including the paths that exit before
-    # a check has run, which are the ones where the log is the only evidence
-    # there is (a shell that never reached interactive says why in there).
-    if (( fail_count )) || (( exit_status )); then
-        printf 'log kept: %s\n' "$LOG"
-    else
-        rm -f "$LOG"
-    fi
+    session_run_teardown "$exit_status"
 }
 trap cleanup EXIT
 
-for _ in $(seq 1 300); do
-    grep -qa 'startup: stage interactive' "$LOG" && break
-    sleep 0.1
-done
-if ! grep -qa 'startup: stage interactive' "$LOG"; then
-    echo "the shell never reached interactive — see $LOG" >&2
-    exit 1
-fi
-note "shell up (pid $SHELL_PID) — settling for 10 s before the window opens"
-
-# The first seconds are startup, not idle: wallpaper decode, the deferred stage,
-# and each native service's first DBus reply all land in them — the last of
-# those is the slowest, at about a second per backend, and each one that changes
-# a glyph on the bar costs the repaint that draws it.
-sleep 10
+session_run_settle 10 'before the window opens' || exit 1
 
 ticks_per_second=$(getconf CLK_TCK)
 cpu_ticks() { awk '{print $14 + $15}' "/proc/$1/stat" 2>/dev/null; }
 switches()  { awk '/ctxt_switches/ {total += $2} END {print total}' "/proc/$1/status" 2>/dev/null; }
-# The scenegraph's own wording, which is `syncAndRender: frame rendered in Nms`
-# — one line per presented frame, per window. `grep -c` prints its count and
-# *exits 1* when that count is zero, so the obvious `|| echo 0` fallback would
-# append a second number to the first.
-frames()    { local count; count=$(grep -ac 'frame rendered in' "$1" 2>/dev/null); echo "${count:-0}"; }
 
-start_ticks=$(cpu_ticks "$SHELL_PID")
-start_switches=$(switches "$SHELL_PID")
-start_frames=$(frames "$LOG")
-start_lines=$(grep -ac '' "$LOG")
+start_ticks=$(cpu_ticks "$SESSION_RUN_PID")
+start_switches=$(switches "$SESSION_RUN_PID")
+start_frames=$(session_run_frames "$SESSION_RUN_LOG")
+start_lines=$(session_run_mark)
 start_time=$(date +%s.%N)
 load_window_start
 
 note "measuring for ${SECONDS_WINDOW}s — do not touch the machine"
 sleep "$SECONDS_WINDOW"
 
-end_ticks=$(cpu_ticks "$SHELL_PID")
-end_switches=$(switches "$SHELL_PID")
-end_frames=$(frames "$LOG")
+end_ticks=$(cpu_ticks "$SESSION_RUN_PID")
+end_switches=$(switches "$SESSION_RUN_PID")
+end_frames=$(session_run_frames "$SESSION_RUN_LOG")
 end_time=$(date +%s.%N)
 load_window_report
 
 if [[ -z "$end_ticks" ]]; then
-    echo "the shell died during the window — see $LOG" >&2
+    echo "the shell died during the window — see $SESSION_RUN_LOG" >&2
     exit 1
 fi
 
@@ -175,7 +129,7 @@ fi
 # same way. So the shell's own compositor lines are the witness: a workspace
 # focus or an active-window change inside the window means there was input on
 # this session, from a human or from another agent driving hyprctl.
-compositor_events=$(tail -n +"$((start_lines + 1))" "$LOG" \
+compositor_events=$(tail -n +"$((start_lines + 1))" "$SESSION_RUN_LOG" \
     | grep -ac 'compositor: \(workspace .* focused\|focused window\)')
 compositor_events=${compositor_events:-0}
 
@@ -238,7 +192,7 @@ frame_count=$((end_frames - start_frames))
 # Measured on the T480, one screen, 195 s: 7-9 frames. The failure this catches
 # is an order of magnitude away from that — an animation that never settles
 # measures in the hundreds.
-screens=$(grep -ac 'bar: content ready on' "$LOG")
+screens=$(grep -ac 'bar: content ready on' "$SESSION_RUN_LOG")
 screens=${screens:-1}
 (( screens )) || screens=1
 expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
@@ -301,7 +255,7 @@ fi
 # asks — #73 proved it with the list, `gaps (ms): [59999, 59999, 60000, …]`.
 # The threshold drops the sub-second pairs, which are the second window
 # rendering the same repaint moment rather than a repaint of their own.
-python3 "$(dirname "${BASH_SOURCE[0]}")/measure-frame-timing.py" "$LOG" \
+python3 "$(dirname "${BASH_SOURCE[0]}")/measure-frame-timing.py" "$SESSION_RUN_LOG" \
     --from-line "$start_lines" --list-gaps 1000 2>/dev/null | grep -a '^gaps' | sed 's/^/  ....  /'
 
 # --- the startup gates, from the same run ------------------------------------
@@ -315,7 +269,7 @@ python3 "$(dirname "${BASH_SOURCE[0]}")/measure-frame-timing.py" "$LOG" \
 # frame nobody could see. #36's own criterion is that the gates still hold with
 # five more services in the deferred stage — which is a question about this
 # session, on this machine.
-gate_ms() { sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -a "startup: stage $1" | head -1 \
+gate_ms() { sed 's/\x1b\[[0-9;]*m//g' "$SESSION_RUN_LOG" | grep -a "startup: stage $1" | head -1 \
                 | grep -o '+[0-9]*ms' | head -1 | tr -d '+ms'; }
 
 first_frame_ms=$(gate_ms 'first frame painted')
@@ -337,7 +291,7 @@ else
     fail 'the log never said the shell became interactive'
 fi
 
-printf '\nthe shell pushed a Hyprland layerrule that outlives it — `hyprctl reload` clears it\n'
+session_run_layerrule_note
 # A real failure outranks a void one: something measured and over budget is a
 # finding whatever else the window contained. Void alone is exit 2 — nothing
 # here is a verdict on the shell, so re-run rather than read it as one.

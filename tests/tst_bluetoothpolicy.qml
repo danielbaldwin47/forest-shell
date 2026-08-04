@@ -335,7 +335,21 @@ TestCase {
         compare(names(paired), ["LE-Zen Zone", "Zen Zone"]);
     }
 
+    function test_a_row_with_nothing_happening_to_it_is_a_scan_result() {
+        verify(policy.nothingHappeningTo(device("00:01")));
+        verify(!policy.nothingHappeningTo(device("00:01", { connected: true })));
+        verify(!policy.nothingHappeningTo(device("00:01", { paired: true })));
+        verify(!policy.nothingHappeningTo(device("00:01", { pairing: true })));
+    }
+
     // --- the pairing agent (#153) --------------------------------------------
+
+    function test_an_attempt_is_given_a_minute() {
+        // Long enough for a headset held in a hand and a BlueZ window that is
+        // about this wide; short enough that a device that walked away does not
+        // leave a row reading "Pairing…" until the shell restarts.
+        compare(policy.pairTimeoutMs, 60000);
+    }
 
     function test_the_pairing_script_registers_an_agent_before_it_pairs() {
         // The whole of #153's first cause: an outgoing Pair() with nothing to

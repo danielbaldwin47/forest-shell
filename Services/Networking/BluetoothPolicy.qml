@@ -130,11 +130,21 @@ QtObject {
         for (const row of rows ?? []) {
             const base = policy.classicName(row.name);
             const shadowed = base !== "" && byName[base.toLowerCase()] === true;
-            if (shadowed && policy.deviceBand(row) === 3)
+            if (shadowed && policy.nothingHappeningTo(row))
                 continue;
             out.push(row);
         }
         return out;
+    }
+
+    /// A row that is only a scan result: nothing connected, nothing bonded,
+    /// nothing in flight. Asked as a question rather than compared against
+    /// `deviceBand`'s last band, so that adding a band stays a change to the
+    /// order rather than a silent change to what the list contains.
+    function nothingHappeningTo(row: var): bool {
+        const facts = row ?? ({});
+        return facts.connected !== true && facts.paired !== true
+            && facts.pairing !== true;
     }
 
     function deviceRow(device: var, address: string): var {
@@ -327,6 +337,12 @@ QtObject {
     // export one, and `bluetoothctl` registers one for as long as it runs.
     // These two functions are the whole of what it is told and the whole of
     // what is read back.
+
+    /// How long an attempt is given before it is called off. BlueZ's own
+    /// pairing window is about this long, and the number is here rather than on
+    /// the Timer for the reason LogindBridge's confirm timeout is: it is a
+    /// threshold, and thresholds are decisions (CLAUDE.md, seam 1).
+    readonly property int pairTimeoutMs: 60000
 
     /// What to write to `bluetoothctl` to pair one device, in order.
     ///

@@ -100,11 +100,14 @@ Singleton {
 
     // --- the drill-in's list (#45) -------------------------------------------
     //
-    // Native throughout: `BluetoothDevice` carries `pair()`, `connect()`,
-    // `disconnect()`, `cancelPair()` and `forget()`, so none of this shells out
-    // to `bluetoothctl`. What it does need is a scan, which the bar deliberately
-    // never started — see the header, and `beginDiscovery` below for who holds
-    // it now.
+    // Native but for one verb: `BluetoothDevice` carries `connect()`,
+    // `disconnect()`, `cancelPair()` and `forget()`, and it carries `pair()`
+    // too — but a pair with no agent behind it is #153, so that one goes
+    // through `bluetoothctl` instead. The header argues it; `pairer` below is
+    // where it happens.
+    //
+    // What all of it needs is a scan, which the bar deliberately never started
+    // — see the header, and `beginDiscovery` below for who holds it now.
 
     /// Every device BlueZ knows about, as plain rows — the same shape
     /// `devices` above uses for the count, with the per-device state the panel
@@ -181,9 +184,17 @@ Singleton {
     /// Mark a device that has just bonded trusted (#153).
     ///
     /// Here and not only in the pair script, because a bond can arrive without
-    /// this shell asking for one — a headset put into pairing mode and paired
-    /// from its own side ends up in exactly the state the ticket describes:
-    /// bonded, untrusted, and unable to reconnect itself afterwards.
+    /// this shell asking for one — a headset paired from its own side ends up
+    /// in exactly the state the ticket describes: bonded, untrusted, and unable
+    /// to reconnect itself afterwards. BlueZ materialises the device object
+    /// when it shows up rather than when the bond completes, so that arrives
+    /// here as a transition like any other.
+    ///
+    /// What it is not is the shell starting up next to devices that are already
+    /// paired. Those have no previous reading, `noteDeviceChanges` skips them,
+    /// and `trustNeeded` says why that is the wanted answer rather than a gap:
+    /// an old bond left untrusted was left that way by a decision this shell
+    /// knows nothing about.
     ///
     /// `trusted` is one of the two writable properties on the upstream device
     /// object, so this half needs no helper.
@@ -294,6 +305,16 @@ Singleton {
                                                   + root.pairingName));
             return;
         }
+        if (pairer.live) {
+            // The helper of the attempt just cancelled has not exited yet, and
+            // starting inside that window hands the new attempt to the old
+            // process's exit handler. Refused rather than queued: the press is
+            // a finger, and a finger can press again.
+            Logger.warn("bluetooth",
+                        root.policy.deviceRefused(row.name, "the last pairing helper "
+                                                  + "has not stopped yet"));
+            return;
+        }
         Logger.log("bluetooth", root.policy.asked("pair", row.name));
         root.pairingAddress = row.address;
         root.pairingName = row.name;
@@ -336,6 +357,7 @@ Singleton {
         stdinEnabled: true
 
         onStarted: {
+            pairer.live = true;
             for (const line of root.policy.pairScript(root.pairingAddress))
                 pairer.write(line + "\n");
         }
@@ -353,17 +375,19 @@ Singleton {
         }
 
         onExited: (exitCode, exitStatus) => {
-            pairTimeout.stop();
+            pairer.live = false;
             if (root.pairingAddress === "")
-                return;     // an answer already ended it — nothing to report
-            const name = root.pairingName;
-            root.forgetPairingFlag(root.pairingAddress);
-            root.pairingAddress = "";
-            root.pairingName = "";
-            Logger.warn("bluetooth", root.policy.paired(name, {
-                ok: false, reason: "bluetoothctl exited " + exitCode
-            }));
+                return;     // an answer or a cancel already ended it
+            root.failPairing("bluetoothctl exited " + exitCode);
         }
+
+        /// Between `onStarted` and `onExited`, which is not the same as
+        /// `running`: ending the helper asks it to terminate and the exit
+        /// arrives later. A second attempt started inside that gap would be
+        /// ended by the *previous* process's exit — this is what makes a
+        /// cancel followed immediately by a press refuse rather than eat the
+        /// attempt it started.
+        property bool live: false
     }
 
     /// A pairing nobody ever answers — the headset that was put down, the
@@ -372,17 +396,11 @@ Singleton {
     Timer {
         id: pairTimeout
 
-        interval: 60000
+        interval: root.policy.pairTimeoutMs
         onTriggered: {
             if (root.pairingAddress === "")
                 return;
-            const name = root.pairingName;
-            root.forgetPairingFlag(root.pairingAddress);
-            root.pairingAddress = "";
-            root.pairingName = "";
-            Logger.warn("bluetooth", root.policy.paired(name, { ok: false,
-                                                                reason: "timed out" }));
-            root.stopPairer();
+            root.failPairing("timed out");
         }
     }
 
@@ -395,17 +413,11 @@ Singleton {
             return;
 
         const address = root.pairingAddress;
-        const name = root.pairingName;
-        root.pairingAddress = "";
-        root.pairingName = "";
-        root.forgetPairingFlag(address);
-        pairTimeout.stop();
-
+        const name = root.endPairing();
         if (outcome.ok)
             Logger.log("bluetooth", root.policy.paired(name, outcome));
         else
             Logger.warn("bluetooth", root.policy.paired(name, outcome));
-        root.stopPairer();
 
         // The second half of the one gesture. BlueZ connects on its own after a
         // pair for most device classes and this is the case where it does not;
@@ -413,6 +425,14 @@ Singleton {
         // asking costs a headset that is bonded and silent.
         if (outcome.ok)
             root.connectAfterPair(address);
+    }
+
+    /// End the attempt and say why, for the two endings that are nobody's
+    /// answer: the helper dying, and the minute running out.
+    function failPairing(reason: string): void {
+        const name = root.endPairing();
+        Logger.warn("bluetooth",
+                    root.policy.paired(name, { done: true, ok: false, reason: reason }));
     }
 
     function connectAfterPair(address: string): void {
@@ -448,14 +468,19 @@ Singleton {
         pairer.running = false;
     }
 
-    /// Give up on the pairing in flight without claiming an outcome for it —
-    /// the cancel path, where the line has already been written.
-    function endPairing(): void {
+    /// End whatever is in flight and hand back the name it was for, so the
+    /// caller can say what became of it. The one teardown: every ending —
+    /// an answer, a cancel, a timeout, a helper that died — goes through here,
+    /// because four of them written out four times is four chances to drop the
+    /// timer or leave the flag up.
+    function endPairing(): string {
+        const name = root.pairingName;
         pairTimeout.stop();
         root.forgetPairingFlag(root.pairingAddress);
         root.pairingAddress = "";
         root.pairingName = "";
         root.stopPairer();
+        return name;
     }
 
     function connectDevice(address: string): void {

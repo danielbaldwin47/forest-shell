@@ -196,3 +196,21 @@ open a PR, and merge it.
 If the work came from a ticket, close the ticket once the PR is open and the
 work is complete — even when you cannot merge (background sessions can't).
 Other sessions gate on ticket state, so an unclosed ticket stalls the chain.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as GitHub issues on `danielbaldwin47/forest-shell`, driven
+with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name: `needs-triage`,
+`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` and `docs/adr/` at the repo root, both created
+lazily by `/domain-modeling` rather than upfront. See `docs/agents/domain.md`.

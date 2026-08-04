@@ -51,6 +51,11 @@ python=$(command -v python3 || true)
 # supposed to produce — so the tool that reads it is checkable without one.
 "$python" tst_measure_blur.py
 
+# And the same shape for the idle budget's conditions (#176): "did that window
+# measure the idle shell or the idle ladder" is a decision over a log and two
+# numbers, even though only the window itself needs a real session.
+"$python" tst_idle_rungs.py
+
 # Same reason, different language: which quickshell binary may run the shell is
 # a decision (parse a version, compare against a floor), but it is bash, and
 # qmltestrunner only loads QML. It rides along here (#57).

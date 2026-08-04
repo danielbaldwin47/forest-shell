@@ -4,6 +4,7 @@
 #   tools/idle-budget.sh                  # 195 s window, the real shell
 #   tools/idle-budget.sh --seconds 120
 #   tools/idle-budget.sh --keep           # leave the shell up afterwards
+#   tools/idle-budget.sh --help           # the window, and the rungs it reaches
 #
 # **This is not a seam, and it cannot be made into one.** `tests/` cannot import
 # Quickshell; the nested compositor never presents a frame (#85), so frames
@@ -32,6 +33,18 @@
 # never measured. The 1-minute load average over the window is reported next to
 # the numbers for the same reason (tools/load-window.sh).
 #
+# The other thing waiting for the machine to be left alone is the shell's own
+# idle ladder (#176). `system.idle.dim` fires at 2.5 min on battery and 5 min on
+# mains, so the default window straddles a rung on one power source and not on
+# the other — and #152 walked into it: 45 frames against a budget of 10, 39 of
+# them the screen dimming at 151.7 s and the OSD announcing it (#175). A rung
+# firing inside the window is a state change the harness measured rather than a
+# repaint regression, so it voids the same way input does. Which rungs were
+# armed comes out of the shell's own ladder line, and the power state is
+# reported on every run, because #73's 6 frames and #137's 21 are only
+# comparable to each other if they were taken on the same one and nothing
+# recorded it. `--help` says which rungs the default window can reach.
+#
 # The one that is not obvious, and cost #95 three windows: **an animated window
 # title is input.** The bar tracks the focused window, a terminal running an
 # agent puts a spinner in its title, and the title changes about once a second
@@ -54,15 +67,89 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session-run.sh"
 
 SECONDS_WINDOW=195
 ENTRY="shell.qml"
+RUN_START=$(date +%s.%N)
+
+usage() {
+    cat <<'USAGE'
+tools/idle-budget.sh [--seconds N] [--entry FILE] [--keep]
+
+  --seconds N   the window, in seconds (default 195)
+  --entry FILE  the shell entry point (default shell.qml)
+  --keep        leave the shell running afterwards
+  --help        this
+
+Which idle rungs the window reaches, and why it matters:
+
+  The shell's idle ladder is waiting for the same thing this harness is — a
+  machine nobody is touching. On battery the defaults are dim at 2.5 min
+  (150 s), lock at 5 min (300 s), dpms at 6 min (360 s) and suspend at 15 min
+  (900 s); on mains each is twice that and suspend is off. The window is
+  measured on top of the ~12-15 s the harness spends launching and settling, so
+  from a cold start the 195 s default reaches **dim and nothing else on
+  battery, and no rung at all on mains**. Past that the lead counts: --seconds
+  300 covers idle 15 s to 315 s, which reaches lock on battery *and* dim on
+  mains, and --seconds 360 reaches dpms on battery. The longest window that
+  clears every rung is roughly --seconds 135 on battery and --seconds 285 on
+  mains.
+
+  A rung that fires inside the window is measured by it: #152 read 45 frames
+  against a budget of 10, 39 of which were the screen dimming at 151.7 s. So a
+  window with a rung in it voids the frame criterion the way input does and
+  exits 2, inconclusive — re-run it on mains, or with --seconds short of the
+  first armed rung. Mains buys headroom rather than immunity: 195 s clears
+  mains dim at 300 s, but --seconds 300 does not, because the lead counts. What
+  is actually armed is read out of the shell's own ladder line rather than out
+  of the timeouts above, which are only the defaults.
+
+  Your idle clock may already be running when the harness starts: it counts
+  from the last input on the session, not from launch. The prediction assumes
+  the last input was you starting this, and the log is the witness either way.
+USAGE
+}
 
 while (( $# )); do
     case "$1" in
         --seconds) SECONDS_WINDOW="$2"; shift 2 ;;
         --entry)   ENTRY="$2"; shift 2 ;;
         --keep)    SESSION_RUN_KEEP=1; shift ;;
-        *) echo "unknown option: $1" >&2; exit 2 ;;
+        --help|-h) usage; exit 0 ;;
+        *) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+# Which power source the machine is on. The shell's own ladder line is the
+# better authority once it is up — it is what the ladder was armed against —
+# but this is wanted before the window opens and on runs that never get a
+# ladder line at all, so it comes from sysfs, which is where UPower reads it
+# from too. A machine with neither a mains supply nor a battery is `unknown`
+# rather than a guess: the report says what it knows (#176).
+# A USB supply is only consulted when the machine has no mains one at all. On
+# the T480 the two USB-C port controllers publish `online 1` while the barrel
+# charger is what is actually feeding it, so a machine with both would read `ac`
+# off a USB port that charges nothing — and on a laptop running from its
+# battery with a USB-C dock attached, that is the wrong answer in the direction
+# that matters here.
+power_state() {
+    local type_file supply mains_seen=0 mains_online=0 usb_online=0 battery=0
+    for type_file in /sys/class/power_supply/*/type; do
+        [[ -r "$type_file" ]] || continue
+        supply=${type_file%/type}
+        [[ -r "$supply/online" ]] || { [[ "$(<"$type_file")" == Battery ]] && battery=1; continue; }
+        case "$(<"$type_file")" in
+            Mains)
+                mains_seen=1
+                [[ "$(<"$supply/online")" == 1 ]] && mains_online=1 ;;
+            USB|USB_PD|USB_PD_DRP)
+                [[ "$(<"$supply/online")" == 1 ]] && usb_online=1 ;;
+            Battery) battery=1 ;;
+        esac
+    done
+    if (( mains_seen )); then
+        (( mains_online )) && printf 'ac\n' || { (( battery )) && printf 'battery\n' || printf 'unknown\n'; }
+    elif (( usb_online )); then printf 'ac\n'
+    elif (( battery )); then printf 'battery\n'
+    else printf 'unknown\n'; fi
+}
 
 session_run_require_session
 
@@ -104,8 +191,12 @@ start_switches=$(switches "$SESSION_RUN_PID")
 start_frames=$(session_run_frames "$SESSION_RUN_LOG")
 start_lines=$(session_run_mark)
 start_time=$(date +%s.%N)
+power_at_start=$(power_state)
 load_window_start
 
+# Said here as well as in the report, so a run that dies mid-window still leaves
+# the one condition that cannot be recovered afterwards in its log (#176).
+note "power   $power_at_start — the ladder's ${power_at_start} rungs are the ones in play"
 note "measuring for ${SECONDS_WINDOW}s — do not touch the machine"
 sleep "$SECONDS_WINDOW"
 
@@ -113,6 +204,7 @@ end_ticks=$(cpu_ticks "$SESSION_RUN_PID")
 end_switches=$(switches "$SESSION_RUN_PID")
 end_frames=$(session_run_frames "$SESSION_RUN_LOG")
 end_time=$(date +%s.%N)
+power_at_end=$(power_state)
 load_window_report
 
 if [[ -z "$end_ticks" ]]; then
@@ -132,6 +224,46 @@ fi
 compositor_events=$(tail -n +"$((start_lines + 1))" "$SESSION_RUN_LOG" \
     | grep -ac 'compositor: \(workspace .* focused\|focused window\)')
 compositor_events=${compositor_events:-0}
+
+# The other thing that was waiting for the machine to be left alone: the shell's
+# own idle ladder (#176). Same argument as the paragraph above — a rung firing
+# inside the window is a state change the window measured, not a repaint the
+# idle shell made, and the two must not report the same way.
+#
+# The ladder is read off the shell's own startup line rather than out of the
+# settings file, so the harness and the shell cannot disagree about what was
+# armed; the arithmetic on it is a decision and lives at the first seam
+# (tools/idle-rungs.py, tests/tst_idle_rungs.py). `lead` is how much idle time
+# was already on the clock when the window opened — launch plus settle — because
+# a rung fires on the idle clock and not on the window's.
+#
+# stderr is deliberately not swallowed: a reader that cannot say what was armed
+# is the #81 shape — a silent failure with two candidate causes — and the run
+# says so below rather than quietly judging the frames anyway.
+lead_seconds=$(python3 -c "print(round($start_time - $RUN_START, 1))")
+rungs_report=$(python3 "$(dirname "${BASH_SOURCE[0]}")/idle-rungs.py" "$SESSION_RUN_LOG" \
+                   --window "$SECONDS_WINDOW" --lead "$lead_seconds" --from-line "$start_lines")
+rungs_field() { printf '%s\n' "$rungs_report" | grep -a "^$1=" | cut -d= -f2-; }
+ladder_power=$(rungs_field power)
+armed_rungs=$(rungs_field armed)
+before_rungs=$(rungs_field before)
+crossed_rungs=$(rungs_field crossed)
+fired_rungs=$(rungs_field fired)
+
+# What the shell believed beats what sysfs says, when they disagree: the ladder
+# was armed against the shell's own reading. A disagreement is itself worth
+# printing rather than resolving silently.
+power_line="$power_at_start"
+[[ "$power_at_start" != "$power_at_end" ]] && power_line="$power_at_start → $power_at_end during the window"
+[[ -n "$ladder_power" && "$ladder_power" != unknown && "$ladder_power" != "$power_at_start" ]] \
+    && power_line="$power_line (sysfs), $ladder_power (the shell's ladder)"
+
+note "power   $power_line"
+if [[ -n "$armed_rungs" ]]; then
+    note "ladder  armed ${armed_rungs//,/, } — idle time ${lead_seconds}s to $(python3 -c "print(round($lead_seconds + $SECONDS_WINDOW, 1))")s was measured"
+else
+    note "ladder  the log never said what was armed"
+fi
 
 printf '\n'
 python3 - "$start_ticks" "$end_ticks" "$start_switches" "$end_switches" \
@@ -197,44 +329,93 @@ screens=${screens:-1}
 (( screens )) || screens=1
 expected_frames=$(python3 -c "import math; print(2 * $screens * (math.ceil($SECONDS_WINDOW / 60) + 1))")
 
+power_changed=0
+[[ "$power_at_start" != "$power_at_end" ]] && power_changed=1
+
 printf '\n'
 if (( compositor_events )); then
     note "$compositor_events compositor event(s) inside the window — workspace switches or"
     note "active-window changes, so this session was in use while it was measured"
-    printf '\n'
 fi
+if [[ -n "$fired_rungs" ]]; then
+    note "the idle ladder fired inside the window: ${fired_rungs//,/, } — that is the shell"
+    note "changing state on a schedule, and the repaints it costs are that rung's"
+elif [[ -n "$crossed_rungs" ]]; then
+    note "the window covered ${crossed_rungs//,/, } on the idle clock, but no rung fired in it:"
+    note "either the session was already idle when the run began, so the rung had gone"
+    note "before the window opened, or something held it off (see the log's idle lines)"
+elif [[ -n "$before_rungs" ]]; then
+    note "${before_rungs//,/, } was already behind the idle clock when the window opened —"
+    note "measured with that rung's state already applied, not on the way into it"
+fi
+if (( power_changed )); then
+    note "the power source changed mid-window ($power_at_start → $power_at_end), which rearms the"
+    note "whole ladder at the other source's timeouts"
+fi
+{ (( compositor_events )) || [[ -n "$fired_rungs" ]] || (( power_changed )); } && printf '\n'
 
-# What a driven window does and does not void. Input only ever *adds* work — a
-# workspace switch animates the ridgeline, a hover repaints a module — so a
+# What a disturbed window does and does not void. Input only ever *adds* work —
+# a workspace switch animates the ridgeline, a hover repaints a module — so a
 # reading that passes its budget under input passes it at rest too, and that
 # pass is real. A reading that fails one has no such argument: it might be the
 # shell, it might be whoever was driving. So the three criteria split by
 # direction rather than all going out together, and only the frame count, whose
 # budget the driving directly writes, is void either way.
+#
+# A rung firing is the same kind of event with one asymmetry (#176): it does not
+# only add. dim writes a backlight and the OSD used to announce it (#175), but
+# dpms blanks the screen, and a shell whose frames stop being presented can come
+# in *under* a frame budget it would otherwise fail. So a pass taken with a rung
+# in the window is still a pass — the number was measured — but it is not an
+# upper bound on the shell at rest, and it does not claim to be. The frame
+# count, which the rung's repaints are counted into directly, is void.
+#
+# Not knowing what was armed is the third case, and it goes the same way: a
+# window whose ladder could not be read cannot be called rung-free, so it is
+# reported as unjudged rather than judged (#81 — the failure that says nothing
+# is the expensive one).
 void_count=0
 void() { printf '  \033[33m????\033[0m  %s\n' "$1"; void_count=$((void_count + 1)); }
-driven=$(( compositor_events > 0 ))
+
+disturbance=""
+join_reason() { [[ -n "$disturbance" ]] && disturbance="$disturbance and $1" || disturbance="$1"; }
+(( compositor_events )) && join_reason "the window was driven"
+[[ -n "$fired_rungs" ]] && join_reason "the idle ladder fired (${fired_rungs//,/, })"
+(( power_changed )) && join_reason "the power source changed"
+[[ -z "$armed_rungs" ]] && join_reason "what the idle ladder had armed could not be read"
+
+# Input alone is the one disturbance that argues in a single direction — it only
+# ever adds work — so it is the one a pass can still be called an upper bound
+# under. The flag is set where the reason is, rather than by matching the prose
+# back out of it.
+driven_only=1
+{ [[ -n "$fired_rungs" ]] || (( power_changed )) || [[ -z "$armed_rungs" ]]; } && driven_only=0
+
+disturbed=0
+[[ -n "$disturbance" ]] && disturbed=1
+qualifier="$disturbance"
+(( driven_only )) && qualifier="under input, so an upper bound"
 
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then
-    if (( driven )); then
-        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5% — under input, so an upper bound"
+    if (( disturbed )); then
+        pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5% — $qualifier"
     else
         pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
     fi
-elif (( driven )); then
-    void "idle CPU $(printf '%.3f' "$cpu_percent")% over budget, but the window was driven"
+elif (( disturbed )); then
+    void "idle CPU $(printf '%.3f' "$cpu_percent")% over budget, but $disturbance"
 else
     fail "idle CPU $(printf '%.3f' "$cpu_percent")% over the 0.5% budget"
 fi
 
 if python3 -c "import sys; sys.exit(0 if $switch_rate < 5 else 1)"; then
-    if (( driven )); then
-        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s — under input, so an upper bound"
+    if (( disturbed )); then
+        pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s — $qualifier"
     else
         pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
     fi
-elif (( driven )); then
-    void "$(printf '%.2f' "$switch_rate") context switches/s over budget, but the window was driven"
+elif (( disturbed )); then
+    void "$(printf '%.2f' "$switch_rate") context switches/s over budget, but $disturbance"
 else
     fail "$(printf '%.2f' "$switch_rate") context switches/s over the 5/s budget"
 fi
@@ -242,9 +423,9 @@ fi
 # The clock is the one thing that may repaint at rest, once a minute on the
 # minute (Surfaces/Bar/Modules/Clock.qml). Anything much past that is an
 # animation that did not stop.
-if (( driven )); then
-    void "$frame_count frames in ${SECONDS_WINDOW}s, but the window was driven — every"
-    note "     switch and hover in it is a repaint the criterion never asked about"
+if (( disturbed )); then
+    void "$frame_count frames in ${SECONDS_WINDOW}s, but $disturbance — the repaints"
+    note "     that costs are not the ones the criterion asked about"
 elif (( frame_count <= expected_frames )); then
     pass "$frame_count frames in ${SECONDS_WINDOW}s — the clock, and nothing else"
 else
@@ -297,7 +478,11 @@ session_run_layerrule_note
 # here is a verdict on the shell, so re-run rather than read it as one.
 (( fail_count )) && exit 1
 if (( void_count )); then
-    printf 'that is %d criterion/criteria this window could not judge — re-run when nothing\nelse is on the compositor\n' "$void_count"
+    printf 'that is %d criterion/criteria this window could not judge — re-run when nothing\nelse is on the compositor' "$void_count"
+    if [[ -n "$fired_rungs" ]]; then
+        printf ', and either on mains or with --seconds under the first\narmed rung (see --help)'
+    fi
+    printf '\n'
     exit 2
 fi
 exit 0

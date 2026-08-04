@@ -214,6 +214,22 @@ TestCase {
             + "Fingerprints for user daniel: right-index-finger"));
     }
 
+    function test_a_real_enrolled_finger_is_read_out_of_fprintd_list() {
+        // Verbatim from this machine, 2026-08-04 (#152 §3), on the stack that
+        // actually drives its reader: open-fprintd + python-validity, with the
+        // print stored on the sensor. Note the shape the invented case above
+        // misses — the driver name and press/swipe mode trail the user, and the
+        // fingers are a list below rather than a value after the colon. The
+        // match survives it because it anchors on `Fingerprints for user` and
+        // nothing after it, which is worth having pinned rather than assumed.
+        verify(policy.fingerprintEnrolled(
+            "found 1 devices\n"
+            + "Device at /net/reactivated/Fprint/Device/0\n"
+            + "Using device /net/reactivated/Fprint/Device/0\n"
+            + "Fingerprints for user daniel on DBus driver (press):\n"
+            + " - #0: right-index-finger"));
+    }
+
     function test_a_reader_with_nothing_enrolled_is_not_offered() {
         // The prose is the answer, not the exit code — the probe reads stdout and
         // never sees the status. A fingerprint prompt nothing can answer is worse

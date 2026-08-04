@@ -157,6 +157,28 @@ weight, and why its patterns are worth more than the return code.
 Needs a reader with an enrolled finger — `fprintd-list "$USER"` must name at
 least one. `system.lock.fingerprint` must also be on.
 
+**And a third prerequisite, which is easy to miss and stops the run dead.** The
+parallel context opens the PAM service named by `system.lock.fingerprintPamConfig`
+(default `fprintd`) out of `configDirectory`, `/etc/pam.d`. Arch ships no
+`/etc/pam.d/fprintd` — the `pam_fprintd.so` module arrives without a service
+file — so on a stock install there is nothing for the context to open, and a
+machine with a working, enrolled reader still shows no prompt. Confirm the file
+exists before blaming the surface:
+
+    ls /etc/pam.d/fprintd
+
+Creating it is a two-line service, and it is worth being deliberate about,
+because a PAM service file is authentication policy:
+
+    #%PAM-1.0
+    auth     required   pam_fprintd.so
+    account  required   pam_permit.so
+
+`required` rather than `sufficient` is the safe shape here: this service is only
+ever consulted by the lock's own fingerprint context, and it must not become a
+way to satisfy some other stack's auth. The password context is a separate
+service (`system.lock.pamConfig`, default `login`) and is untouched by this.
+
 **Where a finger is enrolled:**
 
 1. Lock the session.
@@ -228,11 +250,29 @@ before trusting a green result there is that the client is actually installed:
 daemon without the client gives the probe nothing to launch, which reads as
 "nothing enrolled" no matter how many fingers are.
 
-Running the enrolled half here therefore means installing `open-fprintd` +
-`python-validity` (AUR), which displaces `fprintd` and needs the sensor's
-firmware extracted from a vendor installer. That is a deliberate system change,
-not a test step — take it knowingly, or run the enrolled half on a machine
-whose reader libfprint already supports.
+**That stack was installed here later the same day**, and the reader works.
+`open-fprintd 0.7-2`, `python-validity 0.15-1`, `fprintd-clients-git` for the
+client and the PAM module, `fprintd` itself gone. The probe now answers:
+
+    found 1 devices
+    Device at /net/reactivated/Fprint/Device/0
+    Using device /net/reactivated/Fprint/Device/0
+    Fingerprints for user daniel on DBus driver (press):
+     - #0: right-index-finger
+
+A finger was already enrolled with nothing enrolled on this install — these
+sensors store the print on the sensor, so it outlived the operating system that
+put it there. Worth knowing before assuming an enrolment step is needed.
+
+Note the shape against what `tests/tst_lockpolicy.qml` had been assuming: the
+driver name and press/swipe mode trail the user, and the fingers are a list on
+following lines rather than a value after the colon. `fingerprintEnrolled`
+survives that because it anchors on `Fingerprints for user` and nothing after
+it — now pinned by a case rather than left to luck.
+
+So the enrolled half is reachable on this machine at last. What still gates it
+is the PAM service file above: `/etc/pam.d/fprintd` does not exist here, so the
+fingerprint context has nothing to open. Create it, then run steps 1-5.
 
 Record: which half you could run. Both halves need saying — "no reader here, so
 the prompt stayed away" is half the criterion.

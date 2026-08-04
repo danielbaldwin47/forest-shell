@@ -338,10 +338,28 @@ silent: the message is cleared, the prompt disappears, the reader's light goes
 out, and nothing says fingerprint has stopped being an option. The password
 field carries on working, and a relock resets it.
 
-Both are filed rather than fixed here — #168 for the unreadable failure text,
-#169 for the unreachable re-arm and the silent withdrawal. What makes them the
-same lesson as #161 one section up: the numbers were written against a re-arm
-that PAM's own module never lets happen.
+Both were filed rather than fixed in that pass — #168 for the unreadable failure
+text, #169 for the unreachable re-arm and the silent withdrawal. What makes them
+the same lesson as #161 one section up: the numbers were written against a
+re-arm that PAM's own module never lets happen.
+
+**Run again on the same machine, after both fixes (2026-08-04, #152).** Steps 3
+and 5 now read as this file asks for them. The whole conversation, as seen:
+
+    Place your finger on the fingerprint reader
+    Place your finger on the reader again          (finger lifted too fast)
+    Failed to match fingerprint                    (a wrong finger — readable)
+    Out of fingerprint tries — use your password   (after the third touch, and it stays)
+
+Three things are worth reading off that. The failure line is legible where it
+had 9.7 ms before, so `fingerprintErrorDwellMs` is doing its job. The swipe-retry
+prompt still comes through, so the dwell is holding errors without swallowing
+ordinary messages — the failure mode a blunt "errors always win" would have had.
+And the conversation ends on the third touch with the closing line on screen,
+which means the budget being reported is `pam_fprintd`'s own `max-tries` rather
+than a shell-side count layered over it. That was #169's choice to make
+deliberately, since the other reading meant re-arming past an authentication
+module's refusal.
 
 ---
 

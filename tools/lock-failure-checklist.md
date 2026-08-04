@@ -170,14 +170,32 @@ least one. `system.lock.fingerprint` must also be on.
    after the failure, inside one 16.7ms frame, so the failure was never drawn
    and a wrong finger looked identical to a finger the reader never saw. A
    blink with nothing readable in it is the regression.
-   The prompt then re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
-   times, `fingerprintRetryDelayMs` apart.
-4. Touch it with the right finger. It unlocks.
-5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint
-   context on a keystroke; it closes when PAM answers, when the retries run
-   out, or when the lock ends. Note whether both conversations on screen at
-   once read as one screen or as two competing ones. (They are deliberately on
-   separate lines: the prompt sits under the status strip, not in it.)
+   The reader's own prompt then comes back and it waits for another touch. The
+   shell does *not* re-arm anything here — this step used to claim it did
+   (`fingerprintMaxRestarts`, `fingerprintRetryDelayMs`), and #169 found both
+   numbers dead: pam_fprintd re-prompts **inside** the one conversation.
+4. Touch it wrong twice more. Three is all there is — `max-tries`, pam_fprintd's
+   own option, whose default and documented minimum are both 3. Counted, not
+   assumed: `LockPolicy.fingerprintTouchBudget` says 3 and
+   `lock: fingerprint conversation closed after N touch(es)` says what the
+   module really spent. **If those two disagree the log says so as a warning**
+   (`pam_fprintd spent N touch(es), not the 3 LockPolicy documents`) — that
+   line is the finding, and it means the budget moved under us.
+5. After the third, the line must **say fingerprint is over and point at the
+   password** (`Out of fingerprint tries — use your password`) and stay on
+   screen. This is #169's acceptance. Before it, the line simply vanished: the
+   reader's light going out was the only feedback, and that light is the
+   hardware's, not the shell's. A prompt that disappears with nothing in its
+   place is the regression.
+6. Type the password. It still works, and a relock offers the finger again —
+   the withdrawal is for this lock only.
+7. Restart, and this time touch it with the right finger. It unlocks.
+8. Start typing instead of touching. The prompt **stays** — nothing aborts the
+   fingerprint context on a keystroke; it closes when PAM answers, when the
+   touches run out, or when the lock ends. Note whether both conversations on
+   screen at once read as one screen or as two competing ones. (They are
+   deliberately on separate lines: the prompt sits under the status strip, not
+   in it.)
 
 **Where nothing is enrolled** (this machine, and every machine with no reader):
 

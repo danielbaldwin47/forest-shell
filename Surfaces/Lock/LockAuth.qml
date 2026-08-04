@@ -87,7 +87,7 @@ Scope {
         priv.begun = true;
         priv.message = "";
         priv.messageIsError = false;
-        priv.fingerprintRestarts = 0;
+        priv.fingerprintTouches = 0;
         priv.lockedOut = false;
         priv.lockoutSeen = false;
         priv.rearmOnInput = false;
@@ -114,7 +114,6 @@ Scope {
         priv.conversing = false;
         priv.pendingSubmit = false;
         conversationWatchdog.stop();
-        fingerprintRetry.stop();
         password.abort();
         fingerprint.abort();
         priv.fingerprintActive = false;
@@ -292,6 +291,12 @@ Scope {
     function noteFingerprintMessage(text: string, isError: bool): void {
         if (!text)
             return;
+        // Counted here rather than at the close, because the close is handed a
+        // result and never sees the messages: the module's re-prompts happen
+        // inside the conversation, so the messages are the only place the
+        // touches are visible (#169).
+        if (policy.fingerprintTouchMissed(text))
+            priv.fingerprintTouches += 1;
         const sinceMs = Date.now() - priv.fingerprintMessageAt;
         if (policy.fingerprintMessageWins(priv.fingerprintMessageIsError,
                                           sinceMs, isError)) {
@@ -332,6 +337,30 @@ Scope {
         priv.fingerprintMessageAt = 0;
     }
 
+    /// End the fingerprint offer, and leave a line saying so (#169).
+    ///
+    /// The line deliberately outlives the conversation. Closing used to take it
+    /// down, which left the reader's light as the only word on the subject —
+    /// and that light is the hardware's, not the shell's. It stands until the
+    /// lock ends or is taken down and put back up, both of which come through
+    /// `end()` and clear it there.
+    function withdrawFingerprint(spentBudget: bool): void {
+        if (!priv.fingerprintActive)
+            return;
+        priv.fingerprintActive = false;
+        root.clearFingerprintMessage();
+        root.showFingerprintMessage(policy.fingerprintClosingMessage(spentBudget),
+                                    false);
+        // #81's rule, and the one line that carries the module's real budget:
+        // logged here rather than at the completion because this is the state
+        // change — every way the offer ends comes through this function, and a
+        // withdrawal that left no trace is how #169 went a week looking like a
+        // dead reader.
+        Logger.log("lock", "fingerprint conversation closed after "
+                   + priv.fingerprintTouches + " touch(es), offer withdrawn ("
+                   + (spentBudget ? "budget spent" : "budget not spent") + ")");
+    }
+
     /// Pose the failure path rather than produce it (#96).
     ///
     /// A real refusal takes a real PAM stack, a real keyboard and a compositor
@@ -353,6 +382,11 @@ Scope {
             priv.lockedOut = fields.lockedOut;
         if (fields.fingerprintActive !== undefined)
             priv.fingerprintActive = fields.fingerprintActive;
+        // Poseable because the count is what the close reports, and a posed
+        // offer that inherited a previous one's tally would put a number in the
+        // log that no conversation ever spent (#169).
+        if (fields.fingerprintTouches !== undefined)
+            priv.fingerprintTouches = fields.fingerprintTouches;
         // Through the same door a real message uses, so a posed one is not a
         // message with no stamp beside it (#168): `fingerprintMessageAt` is
         // what the *next* message asks about, and two writers of one state
@@ -481,27 +515,31 @@ Scope {
                 return;
             }
 
-            // A finger landing crooked is the normal case, so re-arm — but on a
-            // cooldown and only so many times, so a reader that has started
-            // failing every time does not spin (#22 §5).
-            priv.fingerprintRestarts += 1;
-            if (priv.begun && result !== PamResult.MaxTries
-                    && priv.fingerprintRestarts < policy.fingerprintMaxRestarts) {
-                fingerprintRetry.restart();
-            } else {
-                priv.fingerprintActive = false;
-                root.clearFingerprintMessage();
-                Logger.log("lock", "fingerprint conversation closed after "
-                           + priv.fingerprintRestarts + " attempt(s)");
-            }
+            // This conversation was the whole offer (#169). pam_fprintd spent
+            // its own re-prompts inside it, so there is nothing left to re-arm
+            // — the shell used to try, behind a branch that excluded
+            // PAM_MAXTRIES and was therefore never taken.
+            const maxTries = result === PamResult.MaxTries;
+            // Logged either side of the withdrawal, as `begin()` is: what PAM
+            // said and what the surface did about it are two facts, and a
+            // result with no withdrawal beside it is the pair #81 needed.
+            Logger.log("lock", "fingerprint pam result " + result
+                       + (maxTries ? " (max tries)" : ""));
+            root.withdrawFingerprint(
+                policy.fingerprintBudgetSpent(maxTries, priv.fingerprintTouches));
+            // The budget is a number in someone else's config file, so notice
+            // out loud when the module stops spending the one we document.
+            if (maxTries && priv.fingerprintTouches !== policy.fingerprintTouchBudget)
+                Logger.warn("lock", "pam_fprintd spent " + priv.fingerprintTouches
+                            + " touch(es), not the " + policy.fingerprintTouchBudget
+                            + " LockPolicy documents");
         }
 
         onError: error => {
             // The likely one by far is StartFailed: fprintd is installed but
             // its pam config is not where we looked. Not worth shouting about —
-            // the password field is right there.
-            priv.fingerprintActive = false;
-            root.clearFingerprintMessage();
+            // the password field is right there, and now says so.
+            root.withdrawFingerprint(false);
             Logger.log("lock", "fingerprint unavailable (pam error " + error + ")");
         }
     }
@@ -520,7 +558,8 @@ Scope {
                 if (!priv.begun || !policy.fingerprintEnrolled(this.text))
                     return;
                 priv.fingerprintActive = true;
-                priv.fingerprintRestarts = 0;
+                priv.fingerprintTouches = 0;
+                root.clearFingerprintMessage();
                 fingerprint.start();
                 Logger.log("lock", "fingerprint enrolled — parallel context started");
             }
@@ -541,12 +580,6 @@ Scope {
                 return;
             root.stall("no prompt within " + policy.conversationTimeoutMs + "ms of starting");
         }
-    }
-
-    Timer {
-        id: fingerprintRetry
-        interval: policy.fingerprintRetryDelayMs
-        onTriggered: if (priv.begun && priv.fingerprintActive) fingerprint.start()
     }
 
     // The other half of the dwell (#168): the message that was held while a
@@ -594,7 +627,12 @@ Scope {
 
         property bool fingerprintActive: false
         property string fingerprintMessage: ""
-        property int fingerprintRestarts: 0
+
+        // Wrong touches spent in the conversation that is running (#169).
+        // Counted rather than assumed: the budget belongs to pam_fprintd, so
+        // the only way to notice it changing is to keep the module's own tally
+        // beside the number LockPolicy documents.
+        property int fingerprintTouches: 0
 
         // The dwell (#168): what the fingerprint line is saying and when it
         // started saying it, plus whatever arrived too soon to replace it.

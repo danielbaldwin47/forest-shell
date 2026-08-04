@@ -60,9 +60,12 @@
 # `summoned` (the field revealed), `caps` (the caps-lock warning), `notify:N`,
 # and #96's failure path — `failed` (PAM's message under the field, in the
 # error treatment), `lockout` (faillock's message, ember, the one state a user
-# cannot type past) and `fingerprint` (the prompt that only draws on a machine
-# with a finger enrolled). Those three take an optional `:text` suffix carrying
-# the message verbatim, with no commas in it:
+# cannot type past), `fingerprint` (the prompt that only draws on a machine
+# with a finger enrolled) and `fingerprintdone` (that prompt withdrawn once
+# pam_fprintd's touches are spent — #169; the longest string the line holds,
+# and the one case where it draws with the conversation already closed). Those
+# four take an optional `:text` suffix carrying the message verbatim, with no
+# commas in it:
 #
 #   tools/capture-harness.sh out.png --surface lock --lock-state failed
 #   tools/capture-harness.sh out.png --surface lock --lock-state lockout

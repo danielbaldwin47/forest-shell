@@ -300,6 +300,43 @@ else
     nested_fail "the hold left no trace in the log — a stuck fingerprint line would be undiagnosable (#81)"
 fi
 
+# 4e — the offer does not withdraw in silence (#169). Three wrong touches are
+# all pam_fprintd allows, and they all happen inside one conversation, so its
+# close is the end of fingerprint for this lock. It used to take the line down
+# with it: the reader's light going out was the only word on the subject, and
+# that light is the hardware's. Posed open, because the probe needs a reader —
+# but the withdrawal itself is the real one the close calls.
+ipc locktest fingeroffer > /dev/null
+for _ in 1 2 3; do
+    ipc locktest fingersay "$fp_fail" true > /dev/null
+    ipc locktest fingersay "$fp_prompt" false > /dev/null
+done
+ipc locktest fingerwithdraw true > /dev/null
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ -z "$message" ]]; then
+    nested_fail "the fingerprint offer withdrew in silence (#169): $state"
+elif [[ "$message" == *[Pp]assword* ]]; then
+    nested_pass "the withdrawn offer points at the password: $message"
+else
+    nested_fail "the offer said it was over but not what to do instead (#169): $message"
+fi
+
+# …and it says so in the log, with the count it spent. Three, because three
+# failures were replayed above and the count is read out of the messages — on
+# hardware that number is pam_fprintd's `max-tries` and not ours, so a budget
+# that quietly changes under us shows up in this line first (#81's argument
+# again, and `LockPolicy.fingerprintTouchBudget` is the number it is checked
+# against there).
+if grep -qa 'lock: fingerprint conversation closed after 3 touch(es)' "$NESTED_SHELL_LOG"; then
+    nested_pass "the close is in the log, with its count: $(grep -a -m1 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG")"
+elif grep -qa 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG"; then
+    nested_fail "the close logged a count no conversation spent: $(grep -a -m1 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the close left no trace in the log — a withdrawn offer would be undiagnosable (#81)"
+fi
+
 # 5 — the field can hear a keyboard. The IPC above deliberately bypasses it,
 # so this is the only thing standing in for "would a keystroke have landed".
 if grep -qa 'lock: field has focus on' "$NESTED_SHELL_LOG"; then

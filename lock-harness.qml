@@ -97,6 +97,29 @@ ShellRoot {
             return true;
         }
 
+        /// Open the fingerprint offer, as the enrolment probe does (#169).
+        ///
+        /// The probe runs `fprintd-list` against a reader this seam does not
+        /// have, so the offer can only be posed — but everything after it is
+        /// real: the touch count, the arbitration, and the withdrawal below all
+        /// run on the offer being open.
+        function fingeroffer(): bool {
+            lock.auth.pose({ fingerprintActive: true, fingerprintTouches: 0 });
+            return true;
+        }
+
+        /// Close it again, as a completed or failed PAM conversation does.
+        ///
+        /// `spent` is the difference between the budget running out and the
+        /// context never getting started, which is the one thing the closing
+        /// line has to get right. The withdrawal itself is real: what #169 was
+        /// about is that the line has to survive the conversation that put it
+        /// there, and that survival is what a script can watch.
+        function fingerwithdraw(spent: bool): bool {
+            lock.auth.withdrawFingerprint(spent);
+            return true;
+        }
+
         /// The clearing half of the idle retreat, which is what took #161's
         /// lockout off the screen. Called from here because the retreat itself
         /// is a timer on the surface and this seam cannot wait one out; the
@@ -118,7 +141,8 @@ ShellRoot {
                 messageIsError: lock.auth.messageIsError,
                 lockedOut: lock.auth.lockedOut,
                 conversing: lock.auth.conversing,
-                fingerprintMessage: lock.auth.fingerprintMessage
+                fingerprintMessage: lock.auth.fingerprintMessage,
+                fingerprintActive: lock.auth.fingerprintActive
             });
         }
     }

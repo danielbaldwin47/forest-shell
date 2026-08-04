@@ -224,11 +224,57 @@ TestCase {
         verify(!policy.fingerprintEnrolled(""));
     }
 
-    function test_the_fingerprint_re_arm_is_bounded() {
-        // A reader that has started failing every time must not re-arm a PAM
-        // conversation all night on battery (#22 §5).
-        verify(policy.fingerprintRetryDelayMs > 0);
-        verify(policy.fingerprintMaxRestarts > 0);
+    // The recorded conversation (#169): one `fprintd` verify run driven with
+    // three wrong touches, transcribed in the order the messages arrived. This
+    // is the evidence `fingerprintTouchBudget` stands on, which is why it is
+    // written out here rather than summarised as a number.
+    readonly property var wrongFingerThreeTimes: [
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint",
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint",
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint"
+    ]
+
+    function test_the_touch_budget_is_the_one_pam_fprintd_actually_spends() {
+        // Not `> 0` (which is what #169 caught this asserting): the number has
+        // to be the module's real one, so it is compared against a
+        // conversation that really was refused. If pam_fprintd's `max-tries`
+        // changes under us, the recorded run stops matching the constant and
+        // this fails.
+        compare(policy.fingerprintTouchesSpent(wrongFingerThreeTimes),
+                policy.fingerprintTouchBudget);
+        compare(policy.fingerprintTouchBudget, 3);
+    }
+
+    function test_a_re_prompt_is_not_a_spent_touch() {
+        // Every touch is a *pair* of messages, and only the failure is the
+        // touch — counting prompts would double the budget.
+        compare(policy.fingerprintTouchesSpent(
+            ["Place your finger on the fingerprint reader"]), 0);
+        compare(policy.fingerprintTouchesSpent([]), 0);
+    }
+
+    function test_the_budget_is_spent_by_maxtries_or_by_the_count() {
+        // MaxTries is the module saying so, and is authoritative on its own —
+        // the count is the fallback for a context that ends without one.
+        verify(policy.fingerprintBudgetSpent(true, 0));
+        verify(policy.fingerprintBudgetSpent(false, 3));
+        verify(!policy.fingerprintBudgetSpent(false, 2));
+    }
+
+    function test_a_withdrawn_fingerprint_prompt_says_so_and_points_at_the_password() {
+        // #169: three wrong touches and the prompt simply vanished. The
+        // reader's light going out is hardware, not the shell, so nothing on
+        // screen said fingerprint had stopped being an option.
+        const spent = policy.fingerprintClosingMessage(true);
+        const gone = policy.fingerprintClosingMessage(false);
+        verify(spent.length > 0);
+        verify(gone.length > 0);
+        verify(spent !== gone);
+        verify(/password/i.test(spent));
+        verify(/password/i.test(gone));
     }
 
     // What fprintd says about a failed match is the whole feedback channel for

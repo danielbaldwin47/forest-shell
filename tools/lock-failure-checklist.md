@@ -157,6 +157,28 @@ weight, and why its patterns are worth more than the return code.
 Needs a reader with an enrolled finger — `fprintd-list "$USER"` must name at
 least one. `system.lock.fingerprint` must also be on.
 
+**And a third prerequisite, which is easy to miss and stops the run dead.** The
+parallel context opens the PAM service named by `system.lock.fingerprintPamConfig`
+(default `fprintd`) out of `configDirectory`, `/etc/pam.d`. Arch ships no
+`/etc/pam.d/fprintd` — the `pam_fprintd.so` module arrives without a service
+file — so on a stock install there is nothing for the context to open, and a
+machine with a working, enrolled reader still shows no prompt. Confirm the file
+exists before blaming the surface:
+
+    ls /etc/pam.d/fprintd
+
+Creating it is a two-line service, and it is worth being deliberate about,
+because a PAM service file is authentication policy:
+
+    #%PAM-1.0
+    auth     required   pam_fprintd.so
+    account  required   pam_permit.so
+
+`required` rather than `sufficient` is the safe shape here: this service is only
+ever consulted by the lock's own fingerprint context, and it must not become a
+way to satisfy some other stack's auth. The password context is a separate
+service (`system.lock.pamConfig`, default `login`) and is untouched by this.
+
 **Where a finger is enrolled:**
 
 1. Lock the session.
@@ -170,8 +192,13 @@ least one. `system.lock.fingerprint` must also be on.
    after the failure, inside one 16.7ms frame, so the failure was never drawn
    and a wrong finger looked identical to a finger the reader never saw. A
    blink with nothing readable in it is the regression.
-   The prompt then re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
-   times, `fingerprintRetryDelayMs` apart.
+   The re-arm is the half #168 does **not** touch, and this file used to
+   promise it wrongly: `LockPolicy.fingerprintMaxRestarts` times
+   `fingerprintRetryDelayMs` apart is unreachable on a stock `pam_fprintd`,
+   measured 2026-08-04 (#152) — the module retries internally and the real
+   bound is three touches. What actually happens is under **Run on this
+   machine** below; expect the whole prompt to vanish for good after the third
+   wrong touch, and silently (#169).
 4. Touch it with the right finger. It unlocks.
 5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint
    context on a keystroke; it closes when PAM answers, when the retries run
@@ -189,14 +216,116 @@ cannot be answered is worse than no prompt, which is why the probe gates it.
 `tests/tst_lockpolicy.qml` covers the reading; what a real session adds is that
 the surface honours it.
 
-Already answered on this machine (2026-08-03): `fprintd-list` is not installed
-at all, so the probe cannot find an enrolled finger, and every lock capture
-taken without `--lock-state fingerprint` renders nothing where the prompt
-would be. That is the absent half. The enrolled half needs a machine with a
-reader and is still open.
+Already answered on this machine, twice, and the second answer is the better
+one. On 2026-08-03 `fprintd-list` was not installed at all, so the probe's
+`Process` had nothing to launch and the empty stdout decided it. That tests
+almost nothing: a missing binary short-circuits the parse.
+
+**Re-run 2026-08-04 (#152), with fprintd installed.** The machine now has
+`fprintd 1.94.5`, `libfprint 1.94.100`, and a real reader on the USB bus —
+`06cb:009a Synaptics, Inc. Metallica MIS Touch Fingerprint Reader`. libfprint
+claims none of it: the daemon starts, enumerates zero devices, and the probe's
+command answers
+
+    $ fprintd-list "$USER"
+    No devices available          # on stdout, exit 1
+
+That is the absent half done properly. The line arrives on **stdout**, which is
+the stream `StdioCollector` reads (`LockAuth.qml`), so `fingerprintEnrolled` is
+handed real text and returns false on it rather than on emptiness — the prompt
+stays away because the parse said so. `tests/tst_lockpolicy.qml` now carries
+that verbatim string; before this run every fingerprint case in it was invented
+wording, which is exactly the setup that produced #161 at §2.
+
+The enrolled half is still open, and on *this* machine it is blocked by driver
+support rather than by hardware. libfprint has no driver for 06cb:009a —
+enumerated twice, `fprintd` as root and libfprint's own typelib as the user,
+zero devices both times, and enumeration is descriptor matching that happens
+before any device is opened, so this is not permissions and not a sensor left
+in a bad state.
+
+The reader is not a libfprint device at all. 06cb:009a is a Validity-family
+sensor, and the driver that knows it is **python-validity** (`DEV_9a = (0x06cb,
+0x009a)` in `validitysensor/usb.py`), which ships its own daemon,
+`open-fprintd`, implementing fprintd's D-Bus API in fprintd's place. That is
+the stack this machine ran before its current install — CachyOS here dates to
+2026-04-09 and its pacman log, unrotated, first installs `fprintd` on
+2026-08-03.
+
+**What that means for the probe, and it is not obvious.** On the
+python-validity stack the *daemon* is replaced but the *client* is not:
+`fprintd-list` stays the same binary from fprintd's own client tooling, so its
+output format — the `Fingerprints for user` line `fingerprintEnrolled` matches
+on — is unchanged, and `LockAuth`'s probe keeps working. The thing to check
+before trusting a green result there is that the client is actually installed:
+`open-fprintd` pulls it in as a separate package, and a stack that has the
+daemon without the client gives the probe nothing to launch, which reads as
+"nothing enrolled" no matter how many fingers are.
+
+**That stack was installed here later the same day**, and the reader works.
+`open-fprintd 0.7-2`, `python-validity 0.15-1`, `fprintd-clients-git` for the
+client and the PAM module, `fprintd` itself gone. The probe now answers:
+
+    found 1 devices
+    Device at /net/reactivated/Fprint/Device/0
+    Using device /net/reactivated/Fprint/Device/0
+    Fingerprints for user daniel on DBus driver (press):
+     - #0: right-index-finger
+
+A finger was already enrolled with nothing enrolled on this install — these
+sensors store the print on the sensor, so it outlived the operating system that
+put it there. Worth knowing before assuming an enrolment step is needed.
+
+Note the shape against what `tests/tst_lockpolicy.qml` had been assuming: the
+driver name and press/swipe mode trail the user, and the fingers are a list on
+following lines rather than a value after the colon. `fingerprintEnrolled`
+survives that because it anchors on `Fingerprints for user` and nothing after
+it — now pinned by a case rather than left to luck.
+
+So the enrolled half is reachable on this machine at last. What still gates it
+is the PAM service file above: `/etc/pam.d/fprintd` does not exist here, so the
+fingerprint context has nothing to open. Create it, then run steps 1-5.
 
 Record: which half you could run. Both halves need saying — "no reader here, so
 the prompt stayed away" is half the criterion.
+
+**Run on this machine (2026-08-04, #152) — enrolled half, at last.** The prompt
+drew under the strip with its glyph, the right finger unlocked, and typing did
+not abort it. Three of the five steps behaved. The other two did not, and both
+answers came from the same measurement.
+
+The `fprintd` PAM service was driven directly, outside the shell, printing every
+conversation message with a millisecond stamp:
+
+    [ 10915.5 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 10925.2 ms] TEXT_INFO  | Place your finger on the fingerprint reader
+    [ 12047.8 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 12058.0 ms] TEXT_INFO  | Place your finger on the fingerprint reader
+    [ 13547.1 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 13548.9 ms] RESULT     | 11 (Have exhausted maximum number of retries)
+
+**The failure text is real and unreadable.** `Failed to match fingerprint`
+arrives, and the re-prompt replaces it **9.7 ms** later — a frame at 60Hz is
+16.7ms, so it never survives to be drawn. `LockAuth`'s `onPamMessage` assigns
+every message unconditionally, so the error loses to whatever follows it. On
+screen this reads as the prompt blinking: not an animation, a label overwritten
+before it could render. The third error lasts 1.8ms before the result arrives,
+so the last one is invisible too.
+
+**The re-arm never runs.** `pam_fprintd` retries internally — `max-tries`,
+default *and minimum* 3 — so all three touches happen inside one conversation,
+and it then returns `PAM_MAXTRIES`. `LockAuth` treats MaxTries as final and
+closes, which means `fingerprintMaxRestarts` (5) and `fingerprintRetryDelayMs`
+(1000) are unreachable on a stock `pam_fprintd`. The real bound is three
+touches, set by a module option this shell does not pass. The close is also
+silent: the message is cleared, the prompt disappears, the reader's light goes
+out, and nothing says fingerprint has stopped being an option. The password
+field carries on working, and a relock resets it.
+
+Both are filed rather than fixed here — #168 for the unreadable failure text,
+#169 for the unreachable re-arm and the silent withdrawal. What makes them the
+same lesson as #161 one section up: the numbers were written against a re-arm
+that PAM's own module never lets happen.
 
 ---
 

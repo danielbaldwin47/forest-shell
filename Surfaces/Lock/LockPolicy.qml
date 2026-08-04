@@ -114,8 +114,22 @@ QtObject {
     /// `maxTries` is pam_faillock's own return, so it is the locale-independent
     /// half of this answer; the message match is the other half, for stacks
     /// that report a lockout as a plain failure. Either is enough.
-    function lockedOutBy(kind: string, message: string): bool {
-        return kind === "maxTries" || isLockout(message);
+    ///
+    /// `seenLockout` is the latch: faillock speaks twice per refusal and only
+    /// the first line names the lockout, so the caller carries "some message in
+    /// this conversation read as a lockout" forward and the last message does
+    /// not get to overrule it (#161). Omitted means no latch.
+    function lockedOutBy(kind: string, message: string, seenLockout: bool): bool {
+        return kind === "maxTries" || seenLockout || isLockout(message);
+    }
+
+    /// Whether something PAM said belongs under the field.
+    ///
+    /// The prompt itself ("Password: ") does not — the field is the prompt, and
+    /// captioning it would be the shell talking over PAM. Anything else does,
+    /// including an error raised while a prompt is still standing.
+    function worthShowing(message: string, isError: bool, isPrompt: bool): bool {
+        return !!message && (isError || !isPrompt);
     }
 
     /// What to show under the field for a completed attempt.
@@ -148,15 +162,23 @@ QtObject {
         return isError ? "error" : "quiet";
     }
 
-    // faillock's voice, in the two shapes it speaks in: the refusal
-    // ("Account locked due to 3 failed logins") and the countdown pam_faillock
-    // adds when `unlock_time` is set ("Try again in 8 minutes"). Matched only
-    // to choose a colour and to keep the message on screen — the text itself is
-    // always shown verbatim, and the shell never parses a count out of it.
+    // faillock's voice, in the shapes it speaks in: the refusal ("Account
+    // locked due to 3 failed logins") and the countdown pam_faillock adds when
+    // `unlock_time` is set. Matched only to choose a colour and to keep the
+    // message on screen — the text itself is always shown verbatim, and the
+    // shell never parses a count out of it.
+    //
+    // The countdown wording is upstream Linux-PAM's own, read off pam_faillock.c
+    // rather than guessed: `_("(%d minutes left to unlock)")`. A stock Arch
+    // install says exactly that and nothing else, and the guessed "Try again in
+    // N minutes" matched none of it — which is #161, a lockout painted as an
+    // ordinary error and cleared by the idle retreat. Both spellings stay: the
+    // guess costs one pattern and some stack somewhere may yet speak it.
     readonly property var lockoutPatterns: [
         /account\s+.*lock(ed)?/i,
         /lock(ed)?\s+.*due\s+to.*fail/i,
-        /try\s+again\s+in\b/i
+        /try\s+again\s+in\b/i,
+        /left\s+to\s+unlock\b/i
     ]
 
     /// Whether a PAM message is faillock reporting a locked account.

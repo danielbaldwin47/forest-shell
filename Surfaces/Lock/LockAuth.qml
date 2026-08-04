@@ -89,6 +89,7 @@ Scope {
         priv.messageIsError = false;
         priv.fingerprintRestarts = 0;
         priv.lockedOut = false;
+        priv.lockoutSeen = false;
         priv.rearmOnInput = false;
         priv.answered = false;
         priv.conversing = false;
@@ -203,6 +204,47 @@ Scope {
         priv.messageIsError = false;
     }
 
+    /// Take one thing PAM said: latch it if it is a lockout, show it if it is
+    /// worth showing.
+    ///
+    /// The latch is #161. pam_faillock speaks twice per refusal — "Account
+    /// locked due to N failed logins", then "(10 minutes left to unlock)" — and
+    /// only the first reads as a lockout. `message` remembers whichever came
+    /// last, so the completed attempt has to ask this flag instead, or a real
+    /// lockout completes as an ordinary failure: white text that the idle
+    /// retreat then clears.
+    ///
+    /// The showing rule is unchanged: the prompt itself ("Password: ") is not
+    /// worth showing, because the field is the prompt. Anything else PAM says
+    /// is.
+    ///
+    /// A separate function because it is also the seam the nested harness
+    /// drives (`locktest say`): a two-message refusal takes a real faillock
+    /// lockout to produce, which is the one thing a harness must not do to the
+    /// machine it is running on.
+    function noteMessage(text: string, isError: bool, isPrompt: bool): void {
+        root.latchLockout(text);
+        if (policy.worthShowing(text, isError, isPrompt)) {
+            priv.message = text;
+            priv.messageIsError = isError;
+        }
+    }
+
+    /// Remember that faillock has refused, for the rest of this conversation.
+    ///
+    /// Split out of `noteMessage` because it is the half that cannot wait: the
+    /// message handler below returns early on a held Enter, and a lockout heard
+    /// on that path would otherwise be forgotten before the attempt completes.
+    function latchLockout(text: string): void {
+        if (priv.lockoutSeen || !policy.isLockout(text))
+            return;
+        priv.lockoutSeen = true;
+        // Logged because #161 was diagnosed from a log that could not
+        // distinguish "faillock never said it" from "we did not hear it":
+        // ~60 attempts, every one logged `password attempt failed`.
+        Logger.log("lock", "faillock lockout recognised in a pam message");
+    }
+
     /// Pose the failure path rather than produce it (#96).
     ///
     /// A real refusal takes a real PAM stack, a real keyboard and a compositor
@@ -253,6 +295,10 @@ Scope {
             }
             priv.responseRequired = password.responseRequired;
             priv.responseVisible = password.responseVisible;
+            // Before anything can return past it (#161). Only the latch is
+            // hoisted: what gets *shown* stays where it was, on the far side of
+            // the held-Enter return below.
+            root.latchLockout(password.message);
             if (password.responseRequired) {
                 conversationWatchdog.stop();
                 // An Enter that arrived before the prompt did. Sending it here
@@ -264,12 +310,8 @@ Scope {
                     return;
                 }
             }
-            // The prompt itself ("Password: ") is not worth showing — the field
-            // is the prompt. Anything else PAM says is.
-            if (password.message && (password.messageIsError || !password.responseRequired)) {
-                priv.message = password.message;
-                priv.messageIsError = password.messageIsError;
-            }
+            root.noteMessage(password.message, password.messageIsError,
+                             password.responseRequired);
             if (password.responseRequired)
                 priv.busy = false;
         }
@@ -292,7 +334,12 @@ Scope {
                        : result === PamResult.Error ? "error" : "failed";
             priv.message = policy.failureText(kind, password.message);
             priv.messageIsError = true;
-            priv.lockedOut = policy.lockedOutBy(kind, priv.message);
+            priv.lockedOut = policy.lockedOutBy(kind, priv.message,
+                                                priv.lockoutSeen);
+            // Spent: the next attempt is its own conversation and has to earn
+            // its own lockout. faillock repeats itself while the account is
+            // locked, so nothing is lost by not carrying this across.
+            priv.lockoutSeen = false;
             Logger.log("lock", "password attempt " + kind
                        + (priv.lockedOut ? " (faillock: locked out)" : ""));
             root.failed();
@@ -422,6 +469,12 @@ Scope {
         property string message: ""
         property bool messageIsError: false
         property bool lockedOut: false
+
+        // The latch (#161): any message in the running conversation that read
+        // as faillock's refusal, remembered until that conversation completes.
+        // Not the same thing as `lockedOut`, which is what the completed
+        // attempt decided and what the surface reads.
+        property bool lockoutSeen: false
 
         // Whether we answered the conversation that is running, and whether the
         // last one ended unanswered and is waiting for a keystroke to reopen.

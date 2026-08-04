@@ -56,6 +56,33 @@ ShellRoot {
             return true;
         }
 
+        /// Say something to the lock as PAM would, mid-conversation (#161).
+        ///
+        /// The message faillock sends first — "Account locked due to N failed
+        /// logins" — only arrives after N real failed logins against the real
+        /// account of whoever is running this, which is the one experiment a
+        /// harness must not perform on its own machine. So the script speaks
+        /// faillock's lines and the real `noteMessage` hears them; the
+        /// completion that follows is a real PAM completion.
+        ///
+        /// It cannot let anyone in: the only state it reaches is the message
+        /// under the field and the lockout latch, and a latched lockout makes
+        /// the lock *refuse* harder (#30 — `lockedOut` is presentation).
+        function say(text: string): bool {
+            lock.auth.noteMessage(text, true, false);
+            return true;
+        }
+
+        /// The clearing half of the idle retreat, which is what took #161's
+        /// lockout off the screen. Called from here because the retreat itself
+        /// is a timer on the surface and this seam cannot wait one out; the
+        /// surface checks `lockedOut` again before it gets this far, so a
+        /// message that survives this call survives the real retreat too.
+        function clearmessage(): bool {
+            lock.auth.clearMessage();
+            return true;
+        }
+
         /// Everything a script needs to assert on, in one round trip.
         function state(): string {
             return JSON.stringify({

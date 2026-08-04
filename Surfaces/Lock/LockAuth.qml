@@ -223,17 +223,26 @@ Scope {
     /// lockout to produce, which is the one thing a harness must not do to the
     /// machine it is running on.
     function noteMessage(text: string, isError: bool, isPrompt: bool): void {
-        if (!priv.lockoutSeen && policy.isLockout(text)) {
-            priv.lockoutSeen = true;
-            // Logged because #161 was diagnosed from a log that could not
-            // distinguish "faillock never said it" from "we did not hear it":
-            // ~60 attempts, every one logged `password attempt failed`.
-            Logger.log("lock", "faillock lockout recognised in a pam message");
-        }
-        if (text && (isError || !isPrompt)) {
+        root.latchLockout(text);
+        if (policy.worthShowing(text, isError, isPrompt)) {
             priv.message = text;
             priv.messageIsError = isError;
         }
+    }
+
+    /// Remember that faillock has refused, for the rest of this conversation.
+    ///
+    /// Split out of `noteMessage` because it is the half that cannot wait: the
+    /// message handler below returns early on a held Enter, and a lockout heard
+    /// on that path would otherwise be forgotten before the attempt completes.
+    function latchLockout(text: string): void {
+        if (priv.lockoutSeen || !policy.isLockout(text))
+            return;
+        priv.lockoutSeen = true;
+        // Logged because #161 was diagnosed from a log that could not
+        // distinguish "faillock never said it" from "we did not hear it":
+        // ~60 attempts, every one logged `password attempt failed`.
+        Logger.log("lock", "faillock lockout recognised in a pam message");
     }
 
     /// Pose the failure path rather than produce it (#96).
@@ -286,10 +295,10 @@ Scope {
             }
             priv.responseRequired = password.responseRequired;
             priv.responseVisible = password.responseVisible;
-            // Taken before anything can return past it: the latch inside is the
-            // whole point of #161 and the `pendingSubmit` path below returns.
-            root.noteMessage(password.message, password.messageIsError,
-                             password.responseRequired);
+            // Before anything can return past it (#161). Only the latch is
+            // hoisted: what gets *shown* stays where it was, on the far side of
+            // the held-Enter return below.
+            root.latchLockout(password.message);
             if (password.responseRequired) {
                 conversationWatchdog.stop();
                 // An Enter that arrived before the prompt did. Sending it here
@@ -301,6 +310,8 @@ Scope {
                     return;
                 }
             }
+            root.noteMessage(password.message, password.messageIsError,
+                             password.responseRequired);
             if (password.responseRequired)
                 priv.busy = false;
         }

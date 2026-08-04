@@ -120,7 +120,16 @@ QtObject {
     /// this conversation read as a lockout" forward and the last message does
     /// not get to overrule it (#161). Omitted means no latch.
     function lockedOutBy(kind: string, message: string, seenLockout: bool): bool {
-        return kind === "maxTries" || seenLockout === true || isLockout(message);
+        return kind === "maxTries" || seenLockout || isLockout(message);
+    }
+
+    /// Whether something PAM said belongs under the field.
+    ///
+    /// The prompt itself ("Password: ") does not — the field is the prompt, and
+    /// captioning it would be the shell talking over PAM. Anything else does,
+    /// including an error raised while a prompt is still standing.
+    function worthShowing(message: string, isError: bool, isPrompt: bool): bool {
+        return !!message && (isError || !isPrompt);
     }
 
     /// What to show under the field for a completed attempt.

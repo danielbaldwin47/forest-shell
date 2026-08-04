@@ -68,6 +68,14 @@ lock_message() {
     sed 's/.*"message":"\([^"]*\)".*/\1/' <<< "$state"
 }
 
+# The same guard for the flags, which are unquoted: `true`, `false`, nothing at
+# all if this was the client failing rather than the lock answering.
+lock_flag() {
+    local state="$1" key="$2"
+    [[ "$state" == *"\"$key\":"* ]] || return 1
+    sed "s/.*\"$key\":\([a-z]*\).*/\1/" <<< "$state"
+}
+
 nested_up || exit 1
 nested_shell lock-harness.qml 'harness: lock harness ready' || exit 1
 
@@ -134,7 +142,6 @@ if (( ATTEMPT )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
     else
         nested_pass "the refusal is on screen: $message"
     fi
-    nested_note "clear the tally with: sudo faillock --user $USER --reset"
 fi
 
 # 4c — the lockout latch (#161). faillock says two things per refusal and only
@@ -156,14 +163,24 @@ if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
         nested_fail "faillock's refusal was not recognised — the message patterns missed it (#161)"
     fi
 
+    # Counted rather than awaited: `nested_await` greps the log from the start,
+    # so under `--attempt --latch` 4b's own completion would satisfy it instantly
+    # and the state below would be read before this attempt had finished — a
+    # working latch reported as a broken one.
+    before=$(grep -ac 'lock: password attempt ' "$NESTED_SHELL_LOG")
     ipc locktest type "$WRONG_PASSWORD" > /dev/null
     ipc locktest enter > /dev/null
-    nested_await "$NESTED_SHELL_LOG" 'lock: password attempt (failed|maxTries)' 20 > /dev/null
+    for _ in $(seq 40); do
+        (( $(grep -ac 'lock: password attempt ' "$NESTED_SHELL_LOG") > before )) && break
+        sleep 0.5
+    done
 
     state=$(ipc locktest state)
-    if [[ "$state" != *'"lockedOut":'* ]]; then
+    if ! locked=$(lock_flag "$state" lockedOut); then
         nested_fail "could not read the lock's state — $state"
-    elif [[ "$state" == *'"lockedOut":true'* ]]; then
+    elif (( $(grep -ac 'lock: password attempt ' "$NESTED_SHELL_LOG") == before )); then
+        nested_fail "the attempt never completed — nothing to latch onto (#81)"
+    elif [[ "$locked" == true ]]; then
         nested_pass "the lockout latched: the attempt completed locked out even though the last message was not one"
     else
         nested_fail "the lockout did not latch — the last message overruled it (#161): $state"
@@ -172,7 +189,7 @@ if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
     # …and a latched lockout is a message that stays up. This is the second
     # half of #161: the idle retreat took the lockout off the screen after a
     # couple of seconds, leaving the user typing into a field that cannot win.
-    ipc locktest retreat > /dev/null
+    ipc locktest clearmessage > /dev/null
     state=$(ipc locktest state)
     if ! message=$(lock_message "$state"); then
         nested_fail "could not read the lock's state — $state"
@@ -181,6 +198,10 @@ if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
     else
         nested_fail "the retreat cleared a lockout off the screen (#161)"
     fi
+fi
+
+# Once, however many wrong passwords the flags above spent.
+if (( ATTEMPT || LATCH )); then
     nested_note "clear the tally with: sudo faillock --user $USER --reset"
 fi
 

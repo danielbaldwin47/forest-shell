@@ -134,6 +134,17 @@ TestCase {
         verify(!policy.lockedOutBy("failed", "Authentication failure", false));
     }
 
+    function test_the_prompt_is_not_a_caption() {
+        // The field is the prompt, so PAM's "Password: " is the one thing it
+        // says that the surface stays quiet about. Everything else it says
+        // belongs on screen — including an error raised while the prompt is
+        // still standing, which is how faillock announces itself.
+        verify(!policy.worthShowing("Password: ", false, true));
+        verify(policy.worthShowing("Account locked due to 3 failed logins", true, true));
+        verify(policy.worthShowing("Place your finger on the reader", false, false));
+        verify(!policy.worthShowing("", true, false));
+    }
+
     function test_an_ordinary_failure_is_not_a_lockout() {
         // A lockout keeps the message on screen and paints it ember, so a
         // false positive would make every typo look unrecoverable.

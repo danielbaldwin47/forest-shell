@@ -78,7 +78,7 @@ ShellRoot {
         /// is a timer on the surface and this seam cannot wait one out; the
         /// surface checks `lockedOut` again before it gets this far, so a
         /// message that survives this call survives the real retreat too.
-        function retreat(): bool {
+        function clearmessage(): bool {
             lock.auth.clearMessage();
             return true;
         }

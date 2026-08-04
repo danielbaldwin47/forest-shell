@@ -65,9 +65,20 @@ harmless; `pacman -Qdtq` afterwards if you want them.
 
 That leaves `qs -c noctalia-shell` dead — `noctalia-shell-git` is gone — while
 `dms run`, `qs -c ghibli` and `dms-shell-niri` are all still *installed* but now
-run against upstream 0.3.0 instead of the fork they were written for. Whether
-any of them still works is untested, and that is the reason to do this with a
-terminal already open rather than over a fresh login.
+run against upstream 0.3.0 instead of the fork they were written for. That is
+the reason to do this with a terminal already open rather than over a fresh
+login.
+
+**Ghibli was the one this file called uncertain, and it is fine.** Verified
+2026-08-04 (#152): switched away to forest-shell and back, and `qs -c ghibli`
+came up on upstream 0.3.0 and ran. `dms run` is still unverified.
+
+One thing to know before reading "it still works" as evidence, because it very
+nearly was read that way here: a `qs -c ghibli` that was *already running* when
+the swap happened keeps running afterwards, holding the deleted binary's
+unlinked inode. It survived 13 hours that way on this machine. So the fork is
+only really out of the picture once every process using it has restarted —
+check the pid changed, not just that a window is still on screen.
 
 Then retire the prefix, once `qs` answers correctly:
 
@@ -240,27 +251,35 @@ where the swap has not happened they fail with what to do about it rather than
 with a QML import error. `--help` still works on such a machine — resolution is
 deliberately lazy.
 
-## 5. What is still open
+## 5. Closed out
 
-Everything here needs step 1 to have happened, so none of it could be done from
-the repo side. All three are #57 acceptance criteria that are **not** met yet.
+All three of these were #57 acceptance criteria that needed step 1 to have
+happened, so none of them could be done from the repo side. All three were run
+on 2026-08-04 under #152, and the evidence is in that ticket's comments.
 
-**The seams have not been re-run on the pacman runtime.** Every result behind
-this work was measured with `QS_BIN=qs-upstream`, against the prefix. The
-maintenance pass on #57 is explicit that the swap "must update them and re-run
-all three seams under the pacman runtime, or it lands blind". Same upstream
-version, different build and different library paths. After step 1, re-run the
-list in §4 with no `QS_BIN` set.
+**The seams, re-run on the pacman runtime.** Every earlier result was measured
+with `QS_BIN=qs-upstream` against the prefix, and #57's maintenance pass was
+explicit that the swap "must update them and re-run all three seams under the
+pacman runtime, or it lands blind" — same upstream version, different build,
+different library paths. Re-run with no `QS_BIN` set: `tests/run.sh` →
+`qs-runtime: all checks passed`, `Totals: 1478 passed, 0 failed`;
+`tools/binds-harness.sh` → every bind PASS; `tools/settings-harness.sh` → 18
+checks, 0 FAIL; `tools/capture-harness.sh --surface bar` → written.
 
-**The shell-switch round-trip has not been performed.** "shell-switch switches
-to and from forest-shell; launcher entry point works" needs a live session:
-switch to Forest Shell, confirm it comes up, press SUPER+Space after
-`hyprctl reload`, then switch *back* to another shell and confirm that works
-too. The rollback direction is the one worth doing deliberately — it is what
-you need if the swap goes badly.
+**The shell-switch round-trip, both directions.** Switched to Forest Shell,
+`hyprctl reload`, SUPER+Space for the launcher, then switched back to ghibli.
+The rollback direction is the one worth doing deliberately — it is what you
+need if the swap goes badly — and it is also what proved ghibli on 0.3.0.
 
-**The startup budgets have not been re-measured.** First frame ≤ 1.5 s /
-interactive ≤ 2 s, last measured against the prefix. Re-run
-`tools/idle-budget.sh` after step 1 and judge on `render` time — the swap blocks
-on the Wayland frame callback — using the same method as #95 so the two tickets
-do not measure differently.
+**The startup budgets, on the pacman runtime.** First frame **1387 ms** against
+the 1500 ms gate, interactive **1700 ms** against 2000 ms, on a window with no
+compositor events in it.
+
+That last run also failed its *frame* budget — 45 frames against 10 — which is
+worth knowing about before anyone re-runs it and reads the number the same way.
+It is not a repaint regression. The T480 was on battery, the idle ladder's dim
+rung is 2.5 min, and `tools/idle-budget.sh` measures 195 s: the ladder dimmed
+the screen at 151.7 s and the OSD announced it, and 39 of the 45 frames land
+after that instant. The first 150 s were minute-spaced and on budget. Filed as
+#175 (the OSD showing on an idle-initiated dim) and #176 (the harness recording
+power state, and not counting an idle rung as idle repaints).

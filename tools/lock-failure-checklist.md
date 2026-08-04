@@ -68,7 +68,8 @@ it was never checked against a real stack until #152.
 So §1 exercises the **fallback** branch. The verbatim branch is §2's — `pam_faillock`
 does message through the conversation, which is why its text arrives unrewritten.
 If §2 also shows a shell fallback (`Too many attempts`), then nothing on that
-stack ever reaches the verbatim path, and that is worth its own ticket.
+stack ever reaches the verbatim path, and that is worth its own ticket. It did
+not: §2 was run here on 2026-08-04 and PAM's own text came through untouched.
 
 Record: the exact message string, and which of the two branches it is. `failed`
 is the shell's, `failure` is PAM's — one word, opposite conclusions, so read it
@@ -104,9 +105,15 @@ Then:
 4. On the attempt that trips it, watch for:
    - the message turning **ember** (`Theme.accentEmber`), not the ordinary
      error colour — the lockout tone (`LockPolicy.messageTone`);
-   - faillock's text verbatim, in one of its two voices: the refusal
-     (`Account locked due to 3 failed logins`) or, where `unlock_time` is set,
-     the countdown (`Try again in N minutes`);
+   - faillock's text verbatim. It speaks twice — the refusal (`Account locked
+     due to 3 failed logins`) and then, where `unlock_time` is set, the
+     countdown. The countdown is the one that lands, because it is spoken
+     second, and on this stack (2026-08-04) it reads `(10 minutes left to
+     unlock)` — upstream Linux-PAM's `_("(%d minutes left to unlock)")`,
+     parentheses and all, **not** `Try again in N minutes`. That guess is what
+     #161 was: `LockPolicy.lockoutPatterns` was written against wording nobody
+     had checked, matched none of the real text, and the lockout went
+     unrecognised on every Arch default install;
    - the shell **still asking** — the field stays live and takes input. The
      shell has no idea when faillock starts saying yes again, so it never stops
      offering (#30).
@@ -125,11 +132,25 @@ Then:
 7. Reset from the shell you kept open (`faillock --user "$USER" --reset`), then
    unlock with the right password.
 
-Record: the message string, the colour, and whether it survived the timeout.
+Record: the message string, the colour, and whether it survived the timeout —
+at both moments, step 4's and step 6's, because they were two different answers
+until #164.
+
 Also say whether the string is faillock's own or the shell's fallback (`Too many
-attempts`, the `maxTries` arm of `LockPolicy.failureText`) — §1 established that
-this stack's `pam_unix` sends no message, so §2 is the only step left that can
-show the verbatim path working at all.
+attempts`, the `maxTries` arm of `LockPolicy.failureText`). §1 established that
+this stack's `pam_unix` sends no message, which left §2 as the only step that
+could show the verbatim path working at all.
+
+**Run on this machine (2026-08-04, #152).** It answered yes: `(10 minutes left
+to unlock)` rendered unrewritten, so `failureText`'s verbatim branch is sound and
+the shell's fallbacks were never the problem. Everything §1b found wrong lived in
+the classification on top of it — #161 (the text matched nothing) and #164 (the
+match was acted on a conversation phase too late). With both fixed and the run
+repeated, the ember arrives with the announcement and stays. The `maxTries` arm
+is still unexercised here and probably always will be: this stack's
+`pam_faillock` returns `PAM_AUTH_ERR`, so ~60 attempts logged `password attempt
+failed` and not one logged `maxTries`. That is why `isLockout` carries the
+weight, and why its patterns are worth more than the return code.
 
 ## 3. The fingerprint prompt
 

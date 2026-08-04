@@ -114,7 +114,15 @@ Then:
    timeout (`LockPolicy.summonTimeoutMs`). The field may go quiet; the lockout
    message must stay on screen. That is the whole point of `clearMessage`
    refusing to forget a lockout, and it is what has never been watched.
-6. Reset from the shell you kept open (`faillock --user "$USER" --reset`), then
+6. **Look again on the *next* attempt, before typing anything.** Once the
+   account is locked, `pam_faillock` announces it in its **preauth** phase —
+   before `pam_unix` puts up the prompt — so the lockout is on screen while the
+   field is live and empty. It must already be ember there, and must survive the
+   summon timeout there too. This is #164: until it was fixed, the announcement
+   rendered `Theme.textSecondary` (a `pam_info` is not a `PAM_ERROR_MSG`) and
+   retreated, for as long as the user took to type a password they had already
+   been told would not work.
+7. Reset from the shell you kept open (`faillock --user "$USER" --reset`), then
    unlock with the right password.
 
 Record: the message string, the colour, and whether it survived the timeout.

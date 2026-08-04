@@ -258,4 +258,172 @@ TestCase {
         compare(policy.settled("Zen Zone", undefined, state({ paired: true })).length, 0);
         compare(policy.settled("Zen Zone", state({}), null).length, 0);
     }
+
+    // --- trust, and the transport a press lands on (#153) --------------------
+
+    function test_a_device_that_has_just_paired_wants_trusting() {
+        // The bond survived the pass that filed #153; it was untrusted, so
+        // BlueZ refused the headset's own reconnect afterwards.
+        compare(policy.trustNeeded(state({}), state({ paired: true })), true);
+    }
+
+    function test_a_device_that_is_already_trusted_is_left_alone() {
+        compare(policy.trustNeeded(state({}),
+                                   state({ paired: true, trusted: true })), false);
+    }
+
+    function test_trust_follows_the_bond_and_not_the_reading() {
+        // Only the transition into paired. A device that was already paired
+        // and untrusted when the shell started was trusted or not by somebody
+        // else's decision, and starting up is not the moment to overrule it.
+        compare(policy.trustNeeded(state({ paired: true }),
+                                   state({ paired: true })), false);
+        compare(policy.trustNeeded(state({}), state({})), false);
+        compare(policy.trustNeeded(null, state({ paired: true })), false);
+        compare(policy.trustNeeded(state({}), null), false);
+    }
+
+    function test_trusting_says_so() {
+        compare(policy.trustGranted("Zen Zone"), "Zen Zone trusted");
+    }
+
+    function test_an_le_advertisement_names_the_device_it_shadows() {
+        compare(policy.classicName("LE-Zen Zone"), "Zen Zone");
+        compare(policy.classicName("le_Zen Zone"), "Zen Zone");
+        // Not an LE advertisement at all, and not a device that merely starts
+        // with those two letters.
+        compare(policy.classicName("Zen Zone"), "");
+        compare(policy.classicName("LEGO Boost"), "");
+        compare(policy.classicName("LE-"), "");
+        compare(policy.classicName(null), "");
+    }
+
+    function test_a_press_lands_on_the_classic_device_and_not_its_le_shadow() {
+        // #153: the press pairing "LE-Zen Zone" bonded over LE, which carries
+        // no A2DP — no card in PipeWire, no sink, no sound. When both are on
+        // the air the classic one is the row.
+        const rows = policy.deviceRows([
+            device("BC:87:FA:BC:D5:94", { name: "Zen Zone" }),
+            device("7C:11:22:33:44:55", { name: "LE-Zen Zone" })
+        ]);
+        compare(names(rows), ["Zen Zone"]);
+        compare(rows[0].address, "BC:87:FA:BC:D5:94");
+    }
+
+    function test_an_le_device_with_no_classic_twin_is_still_a_row() {
+        // Plenty of devices are LE and nothing else — a tag, a watch, a
+        // mouse. Folding those away would hide the only row they have.
+        const rows = policy.deviceRows([
+            device("7C:11:22:33:44:55", { name: "LE-Tile Tracker" })
+        ]);
+        compare(names(rows), ["LE-Tile Tracker"]);
+    }
+
+    function test_an_le_row_that_is_doing_something_is_never_folded_away() {
+        // Only a bare scan result is shadow enough to drop. A bond or a live
+        // connection over LE is the row that holds the disconnect.
+        const connected = policy.deviceRows([
+            device("BC:87:FA:BC:D5:94", { name: "Zen Zone" }),
+            device("7C:11:22:33:44:55", { name: "LE-Zen Zone", connected: true })
+        ]);
+        compare(names(connected), ["LE-Zen Zone", "Zen Zone"]);
+
+        const paired = policy.deviceRows([
+            device("BC:87:FA:BC:D5:94", { name: "Zen Zone" }),
+            device("7C:11:22:33:44:55", { name: "LE-Zen Zone", paired: true })
+        ]);
+        compare(names(paired), ["LE-Zen Zone", "Zen Zone"]);
+    }
+
+    function test_a_row_with_nothing_happening_to_it_is_a_scan_result() {
+        verify(policy.nothingHappeningTo(device("00:01")));
+        verify(!policy.nothingHappeningTo(device("00:01", { connected: true })));
+        verify(!policy.nothingHappeningTo(device("00:01", { paired: true })));
+        verify(!policy.nothingHappeningTo(device("00:01", { pairing: true })));
+    }
+
+    // --- the pairing agent (#153) --------------------------------------------
+
+    function test_an_attempt_is_given_a_minute() {
+        // Long enough for a headset held in a hand and a BlueZ window that is
+        // about this wide; short enough that a device that walked away does not
+        // leave a row reading "Pairing…" until the shell restarts.
+        compare(policy.pairTimeoutMs, 60000);
+    }
+
+    function test_the_pairing_script_registers_an_agent_before_it_pairs() {
+        // The whole of #153's first cause: an outgoing Pair() with nothing to
+        // answer the authentication request. Order is the point — an agent,
+        // made default, then trust, then pair.
+        compare(policy.pairScript("BC:87:FA:BC:D5:94"), [
+            "agent NoInputNoOutput",
+            "default-agent",
+            "trust BC:87:FA:BC:D5:94",
+            "pair BC:87:FA:BC:D5:94"
+        ]);
+    }
+
+    function test_a_pairing_with_no_address_is_no_script() {
+        compare(policy.pairScript("").length, 0);
+        compare(policy.pairScript(null).length, 0);
+    }
+
+    function test_the_agent_reports_a_pairing_that_worked() {
+        const outcome = policy.pairOutcome("Pairing successful");
+        compare(outcome.done, true);
+        compare(outcome.ok, true);
+    }
+
+    function test_the_agent_reports_why_a_pairing_failed() {
+        const outcome = policy.pairOutcome(
+            "Failed to pair: org.bluez.Error.AuthenticationCanceled");
+        compare(outcome.done, true);
+        compare(outcome.ok, false);
+        compare(outcome.reason, "org.bluez.Error.AuthenticationCanceled");
+    }
+
+    function test_the_colours_bluetoothctl_writes_are_not_part_of_the_answer() {
+        // bluetoothctl paints its own output even with no terminal on the far
+        // end, and an escape sequence in the middle of the line is what makes
+        // a match that works by hand fail in a pipe.
+        const outcome = policy.pairOutcome("\x1b[0;92m[CHG]\x1b[0m Pairing successful");
+        compare(outcome.done, true);
+        compare(outcome.ok, true);
+    }
+
+    function test_a_device_bluetoothctl_cannot_see_ends_the_attempt() {
+        // Measured against bluetoothctl 5.87: an address it does not hold an
+        // object for is refused in a sentence of its own, with no "Failed to
+        // pair" anywhere in it. Read as narration, that is an attempt that
+        // hangs until the timeout — a row stuck on "Pairing…" for a minute
+        // after the device it names walked out of range mid-scan.
+        const outcome = policy.pairOutcome("Device 00:11:22:33:44:55 not available");
+        compare(outcome.done, true);
+        compare(outcome.ok, false);
+        compare(outcome.reason, "not available");
+    }
+
+    function test_everything_else_bluetoothctl_says_is_not_an_outcome() {
+        // It narrates the whole scan while it waits. None of that ends the
+        // attempt, and ending it early is what unregisters the agent.
+        compare(policy.pairOutcome("Attempting to pair with BC:87:FA:BC:D5:94").done, false);
+        compare(policy.pairOutcome("[NEW] Device 7C:11:22:33:44:55 LE-Zen Zone").done, false);
+        // The agent's own registration, which is the *start* of the attempt.
+        compare(policy.pairOutcome("Agent registered").done, false);
+        compare(policy.pairOutcome("Default agent request successful").done, false);
+        compare(policy.pairOutcome("[Zen Zone]> pair BC:87:FA:BC:D5:94").done, false);
+        compare(policy.pairOutcome("").done, false);
+        compare(policy.pairOutcome(null).done, false);
+    }
+
+    function test_a_pairing_result_says_so_in_the_log() {
+        compare(policy.paired("Zen Zone", { done: true, ok: true, reason: "" }),
+                "Zen Zone paired");
+        compare(policy.paired("Zen Zone",
+                              { done: true, ok: false,
+                                reason: "org.bluez.Error.AuthenticationCanceled" }),
+                "Zen Zone pairing failed — org.bluez.Error.AuthenticationCanceled");
+        compare(policy.paired("Zen Zone", { done: true, ok: false, reason: "" }),
+                "Zen Zone pairing failed");
+    }
 }

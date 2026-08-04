@@ -79,10 +79,12 @@ QtObject {
     /// pairing in flight, then paired, then everything the scan turned up —
     /// alphabetical within each band.
     ///
-    /// Nothing is filtered out. A nameless device is a real device with a real
-    /// address, and BlueZ hands those over constantly during a scan; hiding
-    /// them would make the list shorter than what is on the air, which is the
-    /// opposite of what a discovery view is for.
+    /// A nameless device is a real device with a real address, and BlueZ hands
+    /// those over constantly during a scan; hiding them would make the list
+    /// shorter than what is on the air, which is the opposite of what a
+    /// discovery view is for. The one thing that does not get its own row is
+    /// the LE shadow of a device already listed over classic — see
+    /// `foldTransports`, which is #153 and not a tidiness preference.
     function deviceRows(devices: var): var {
         const out = [];
         for (const device of devices ?? []) {
@@ -91,7 +93,58 @@ QtObject {
                 continue;       // BlueZ has not filled the object in yet
             out.push(policy.deviceRow(device, address));
         }
-        return out.sort(policy.compareDevices);
+        return policy.foldTransports(out).sort(policy.compareDevices);
+    }
+
+    /// The name a `LE-…` advertisement is shadowing, or "" for anything that is
+    /// not one.
+    ///
+    /// BlueZ names a device it has only seen advertise over LE after the
+    /// advertisement, and a dual-mode headset advertising while it is also
+    /// discoverable over BR/EDR turns up twice: once as "Zen Zone" and once as
+    /// "LE-Zen Zone", under two different addresses.
+    function classicName(name: var): string {
+        const match = /^LE[-_](.+)$/i.exec(String(name ?? "").trim());
+        return match ? match[1].trim() : "";
+    }
+
+    /// Drop the LE advertisement of a device that is also on the list over
+    /// classic (#153).
+    ///
+    /// The pass that filed it pressed "LE-Zen Zone" and got a bond that carried
+    /// no A2DP — LE has no such profile, so PipeWire never made a card and no
+    /// sink appeared. The two rows are one headset, and only one of them is a
+    /// row you can get audio out of.
+    ///
+    /// Only a bare scan result is folded away. An LE entry that is connected,
+    /// bonded or pairing is the row holding the verb for whatever is actually
+    /// happening, and hiding it would leave a live device with no way to
+    /// disconnect it. An LE device with no classic twin — a tag, a watch, half
+    /// the mice — keeps its row, because it is the only one it has.
+    function foldTransports(rows: var): var {
+        const byName = ({});
+        for (const row of rows ?? [])
+            byName[String(row.name ?? "").trim().toLowerCase()] = true;
+
+        const out = [];
+        for (const row of rows ?? []) {
+            const base = policy.classicName(row.name);
+            const shadowed = base !== "" && byName[base.toLowerCase()] === true;
+            if (shadowed && policy.nothingHappeningTo(row))
+                continue;
+            out.push(row);
+        }
+        return out;
+    }
+
+    /// A row that is only a scan result: nothing connected, nothing bonded,
+    /// nothing in flight. Asked as a question rather than compared against
+    /// `deviceBand`'s last band, so that adding a band stays a change to the
+    /// order rather than a silent change to what the list contains.
+    function nothingHappeningTo(row: var): bool {
+        const facts = row ?? ({});
+        return facts.connected !== true && facts.paired !== true
+            && facts.pairing !== true;
     }
 
     function deviceRow(device: var, address: string): var {
@@ -249,5 +302,98 @@ QtObject {
             lines.push(name + " disconnected");
 
         return lines;
+    }
+
+    // --- trust (#153) ---------------------------------------------------------
+
+    /// Whether a device that has just bonded still needs marking trusted.
+    ///
+    /// Without `Trusted: yes` BlueZ will not accept a connection the device
+    /// itself starts, so a headset that has been powered off and on again sits
+    /// there advertising and nothing happens — the bond is intact and useless.
+    /// The facade read `trusted` from the moment the drill-in was written (#45)
+    /// and never set it; the pass that filed #153 is what that costs.
+    ///
+    /// The transition and not the reading, for the same reason `settled` takes
+    /// two: a device that was already paired and untrusted when the shell
+    /// started was left that way by somebody else's decision — blueman, a
+    /// `bluetoothctl untrust`, a policy this shell knows nothing about — and
+    /// starting up is not the moment to overrule it.
+    function trustNeeded(was: var, now: var): bool {
+        if (was === null || was === undefined || now === null || now === undefined)
+            return false;
+        return was.paired !== true && now.paired === true && now.trusted !== true;
+    }
+
+    function trustGranted(name: string): string {
+        return name + " trusted";
+    }
+
+    // --- the pairing agent (#153) --------------------------------------------
+    //
+    // The one thing in this facade that is not native, and the header of
+    // Services/Networking/Bluetooth.qml argues the case: pairing needs an agent
+    // on the bus to answer BlueZ's authentication request, nothing in QML can
+    // export one, and `bluetoothctl` registers one for as long as it runs.
+    // These two functions are the whole of what it is told and the whole of
+    // what is read back.
+
+    /// How long an attempt is given before it is called off. BlueZ's own
+    /// pairing window is about this long, and the number is here rather than on
+    /// the Timer for the reason LogindBridge's confirm timeout is: it is a
+    /// threshold, and thresholds are decisions (CLAUDE.md, seam 1).
+    readonly property int pairTimeoutMs: 60000
+
+    /// What to write to `bluetoothctl` to pair one device, in order.
+    ///
+    /// The order is the fix. An agent first, made the default second — a
+    /// registered agent BlueZ has not been told to prefer answers nothing —
+    /// then trust, then pair. Trust *before* pair because that is the sequence
+    /// that held on real hardware (#153): a device trusted while the bond is
+    /// being made never has an unattended moment where BlueZ would refuse it.
+    function pairScript(address: var): var {
+        const target = String(address ?? "").trim();
+        if (target === "")
+            return [];
+        return ["agent NoInputNoOutput", "default-agent",
+                "trust " + target, "pair " + target];
+    }
+
+    /// What one line of `bluetoothctl` output means, if anything.
+    ///
+    /// `done` is the important half: it is what ends the attempt, and ending
+    /// the attempt is what closes the process and unregisters the agent. It
+    /// narrates the whole scan while it waits — every `[NEW] Device` on the
+    /// air — and treating any of that as an answer is how a pairing loses its
+    /// agent halfway through, which is the shape of the bug this fixes.
+    ///
+    /// The escape sequences are stripped first: bluetoothctl colours its output
+    /// with no terminal on the far end, and a `[0;92m` in front of the text is
+    /// what makes a match that works by hand fail in a pipe.
+    function pairOutcome(text: var): var {
+        const line = String(text ?? "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+        if (/Pairing successful/i.test(line))
+            return { done: true, ok: true, reason: "" };
+        const failed = /Failed to pair:?\s*(.*)$/i.exec(line);
+        if (failed)
+            return { done: true, ok: false, reason: failed[1].trim() };
+        // An address bluetoothctl holds no object for — a device that walked
+        // out of range between the scan and the press. Measured against 5.87:
+        // it says this instead of failing to pair, and reading it as narration
+        // is a row stuck on "Pairing…" until the timeout.
+        if (/Device \S+ not available/i.test(line))
+            return { done: true, ok: false, reason: "not available" };
+        return { done: false, ok: false, reason: "" };
+    }
+
+    /// What the log says once the attempt is over. The reason is BlueZ's own
+    /// error name, kept verbatim: `org.bluez.Error.AuthenticationCanceled` is
+    /// searchable and "pairing failed" is not.
+    function paired(name: string, outcome: var): string {
+        if (outcome?.ok === true)
+            return name + " paired";
+        const reason = String(outcome?.reason ?? "").trim();
+        return reason === "" ? name + " pairing failed"
+                             : name + " pairing failed — " + reason;
     }
 }

@@ -118,7 +118,7 @@ Scope {
         password.abort();
         fingerprint.abort();
         priv.fingerprintActive = false;
-        priv.fingerprintMessage = "";
+        root.clearFingerprintMessage();
         // The latch dies with the lock it was raised on (#164). Both success
         // paths — password and fingerprint — come through here, and a lockout
         // promoted mid-conversation would otherwise stand until the next
@@ -275,6 +275,57 @@ Scope {
         Logger.log("lock", "faillock lockout recognised in a pam message");
     }
 
+    /// Take one thing the fingerprint conversation said, and decide whether it
+    /// may replace what is already on that line.
+    ///
+    /// It cannot simply be an assignment (#168). Driven directly on hardware,
+    /// pam_fprintd re-prompts 9.7ms after it reports a failed match — less than
+    /// one frame at 60Hz — so the last message always won and the last message
+    /// is always the re-prompt. A wrong finger and a finger the reader never
+    /// saw were the same screen, which leaves nothing to suggest trying a
+    /// different finger.
+    ///
+    /// So a failure holds the line for `fingerprintErrorDwellMs`, and a message
+    /// that loses is *held* rather than dropped: the timer below puts it up
+    /// when the dwell expires, so the reader's prompt still comes back. Which
+    /// message wins is LockPolicy's decision — the seam it can be tested at.
+    function noteFingerprintMessage(text: string, isError: bool): void {
+        if (!text)
+            return;
+        const sinceMs = Date.now() - priv.fingerprintMessageAt;
+        if (policy.fingerprintMessageWins(priv.fingerprintMessageIsError,
+                                          sinceMs, isError)) {
+            fingerprintDwell.stop();
+            priv.fingerprintHeld = "";
+            root.showFingerprintMessage(text, isError);
+            return;
+        }
+        priv.fingerprintHeld = text;
+        priv.fingerprintHeldIsError = isError;
+        fingerprintDwell.interval = policy.fingerprintDwellRemainingMs(sinceMs);
+        fingerprintDwell.restart();
+    }
+
+    /// Put a fingerprint message on screen, remembering what it was and when —
+    /// both of which the next message has to ask about.
+    function showFingerprintMessage(text: string, isError: bool): void {
+        priv.fingerprintMessage = text;
+        priv.fingerprintMessageIsError = isError;
+        priv.fingerprintMessageAt = Date.now();
+    }
+
+    /// Take the fingerprint line down, including anything waiting to go up on
+    /// it. Called wherever the conversation stops existing — a message flushed
+    /// onto a closed context would be a line about a reader nothing is reading.
+    function clearFingerprintMessage(): void {
+        fingerprintDwell.stop();
+        priv.fingerprintHeld = "";
+        priv.fingerprintHeldIsError = false;
+        priv.fingerprintMessage = "";
+        priv.fingerprintMessageIsError = false;
+        priv.fingerprintMessageAt = 0;
+    }
+
     /// Pose the failure path rather than produce it (#96).
     ///
     /// A real refusal takes a real PAM stack, a real keyboard and a compositor
@@ -407,10 +458,8 @@ Scope {
         config: Config.values.system.lock.fingerprintPamConfig
         configDirectory: "/etc/pam.d"
 
-        onPamMessage: {
-            if (fingerprint.message)
-                priv.fingerprintMessage = fingerprint.message;
-        }
+        onPamMessage: root.noteFingerprintMessage(fingerprint.message,
+                                                  fingerprint.messageIsError)
 
         onCompleted: result => {
             if (result === PamResult.Success) {
@@ -429,7 +478,7 @@ Scope {
                 fingerprintRetry.restart();
             } else {
                 priv.fingerprintActive = false;
-                priv.fingerprintMessage = "";
+                root.clearFingerprintMessage();
                 Logger.log("lock", "fingerprint conversation closed after "
                            + priv.fingerprintRestarts + " attempt(s)");
             }
@@ -440,7 +489,7 @@ Scope {
             // its pam config is not where we looked. Not worth shouting about —
             // the password field is right there.
             priv.fingerprintActive = false;
-            priv.fingerprintMessage = "";
+            root.clearFingerprintMessage();
             Logger.log("lock", "fingerprint unavailable (pam error " + error + ")");
         }
     }
@@ -488,6 +537,22 @@ Scope {
         onTriggered: if (priv.begun && priv.fingerprintActive) fingerprint.start()
     }
 
+    // The other half of the dwell (#168): the message that was held while a
+    // failure was being read, put up once the failure has had its spell. Its
+    // interval is set at the moment something loses, because what is left of
+    // the dwell depends on when the failure landed.
+    Timer {
+        id: fingerprintDwell
+        onTriggered: {
+            if (!priv.fingerprintHeld)
+                return;
+            root.showFingerprintMessage(priv.fingerprintHeld,
+                                        priv.fingerprintHeldIsError);
+            priv.fingerprintHeld = "";
+            priv.fingerprintHeldIsError = false;
+        }
+    }
+
     QtObject {
         id: priv
 
@@ -518,5 +583,15 @@ Scope {
         property bool fingerprintActive: false
         property string fingerprintMessage: ""
         property int fingerprintRestarts: 0
+
+        // The dwell (#168): what the fingerprint line is saying and when it
+        // started saying it, plus whatever arrived too soon to replace it.
+        // `fingerprintMessageAt` is a wall-clock stamp rather than a Timer's
+        // remaining time, because the question a new message asks is how long
+        // the *current* one has been up.
+        property bool fingerprintMessageIsError: false
+        property real fingerprintMessageAt: 0
+        property string fingerprintHeld: ""
+        property bool fingerprintHeldIsError: false
     }
 }

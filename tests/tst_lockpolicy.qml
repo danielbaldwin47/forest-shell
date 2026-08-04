@@ -231,6 +231,58 @@ TestCase {
         verify(policy.fingerprintMaxRestarts > 0);
     }
 
+    // What fprintd says about a failed match is the whole feedback channel for
+    // a wrong finger, and pam_fprintd overwrites it faster than a frame (#168).
+
+    function test_a_re_prompt_cannot_wipe_a_failure_within_one_frame() {
+        // The measured case: "Failed to match fingerprint" at 10915.5ms,
+        // "Place your finger on the fingerprint reader" at 10925.2ms — 9.7ms
+        // later, where a 60Hz frame is 16.7ms. The prompt loses.
+        verify(!policy.fingerprintMessageWins(true, 10, false));
+        verify(!policy.fingerprintMessageWins(true, 0, false));
+    }
+
+    function test_a_later_failure_replaces_an_earlier_one_at_once() {
+        // Two wrong fingers in a row are two events, and the dwell is there to
+        // make failures readable, not to hide the second one.
+        verify(policy.fingerprintMessageWins(true, 0, true));
+        verify(policy.fingerprintMessageWins(true, 10, true));
+    }
+
+    function test_the_prompt_returns_once_the_failure_has_been_read() {
+        // Held, not dropped: the surface still has to end up saying what the
+        // reader wants next.
+        verify(policy.fingerprintMessageWins(
+            true, policy.fingerprintErrorDwellMs, false));
+        verify(policy.fingerprintMessageWins(
+            true, policy.fingerprintErrorDwellMs + 500, false));
+    }
+
+    function test_an_ordinary_prompt_waits_for_nothing_else() {
+        // Nothing is being held, so the first prompt of a conversation — and
+        // every prompt after an ordinary one — shows immediately.
+        verify(policy.fingerprintMessageWins(false, 0, false));
+        verify(policy.fingerprintMessageWins(false, 10, true));
+    }
+
+    function test_the_dwell_outlasts_a_frame_and_ends() {
+        // Longer than 16.7ms or it buys nothing; bounded, or a failure early in
+        // a conversation would sit on top of every prompt after it.
+        verify(policy.fingerprintErrorDwellMs > 17);
+        verify(policy.fingerprintErrorDwellMs <= 3000);
+    }
+
+    function test_a_held_message_knows_how_long_it_waits() {
+        compare(policy.fingerprintDwellRemainingMs(10),
+                policy.fingerprintErrorDwellMs - 10);
+        // Never negative: a Timer given a negative interval fires on a schedule
+        // nobody chose.
+        compare(policy.fingerprintDwellRemainingMs(
+            policy.fingerprintErrorDwellMs), 0);
+        compare(policy.fingerprintDwellRemainingMs(
+            policy.fingerprintErrorDwellMs + 5000), 0);
+    }
+
     // --- notifications -------------------------------------------------------
 
     function test_the_count_is_all_that_is_ever_shown() {

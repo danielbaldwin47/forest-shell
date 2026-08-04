@@ -80,6 +80,23 @@ ShellRoot {
             return true;
         }
 
+        /// Say something to the lock as *fprintd* would (#168).
+        ///
+        /// Same argument as `say` above, for a different unreachable thing: the
+        /// fingerprint conversation needs a reader and a finger, so no nested
+        /// session can produce one. But which of two messages the surface ends
+        /// up showing is decided in `noteFingerprintMessage`, and that hears
+        /// text — so the script replays the two lines the hardware trace
+        /// recorded, 9.7ms apart, and the real arbitration answers them.
+        ///
+        /// `isError` is real here, unlike faillock's: pam_fprintd reports a
+        /// failed match as a `PAM_ERROR_MSG`, which is the whole reason the
+        /// decision has a flag to go on.
+        function fingersay(text: string, isError: bool): bool {
+            lock.auth.noteFingerprintMessage(text, isError);
+            return true;
+        }
+
         /// The clearing half of the idle retreat, which is what took #161's
         /// lockout off the screen. Called from here because the retreat itself
         /// is a timer on the surface and this seam cannot wait one out; the
@@ -100,7 +117,8 @@ ShellRoot {
                 message: lock.auth.message,
                 messageIsError: lock.auth.messageIsError,
                 lockedOut: lock.auth.lockedOut,
-                conversing: lock.auth.conversing
+                conversing: lock.auth.conversing,
+                fingerprintMessage: lock.auth.fingerprintMessage
             });
         }
     }

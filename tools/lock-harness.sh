@@ -72,6 +72,14 @@ lock_message() {
     sed 's/.*"message":"\([^"]*\)".*/\1/' <<< "$state"
 }
 
+# The fingerprint line is its own field, because it is its own line on screen:
+# what fprintd says is about a device, not about the password attempt above it.
+fingerprint_message() {
+    local state="$1"
+    [[ "$state" == *'"fingerprintMessage":'* ]] || return 1
+    sed 's/.*"fingerprintMessage":"\([^"]*\)".*/\1/' <<< "$state"
+}
+
 # The same guard for the flags, which are unquoted: `true`, `false`, nothing at
 # all if this was the client failing rather than the lock answering.
 lock_flag() {
@@ -245,6 +253,38 @@ fi
 # Once, however many wrong passwords the flags above spent.
 if (( ATTEMPT || LATCH )); then
     nested_note "clear the tally with: sudo faillock --user $USER --reset"
+fi
+
+# 4c — a failed finger stays readable (#168). The conversation itself needs a
+# reader and a finger, so it cannot happen here; but which of two messages ends
+# up on screen is decided in `noteFingerprintMessage`, which hears text. So the
+# two lines the hardware trace recorded are replayed back to back — pam_fprintd
+# re-prompts 9.7ms after it reports a failed match, less than a frame — and the
+# real arbitration answers them. Costs no PAM attempt and no faillock try.
+fp_fail='Failed to match fingerprint'
+fp_prompt='Place your finger on the fingerprint reader'
+ipc locktest fingersay "$fp_fail" true > /dev/null
+ipc locktest fingersay "$fp_prompt" false > /dev/null
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_fail" ]]; then
+    nested_pass "the failed match survived the re-prompt: $message"
+else
+    nested_fail "the re-prompt wiped the failure before it could be drawn (#168): $state"
+fi
+
+# …and it is held, not dropped: the reader's own prompt has to come back once
+# the failure has had its dwell, or the line goes stale on a device that is
+# still waiting for a finger.
+sleep 2
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_prompt" ]]; then
+    nested_pass "the prompt returned once the failure had been read: $message"
+else
+    nested_fail "the held prompt never went up — the fingerprint line is stuck (#168): $state"
 fi
 
 # 5 — the field can hear a keyboard. The IPC above deliberately bypasses it,

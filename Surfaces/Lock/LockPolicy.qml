@@ -256,6 +256,39 @@ QtObject {
     readonly property int fingerprintRetryDelayMs: 1000
     readonly property int fingerprintMaxRestarts: 5
 
+    // A failed match is the whole feedback channel for a wrong finger, and
+    // pam_fprintd overwrites it faster than the screen can draw it (#168,
+    // measured on hardware): "Failed to match fingerprint" survives 9.7ms
+    // before the re-prompt lands, where a 60Hz frame is 16.7ms. So a failure
+    // holds the line for a spell of its own, long enough to read a short line
+    // and short enough that the reader's own prompt is not gone for long.
+    readonly property int fingerprintErrorDwellMs: 1500
+
+    /// Whether an arriving fingerprint message may replace the one on screen.
+    ///
+    /// `sinceMs` is how long the current message has been up, and matters only
+    /// while an error is holding: a later error is a second event and replaces
+    /// the first at once, and a message arriving over an ordinary prompt has
+    /// nothing to wait for.
+    ///
+    /// Unlike §2's faillock lines, pam_fprintd's failure genuinely is a
+    /// `PAM_ERROR_MSG`, so `PamContext.messageIsError` is what the caller
+    /// passes for both flags.
+    function fingerprintMessageWins(currentIsError: bool, sinceMs: int,
+                                    incomingIsError: bool): bool {
+        if (incomingIsError || !currentIsError)
+            return true;
+        return sinceMs >= fingerprintErrorDwellMs;
+    }
+
+    /// How long a message that lost must be held before it may be shown. It is
+    /// held rather than dropped — the surface still has to end up saying what
+    /// the reader wants next — so this is the interval that flush waits.
+    function fingerprintDwellRemainingMs(sinceMs: int): int {
+        const remaining = fingerprintErrorDwellMs - sinceMs;
+        return remaining > 0 ? remaining : 0;
+    }
+
     // --- notifications -------------------------------------------------------
 
     /// The count, and only the count (#9 — never the contents, so a lock screen

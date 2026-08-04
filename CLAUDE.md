@@ -90,6 +90,20 @@ idle frames where #73 measured 6, and the difference was another agent
 switching workspaces on the same session, not the shell. A performance number
 without its conditions next to it is a number that will be misread later.
 
+The idle one records two more of those conditions (#176), because the shell's
+own idle ladder is waiting for the same thing the harness is. **Power state**,
+on every run: `system.idle.dim` fires at 2.5 min on battery and 5 min on mains,
+so the 195 s default straddles a rung on one source and not on the other — and
+#73's 6 frames and #137's 21 are only comparable if they were taken on the same
+source, which until now nothing recorded. And **which rung fired inside the
+window**, read off the shell's own ladder line so the harness cannot disagree
+with the shell about what was armed: #152 measured 45 frames against a budget
+of 10 and 39 of them were the screen dimming at 151.7 s, which is the harness
+measuring the ladder rather than the shell, so it voids the frame count and
+exits 2 the way input does. `--help` says which rungs a given `--seconds` can
+reach; the arithmetic that decides it is at the first seam
+(`tools/idle-rungs.py`, `tests/tst_idle_rungs.py`).
+
 One piece of what no seam covers is now measurable rather than merely visible.
 `tools/blur-measure.sh` (#97) photographs the caller's own session with `grim`
 with `bar.surface.blur` on and off, and `tools/measure-blur.py` reads the

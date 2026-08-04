@@ -182,11 +182,33 @@ cannot be answered is worse than no prompt, which is why the probe gates it.
 `tests/tst_lockpolicy.qml` covers the reading; what a real session adds is that
 the surface honours it.
 
-Already answered on this machine (2026-08-03): `fprintd-list` is not installed
-at all, so the probe cannot find an enrolled finger, and every lock capture
-taken without `--lock-state fingerprint` renders nothing where the prompt
-would be. That is the absent half. The enrolled half needs a machine with a
-reader and is still open.
+Already answered on this machine, twice, and the second answer is the better
+one. On 2026-08-03 `fprintd-list` was not installed at all, so the probe's
+`Process` had nothing to launch and the empty stdout decided it. That tests
+almost nothing: a missing binary short-circuits the parse.
+
+**Re-run 2026-08-04 (#152), with fprintd installed.** The machine now has
+`fprintd 1.94.5`, `libfprint 1.94.100`, and a real reader on the USB bus —
+`06cb:009a Synaptics, Inc. Metallica MIS Touch Fingerprint Reader`. libfprint
+claims none of it: the daemon starts, enumerates zero devices, and the probe's
+command answers
+
+    $ fprintd-list "$USER"
+    No devices available          # on stdout, exit 1
+
+That is the absent half done properly. The line arrives on **stdout**, which is
+the stream `StdioCollector` reads (`LockAuth.qml`), so `fingerprintEnrolled` is
+handed real text and returns false on it rather than on emptiness — the prompt
+stays away because the parse said so. `tests/tst_lockpolicy.qml` now carries
+that verbatim string; before this run every fingerprint case in it was invented
+wording, which is exactly the setup that produced #161 at §2.
+
+The enrolled half is still open, and on *this* machine it is blocked by driver
+support rather than by hardware: 06cb:009a is not in upstream libfprint's
+tables, and the only route to it is a Touch-OEM-Driver stack
+(`libfprint-2-tod1-*`) that replaces the system libfprint. That is a system
+decision, not a test step — either take it deliberately or run the enrolled
+half on a machine whose reader libfprint already supports.
 
 Record: which half you could run. Both halves need saying — "no reader here, so
 the prompt stayed away" is half the criterion.

@@ -267,14 +267,22 @@ QtObject {
     // reason (#161, #164).
     //
     // The number can still change under us, since it is configured in a file
-    // this shell does not own. `fingerprintTouchesSpent` counts the real one
-    // out of a conversation, the test compares the two, and LockAuth logs when
-    // a live conversation disagrees.
+    // this shell does not own, and nothing at seam 1 can ask pam_fprintd what
+    // it is today. Two things bind it instead. This constant cannot be edited
+    // without a recorded conversation that spends the new number, because
+    // `fingerprintTouchesSpent` scores a transcribed hardware run against it in
+    // tests/tst_lockpolicy.qml. And a *live* conversation that disagrees is
+    // caught where a live conversation can be seen: LockAuth warns, and the run
+    // sheet's §3 says that warning is the finding.
     readonly property int fingerprintTouchBudget: 3
 
     /// How many touches a fingerprint conversation spent, counted out of the
     /// messages it emitted. Every touch is a pair — a prompt and then its
     /// answer — and only a failed match is a touch that cost something.
+    ///
+    /// Scores a whole conversation at once, which is what a recorded one at
+    /// seam 1 is; LockAuth counts the same thing a message at a time, through
+    /// `fingerprintTouchMissed` below, because it hears them as they arrive.
     function fingerprintTouchesSpent(messages: var): int {
         let spent = 0;
         for (let i = 0; i < messages.length; i += 1) {

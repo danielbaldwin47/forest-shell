@@ -177,13 +177,16 @@ least one. `system.lock.fingerprint` must also be on.
 4. Touch it wrong twice more. Three is all there is — `max-tries`, pam_fprintd's
    own option, whose default and documented minimum are both 3. Counted, not
    assumed: `LockPolicy.fingerprintTouchBudget` says 3 and
-   `lock: fingerprint conversation closed after N touch(es)` says what the
+   `lock: fingerprint offer withdrawn after N touch(es)` says what the
    module really spent. **If those two disagree the log says so as a warning**
    (`pam_fprintd spent N touch(es), not the 3 LockPolicy documents`) — that
    line is the finding, and it means the budget moved under us.
 5. After the third, the line must **say fingerprint is over and point at the
    password** (`Out of fingerprint tries — use your password`) and stay on
-   screen. This is #169's acceptance. Before it, the line simply vanished: the
+   screen. It arrives up to a dwell late on purpose — the third touch is a
+   failure like the other two and keeps its 1.5s, so `Failed to match
+   fingerprint` is still readable and the closing line follows it rather than
+   wiping it (#168). This is #169's acceptance. Before it, the line simply vanished: the
    reader's light going out was the only feedback, and that light is the
    hardware's, not the shell's. A prompt that disappears with nothing in its
    place is the regression.

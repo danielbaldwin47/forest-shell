@@ -312,6 +312,22 @@ for _ in 1 2 3; do
     ipc locktest fingersay "$fp_prompt" false > /dev/null
 done
 ipc locktest fingerwithdraw true > /dev/null
+
+# The last touch is a failure like any other and keeps its dwell (#168), so the
+# closing line queues behind it rather than wiping it — otherwise the fix for
+# #169 re-creates the bug #168 fixed, on the one touch that matters most.
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_fail" ]]; then
+    nested_pass "the last failure survived the withdrawal: $message"
+else
+    nested_fail "the withdrawal wiped the failure that caused it (#168 again): $state"
+fi
+
+# Same 2s as above, and coupled to `fingerprintErrorDwellMs` for the same
+# reason: the closing line goes up once the failure has had its spell.
+sleep 2
 state=$(ipc locktest state)
 if ! message=$(fingerprint_message "$state"); then
     nested_fail "could not read the lock's state — $state"
@@ -329,10 +345,10 @@ fi
 # that quietly changes under us shows up in this line first (#81's argument
 # again, and `LockPolicy.fingerprintTouchBudget` is the number it is checked
 # against there).
-if grep -qa 'lock: fingerprint conversation closed after 3 touch(es)' "$NESTED_SHELL_LOG"; then
-    nested_pass "the close is in the log, with its count: $(grep -a -m1 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG")"
-elif grep -qa 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG"; then
-    nested_fail "the close logged a count no conversation spent: $(grep -a -m1 'lock: fingerprint conversation closed after' "$NESTED_SHELL_LOG")"
+if grep -qa 'lock: fingerprint offer withdrawn after 3 touch(es)' "$NESTED_SHELL_LOG"; then
+    nested_pass "the close is in the log, with its count: $(grep -a -m1 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG")"
+elif grep -qa 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG"; then
+    nested_fail "the close logged a count no conversation spent: $(grep -a -m1 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG")"
 else
     nested_fail "the close left no trace in the log — a withdrawn offer would be undiagnosable (#81)"
 fi

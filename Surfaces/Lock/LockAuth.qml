@@ -348,16 +348,26 @@ Scope {
         if (!priv.fingerprintActive)
             return;
         priv.fingerprintActive = false;
-        root.clearFingerprintMessage();
-        root.showFingerprintMessage(policy.fingerprintClosingMessage(spentBudget),
+        // The queued message goes, but the dwell does not (#168): the touch
+        // that spent the budget is a failure like any other, and withdrawing
+        // on top of it would wipe the last one inside a frame — the exact
+        // thing #168 fixed, re-created by the fix for #169. So the closing
+        // line goes through the same arbitration every other message does, and
+        // waits out whatever is left of the failure's spell.
+        fingerprintDwell.stop();
+        priv.fingerprintHeld = "";
+        priv.fingerprintHeldIsError = false;
+        root.noteFingerprintMessage(policy.fingerprintClosingMessage(spentBudget),
                                     false);
         // #81's rule, and the one line that carries the module's real budget:
         // logged here rather than at the completion because this is the state
         // change — every way the offer ends comes through this function, and a
         // withdrawal that left no trace is how #169 went a week looking like a
-        // dead reader.
-        Logger.log("lock", "fingerprint conversation closed after "
-                   + priv.fingerprintTouches + " touch(es), offer withdrawn ("
+        // dead reader. Says "offer withdrawn" and not "conversation closed",
+        // because the error path below withdraws an offer whose conversation
+        // never opened.
+        Logger.log("lock", "fingerprint offer withdrawn after "
+                   + priv.fingerprintTouches + " touch(es) ("
                    + (spentBudget ? "budget spent" : "budget not spent") + ")");
     }
 

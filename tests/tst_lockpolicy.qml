@@ -239,10 +239,17 @@ TestCase {
 
     function test_the_touch_budget_is_the_one_pam_fprintd_actually_spends() {
         // Not `> 0` (which is what #169 caught this asserting): the number has
-        // to be the module's real one, so it is compared against a
-        // conversation that really was refused. If pam_fprintd's `max-tries`
-        // changes under us, the recorded run stops matching the constant and
-        // this fails.
+        // to be the module's real one, so it is scored against a conversation
+        // that really was refused.
+        //
+        // What this can and cannot catch is worth being exact about. Nothing
+        // here can ask pam_fprintd what `max-tries` is today — the module is
+        // on the far side of seam 1, and the transcript above is a recording.
+        // What it does catch is the constant drifting away from the evidence
+        // for it: raise it to 5 and the recorded run still spends 3, so this
+        // fails until someone records a conversation that really spends 5.
+        // Catching the *module* moving is a live conversation's job, and
+        // LockAuth warns when one disagrees.
         compare(policy.fingerprintTouchesSpent(wrongFingerThreeTimes),
                 policy.fingerprintTouchBudget);
         compare(policy.fingerprintTouchBudget, 3);

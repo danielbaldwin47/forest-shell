@@ -21,10 +21,8 @@ rather than a forecast.
 
     power=battery
     armed=dim:150,lock:300,dpms:360,suspend:900
-    off=
     before=
     crossed=dim:150
-    beyond=lock:300,dpms:360,suspend:900
     fired=dim
 
 Stdlib only, and the arithmetic is on this side of the line rather than in the
@@ -38,8 +36,11 @@ import sys
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# `ladder on battery: dim 150s, lock 300s, dpms 360s, suspend off (turned off)`
-LADDER = re.compile(r"\bidle:\s+ladder on (battery|ac):\s*(.*)$")
+# `ladder on battery: dim 150s, lock 300s, dpms 360s, suspend off (turned off)`.
+# Not anchored to the `idle:` tag, because the shell writes this twice: bare
+# from `onRowsChanged`, and behind `ladder armed (ipc target: idle) — ` from
+# `Component.onCompleted` (Services/System/Idle.qml). Both are the same line.
+LADDER = re.compile(r"\bladder on (battery|ac):\s*(.*)$")
 ROW = re.compile(r"^(\w+)\s+(?:(\d+)s|off \((.*)\))$")
 # `idle: dim — backlight 60 → 10%`, under the `idle` tag, hence the doubling.
 FIRED = re.compile(r"\bidle:\s+idle:\s+(\w+)\b")
@@ -152,10 +153,8 @@ def main(argv=None):
 
     print(f"power={power or 'unknown'}")
     print(f"armed={_rungs(armed)}")
-    print(f"off={_rungs(off)}")
     print(f"before={_rungs(before)}")
     print(f"crossed={_rungs(crossed)}")
-    print(f"beyond={_rungs(beyond)}")
     print(f"fired={','.join(fired(lines[max(0, args.from_line):]))}")
     return 0
 

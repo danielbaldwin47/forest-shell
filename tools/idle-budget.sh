@@ -86,16 +86,20 @@ Which idle rungs the window reaches, and why it matters:
   (900 s); on mains each is twice that and suspend is off. The window is
   measured on top of the ~12-15 s the harness spends launching and settling, so
   from a cold start the 195 s default reaches **dim and nothing else on
-  battery, and no rung at all on mains**. --seconds 300 reaches lock on
-  battery, --seconds 360 reaches dpms, and both stay short of any rung on
+  battery, and no rung at all on mains**. Past that the lead counts: --seconds
+  300 covers idle 15 s to 315 s, which reaches lock on battery *and* dim on
+  mains, and --seconds 360 reaches dpms on battery. The longest window that
+  clears every rung is roughly --seconds 135 on battery and --seconds 285 on
   mains.
 
   A rung that fires inside the window is measured by it: #152 read 45 frames
   against a budget of 10, 39 of which were the screen dimming at 151.7 s. So a
   window with a rung in it voids the frame criterion the way input does and
-  exits 2, inconclusive — re-run it on mains, or shorter than the first armed
-  rung. What is actually armed is read out of the shell's own ladder line
-  rather than out of the timeouts above, which are only the defaults.
+  exits 2, inconclusive — re-run it on mains, or with --seconds short of the
+  first armed rung. Mains buys headroom rather than immunity: 195 s clears
+  mains dim at 300 s, but --seconds 300 does not, because the lead counts. What
+  is actually armed is read out of the shell's own ladder line rather than out
+  of the timeouts above, which are only the defaults.
 
   Your idle clock may already be running when the harness starts: it counts
   from the last input on the session, not from launch. The prediction assumes
@@ -232,12 +236,17 @@ compositor_events=${compositor_events:-0}
 # (tools/idle-rungs.py, tests/tst_idle_rungs.py). `lead` is how much idle time
 # was already on the clock when the window opened — launch plus settle — because
 # a rung fires on the idle clock and not on the window's.
+#
+# stderr is deliberately not swallowed: a reader that cannot say what was armed
+# is the #81 shape — a silent failure with two candidate causes — and the run
+# says so below rather than quietly judging the frames anyway.
 lead_seconds=$(python3 -c "print(round($start_time - $RUN_START, 1))")
 rungs_report=$(python3 "$(dirname "${BASH_SOURCE[0]}")/idle-rungs.py" "$SESSION_RUN_LOG" \
-                   --window "$SECONDS_WINDOW" --lead "$lead_seconds" --from-line "$start_lines" 2>/dev/null)
+                   --window "$SECONDS_WINDOW" --lead "$lead_seconds" --from-line "$start_lines")
 rungs_field() { printf '%s\n' "$rungs_report" | grep -a "^$1=" | cut -d= -f2-; }
 ladder_power=$(rungs_field power)
 armed_rungs=$(rungs_field armed)
+before_rungs=$(rungs_field before)
 crossed_rungs=$(rungs_field crossed)
 fired_rungs=$(rungs_field fired)
 
@@ -249,13 +258,11 @@ power_line="$power_at_start"
 [[ -n "$ladder_power" && "$ladder_power" != unknown && "$ladder_power" != "$power_at_start" ]] \
     && power_line="$power_line (sysfs), $ladder_power (the shell's ladder)"
 
-printf '  ....  power   %s\n' "$power_line"
+note "power   $power_line"
 if [[ -n "$armed_rungs" ]]; then
-    printf '  ....  ladder  armed %s — idle time %ss to %ss was measured\n' \
-        "${armed_rungs//,/, }" "$lead_seconds" \
-        "$(python3 -c "print(round($lead_seconds + $SECONDS_WINDOW, 1))")"
+    note "ladder  armed ${armed_rungs//,/, } — idle time ${lead_seconds}s to $(python3 -c "print(round($lead_seconds + $SECONDS_WINDOW, 1))")s was measured"
 else
-    printf '  ....  ladder  the log never said what was armed — rungs unjudged\n'
+    note "ladder  the log never said what was armed"
 fi
 
 printf '\n'
@@ -334,8 +341,12 @@ if [[ -n "$fired_rungs" ]]; then
     note "the idle ladder fired inside the window: ${fired_rungs//,/, } — that is the shell"
     note "changing state on a schedule, and the repaints it costs are that rung's"
 elif [[ -n "$crossed_rungs" ]]; then
-    note "the window covered ${crossed_rungs//,/, } on the idle clock, but the log has no rung"
-    note "firing in it — the session was already idle before the run, so it fired earlier"
+    note "the window covered ${crossed_rungs//,/, } on the idle clock, but no rung fired in it:"
+    note "either the session was already idle when the run began, so the rung had gone"
+    note "before the window opened, or something held it off (see the log's idle lines)"
+elif [[ -n "$before_rungs" ]]; then
+    note "${before_rungs//,/, } was already behind the idle clock when the window opened —"
+    note "measured with that rung's state already applied, not on the way into it"
 fi
 if (( power_changed )); then
     note "the power source changed mid-window ($power_at_start → $power_at_end), which rearms the"
@@ -354,9 +365,15 @@ fi
 # A rung firing is the same kind of event with one asymmetry (#176): it does not
 # only add. dim writes a backlight and the OSD used to announce it (#175), but
 # dpms blanks the screen, and a shell whose frames stop being presented can come
-# in *under* a frame budget it would otherwise fail. So a window with a rung in
-# it gets no upper-bound claim on any criterion — the numbers are reported, the
-# frame count is void, and the run is inconclusive.
+# in *under* a frame budget it would otherwise fail. So a pass taken with a rung
+# in the window is still a pass — the number was measured — but it is not an
+# upper bound on the shell at rest, and it does not claim to be. The frame
+# count, which the rung's repaints are counted into directly, is void.
+#
+# Not knowing what was armed is the third case, and it goes the same way: a
+# window whose ladder could not be read cannot be called rung-free, so it is
+# reported as unjudged rather than judged (#81 — the failure that says nothing
+# is the expensive one).
 void_count=0
 void() { printf '  \033[33m????\033[0m  %s\n' "$1"; void_count=$((void_count + 1)); }
 
@@ -365,33 +382,39 @@ join_reason() { [[ -n "$disturbance" ]] && disturbance="$disturbance and $1" || 
 (( compositor_events )) && join_reason "the window was driven"
 [[ -n "$fired_rungs" ]] && join_reason "the idle ladder fired (${fired_rungs//,/, })"
 (( power_changed )) && join_reason "the power source changed"
+[[ -z "$armed_rungs" ]] && join_reason "what the idle ladder had armed could not be read"
 
-driven=0
-[[ -n "$disturbance" ]] && driven=1
-# Input alone is the one disturbance that argues in a single direction, so it is
-# the one that still earns "upper bound" out of a pass.
+# Input alone is the one disturbance that argues in a single direction — it only
+# ever adds work — so it is the one a pass can still be called an upper bound
+# under. The flag is set where the reason is, rather than by matching the prose
+# back out of it.
+driven_only=1
+{ [[ -n "$fired_rungs" ]] || (( power_changed )) || [[ -z "$armed_rungs" ]]; } && driven_only=0
+
+disturbed=0
+[[ -n "$disturbance" ]] && disturbed=1
 qualifier="$disturbance"
-[[ "$disturbance" == "the window was driven" ]] && qualifier="under input, so an upper bound"
+(( driven_only )) && qualifier="under input, so an upper bound"
 
 if python3 -c "import sys; sys.exit(0 if $cpu_percent <= 0.5 else 1)"; then
-    if (( driven )); then
+    if (( disturbed )); then
         pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5% — $qualifier"
     else
         pass "idle CPU $(printf '%.3f' "$cpu_percent")% ≤ 0.5%"
     fi
-elif (( driven )); then
+elif (( disturbed )); then
     void "idle CPU $(printf '%.3f' "$cpu_percent")% over budget, but $disturbance"
 else
     fail "idle CPU $(printf '%.3f' "$cpu_percent")% over the 0.5% budget"
 fi
 
 if python3 -c "import sys; sys.exit(0 if $switch_rate < 5 else 1)"; then
-    if (( driven )); then
+    if (( disturbed )); then
         pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s — $qualifier"
     else
         pass "$(printf '%.2f' "$switch_rate") context switches/s < 5/s"
     fi
-elif (( driven )); then
+elif (( disturbed )); then
     void "$(printf '%.2f' "$switch_rate") context switches/s over budget, but $disturbance"
 else
     fail "$(printf '%.2f' "$switch_rate") context switches/s over the 5/s budget"
@@ -400,7 +423,7 @@ fi
 # The clock is the one thing that may repaint at rest, once a minute on the
 # minute (Surfaces/Bar/Modules/Clock.qml). Anything much past that is an
 # animation that did not stop.
-if (( driven )); then
+if (( disturbed )); then
     void "$frame_count frames in ${SECONDS_WINDOW}s, but $disturbance — the repaints"
     note "     that costs are not the ones the criterion asked about"
 elif (( frame_count <= expected_frames )); then

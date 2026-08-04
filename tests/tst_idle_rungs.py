@@ -55,6 +55,18 @@ def test_parse_ladder():
     check("nothing is off on battery", off == [], repr(off))
 
 
+def test_parse_ladder_startup_variant():
+    # Services/System/Idle.qml writes the same ladder twice: bare from
+    # `onRowsChanged`, and behind a prefix from `Component.onCompleted`. A run
+    # whose log only carries the second one must still know what was armed.
+    startup = ("  +212ms idle: ladder armed (ipc target: idle) — "
+               "ladder on battery: dim 150s, lock 300s, dpms 360s, suspend 900s")
+    power, armed, _ = idle_rungs.parse_ladder([startup])
+    check("the startup ladder line is read too", power == "battery", repr(power))
+    check("and carries the same rungs",
+          armed == [("dim", 150), ("lock", 300), ("dpms", 360), ("suspend", 900)], repr(armed))
+
+
 def test_parse_ladder_off_rungs():
     _, armed, off = idle_rungs.parse_ladder([MAINS])
     check("a rung that is off is not armed",

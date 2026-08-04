@@ -184,19 +184,43 @@ service (`system.lock.pamConfig`, default `login`) and is untouched by this.
 1. Lock the session.
 2. The prompt draws under the status strip: the `fingerprint-pattern` glyph and
    whatever fprintd said (`Place your finger on the reader`).
-3. Touch the reader with the wrong finger. What this file used to promise —
-   the line becoming fprintd's failure text, then the prompt re-arming
-   `LockPolicy.fingerprintMaxRestarts` times `fingerprintRetryDelayMs` apart —
-   is wrong in both halves, measured 2026-08-04 (#152). What actually happens
-   is under **Run on this machine** below. Expect a one-frame flicker and no
-   readable failure text, and expect the whole prompt to vanish for good after
-   three wrong touches.
-4. Touch it with the right finger. It unlocks.
-5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint
-   context on a keystroke; it closes when PAM answers, when the retries run
-   out, or when the lock ends. Note whether both conversations on screen at
-   once read as one screen or as two competing ones. (They are deliberately on
-   separate lines: the prompt sits under the status strip, not in it.)
+3. Touch the reader with the wrong finger. **Read the line before it changes**
+   — this is #168's acceptance, and the only place it can be checked. It must
+   say `Failed to match fingerprint` long enough to be read
+   (`LockPolicy.fingerprintErrorDwellMs`, 1.5s), and then go back to the
+   prompt on its own. Before #168 it did neither: pam_fprintd re-prompts 9.7ms
+   after the failure, inside one 16.7ms frame, so the failure was never drawn
+   and a wrong finger looked identical to a finger the reader never saw. A
+   blink with nothing readable in it is the regression.
+   The reader's own prompt then comes back and it waits for another touch. The
+   shell does *not* re-arm anything here — this step used to claim it did
+   (`fingerprintMaxRestarts`, `fingerprintRetryDelayMs`), and #169 found both
+   numbers dead: pam_fprintd re-prompts **inside** the one conversation.
+4. Touch it wrong twice more. Three is all there is — `max-tries`, pam_fprintd's
+   own option, whose default and documented minimum are both 3. Counted, not
+   assumed: `LockPolicy.fingerprintTouchBudget` says 3 and
+   `lock: fingerprint offer withdrawn after N touch(es)` says what the
+   module really spent. **If those two disagree the log says so as a warning**
+   (`pam_fprintd spent N touch(es), not the 3 LockPolicy documents`) — that
+   line is the finding, and it means the budget moved under us.
+5. After the third, the line must **say fingerprint is over and point at the
+   password** (`Out of fingerprint tries — use your password`) and stay on
+   screen. It arrives up to a dwell late on purpose — the third touch is a
+   failure like the other two and keeps its 1.5s, so `Failed to match
+   fingerprint` is still readable and the closing line follows it rather than
+   wiping it (#168). This is #169's acceptance. Before it, the line simply vanished: the
+   reader's light going out was the only feedback, and that light is the
+   hardware's, not the shell's. A prompt that disappears with nothing in its
+   place is the regression.
+6. Type the password. It still works, and a relock offers the finger again —
+   the withdrawal is for this lock only.
+7. Restart, and this time touch it with the right finger. It unlocks.
+8. Start typing instead of touching. The prompt **stays** — nothing aborts the
+   fingerprint context on a keystroke; it closes when PAM answers, when the
+   touches run out, or when the lock ends. Note whether both conversations on
+   screen at once read as one screen or as two competing ones. (They are
+   deliberately on separate lines: the prompt sits under the status strip, not
+   in it.)
 
 **Where nothing is enrolled** (this machine, and every machine with no reader):
 

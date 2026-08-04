@@ -252,11 +252,116 @@ TestCase {
         verify(!policy.fingerprintEnrolled("No devices available"));
     }
 
-    function test_the_fingerprint_re_arm_is_bounded() {
-        // A reader that has started failing every time must not re-arm a PAM
-        // conversation all night on battery (#22 §5).
-        verify(policy.fingerprintRetryDelayMs > 0);
-        verify(policy.fingerprintMaxRestarts > 0);
+    // The recorded conversation (#169): one `fprintd` verify run driven with
+    // three wrong touches, transcribed in the order the messages arrived. This
+    // is the evidence `fingerprintTouchBudget` stands on, which is why it is
+    // written out here rather than summarised as a number.
+    readonly property var wrongFingerThreeTimes: [
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint",
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint",
+        "Place your finger on the fingerprint reader",
+        "Failed to match fingerprint"
+    ]
+
+    function test_the_touch_budget_is_the_one_pam_fprintd_actually_spends() {
+        // Not `> 0` (which is what #169 caught this asserting): the number has
+        // to be the module's real one, so it is scored against a conversation
+        // that really was refused.
+        //
+        // What this can and cannot catch is worth being exact about. Nothing
+        // here can ask pam_fprintd what `max-tries` is today — the module is
+        // on the far side of seam 1, and the transcript above is a recording.
+        // What it does catch is the constant drifting away from the evidence
+        // for it: raise it to 5 and the recorded run still spends 3, so this
+        // fails until someone records a conversation that really spends 5.
+        // Catching the *module* moving is a live conversation's job, and
+        // LockAuth warns when one disagrees.
+        compare(policy.fingerprintTouchesSpent(wrongFingerThreeTimes),
+                policy.fingerprintTouchBudget);
+        compare(policy.fingerprintTouchBudget, 3);
+    }
+
+    function test_a_re_prompt_is_not_a_spent_touch() {
+        // Every touch is a *pair* of messages, and only the failure is the
+        // touch — counting prompts would double the budget.
+        compare(policy.fingerprintTouchesSpent(
+            ["Place your finger on the fingerprint reader"]), 0);
+        compare(policy.fingerprintTouchesSpent([]), 0);
+    }
+
+    function test_the_budget_is_spent_by_maxtries_or_by_the_count() {
+        // MaxTries is the module saying so, and is authoritative on its own —
+        // the count is the fallback for a context that ends without one.
+        verify(policy.fingerprintBudgetSpent(true, 0));
+        verify(policy.fingerprintBudgetSpent(false, 3));
+        verify(!policy.fingerprintBudgetSpent(false, 2));
+    }
+
+    function test_a_withdrawn_fingerprint_prompt_says_so_and_points_at_the_password() {
+        // #169: three wrong touches and the prompt simply vanished. The
+        // reader's light going out is hardware, not the shell, so nothing on
+        // screen said fingerprint had stopped being an option.
+        const spent = policy.fingerprintClosingMessage(true);
+        const gone = policy.fingerprintClosingMessage(false);
+        verify(spent.length > 0);
+        verify(gone.length > 0);
+        verify(spent !== gone);
+        verify(/password/i.test(spent));
+        verify(/password/i.test(gone));
+    }
+
+    // What fprintd says about a failed match is the whole feedback channel for
+    // a wrong finger, and pam_fprintd overwrites it faster than a frame (#168).
+
+    function test_a_re_prompt_cannot_wipe_a_failure_within_one_frame() {
+        // The measured case: "Failed to match fingerprint" at 10915.5ms,
+        // "Place your finger on the fingerprint reader" at 10925.2ms — 9.7ms
+        // later, where a 60Hz frame is 16.7ms. The prompt loses.
+        verify(!policy.fingerprintMessageWins(true, 10, false));
+        verify(!policy.fingerprintMessageWins(true, 0, false));
+    }
+
+    function test_a_later_failure_replaces_an_earlier_one_at_once() {
+        // Two wrong fingers in a row are two events, and the dwell is there to
+        // make failures readable, not to hide the second one.
+        verify(policy.fingerprintMessageWins(true, 0, true));
+        verify(policy.fingerprintMessageWins(true, 10, true));
+    }
+
+    function test_the_prompt_returns_once_the_failure_has_been_read() {
+        // Held, not dropped: the surface still has to end up saying what the
+        // reader wants next.
+        verify(policy.fingerprintMessageWins(
+            true, policy.fingerprintErrorDwellMs, false));
+        verify(policy.fingerprintMessageWins(
+            true, policy.fingerprintErrorDwellMs + 500, false));
+    }
+
+    function test_an_ordinary_prompt_waits_for_nothing_else() {
+        // Nothing is being held, so the first prompt of a conversation — and
+        // every prompt after an ordinary one — shows immediately.
+        verify(policy.fingerprintMessageWins(false, 0, false));
+        verify(policy.fingerprintMessageWins(false, 10, true));
+    }
+
+    function test_the_dwell_outlasts_a_frame_and_ends() {
+        // Longer than 16.7ms or it buys nothing; bounded, or a failure early in
+        // a conversation would sit on top of every prompt after it.
+        verify(policy.fingerprintErrorDwellMs > 17);
+        verify(policy.fingerprintErrorDwellMs <= 3000);
+    }
+
+    function test_a_held_message_knows_how_long_it_waits() {
+        compare(policy.fingerprintDwellRemainingMs(10),
+                policy.fingerprintErrorDwellMs - 10);
+        // Never negative: a Timer given a negative interval fires on a schedule
+        // nobody chose.
+        compare(policy.fingerprintDwellRemainingMs(
+            policy.fingerprintErrorDwellMs), 0);
+        compare(policy.fingerprintDwellRemainingMs(
+            policy.fingerprintErrorDwellMs + 5000), 0);
     }
 
     // --- notifications -------------------------------------------------------

@@ -544,7 +544,11 @@ Item {
         anchors.top: statusStrip.bottom
         anchors.topMargin: Theme.space4
 
+        // Outlives the conversation by a line (#169): once the offer is
+        // withdrawn the message is the only thing left saying so, so the
+        // message rather than the context decides whether this is on screen.
         visible: surface.auth.fingerprintActive
+                 || surface.auth.fingerprintMessage !== ""
         icon: "fingerprint-pattern"
         label: surface.auth.fingerprintMessage
     }

@@ -72,6 +72,14 @@ lock_message() {
     sed 's/.*"message":"\([^"]*\)".*/\1/' <<< "$state"
 }
 
+# The fingerprint line is its own field, because it is its own line on screen:
+# what fprintd says is about a device, not about the password attempt above it.
+fingerprint_message() {
+    local state="$1"
+    [[ "$state" == *'"fingerprintMessage":'* ]] || return 1
+    sed 's/.*"fingerprintMessage":"\([^"]*\)".*/\1/' <<< "$state"
+}
+
 # The same guard for the flags, which are unquoted: `true`, `false`, nothing at
 # all if this was the client failing rather than the lock answering.
 lock_flag() {
@@ -245,6 +253,104 @@ fi
 # Once, however many wrong passwords the flags above spent.
 if (( ATTEMPT || LATCH )); then
     nested_note "clear the tally with: sudo faillock --user $USER --reset"
+fi
+
+# 4d — a failed finger stays readable (#168). The conversation itself needs a
+# reader and a finger, so it cannot happen here; but which of two messages ends
+# up on screen is decided in `noteFingerprintMessage`, which hears text. So the
+# two lines the hardware trace recorded are replayed back to back — pam_fprintd
+# re-prompts 9.7ms after it reports a failed match, less than a frame — and the
+# real arbitration answers them. Costs no PAM attempt and no faillock try.
+fp_fail='Failed to match fingerprint'
+fp_prompt='Place your finger on the fingerprint reader'
+ipc locktest fingersay "$fp_fail" true > /dev/null
+ipc locktest fingersay "$fp_prompt" false > /dev/null
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_fail" ]]; then
+    nested_pass "the failed match survived the re-prompt: $message"
+else
+    nested_fail "the re-prompt wiped the failure before it could be drawn (#168): $state"
+fi
+
+# …and it is held, not dropped: the reader's own prompt has to come back once
+# the failure has had its dwell, or the line goes stale on a device that is
+# still waiting for a finger.
+# Longer than `LockPolicy.fingerprintErrorDwellMs` (1500ms) and no longer than
+# it has to be. Coupled to that number on purpose: raise the dwell past this
+# and the check below asserts the opposite of what it says, so they move
+# together.
+sleep 2
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_prompt" ]]; then
+    nested_pass "the prompt returned once the failure had been read: $message"
+else
+    nested_fail "the held prompt never went up — the fingerprint line is stuck (#168): $state"
+fi
+
+# …and the hold said so in the log. On hardware this is the only way to tell a
+# line stuck on a stale failure from a line nothing ever sent to — #81's
+# argument, and the state above cannot make it after the flush has happened.
+if grep -qa 'lock: fingerprint message held' "$NESTED_SHELL_LOG"; then
+    nested_pass "the hold is in the log: $(grep -a -m1 'lock: fingerprint message held' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the hold left no trace in the log — a stuck fingerprint line would be undiagnosable (#81)"
+fi
+
+# 4e — the offer does not withdraw in silence (#169). Three wrong touches are
+# all pam_fprintd allows, and they all happen inside one conversation, so its
+# close is the end of fingerprint for this lock. It used to take the line down
+# with it: the reader's light going out was the only word on the subject, and
+# that light is the hardware's. Posed open, because the probe needs a reader —
+# but the withdrawal itself is the real one the close calls.
+ipc locktest fingeroffer > /dev/null
+for _ in 1 2 3; do
+    ipc locktest fingersay "$fp_fail" true > /dev/null
+    ipc locktest fingersay "$fp_prompt" false > /dev/null
+done
+ipc locktest fingerwithdraw true > /dev/null
+
+# The last touch is a failure like any other and keeps its dwell (#168), so the
+# closing line queues behind it rather than wiping it — otherwise the fix for
+# #169 re-creates the bug #168 fixed, on the one touch that matters most.
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == "$fp_fail" ]]; then
+    nested_pass "the last failure survived the withdrawal: $message"
+else
+    nested_fail "the withdrawal wiped the failure that caused it (#168 again): $state"
+fi
+
+# Same 2s as above, and coupled to `fingerprintErrorDwellMs` for the same
+# reason: the closing line goes up once the failure has had its spell.
+sleep 2
+state=$(ipc locktest state)
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ -z "$message" ]]; then
+    nested_fail "the fingerprint offer withdrew in silence (#169): $state"
+elif [[ "$message" == *[Pp]assword* ]]; then
+    nested_pass "the withdrawn offer points at the password: $message"
+else
+    nested_fail "the offer said it was over but not what to do instead (#169): $message"
+fi
+
+# …and it says so in the log, with the count it spent. Three, because three
+# failures were replayed above and the count is read out of the messages — on
+# hardware that number is pam_fprintd's `max-tries` and not ours, so a budget
+# that quietly changes under us shows up in this line first (#81's argument
+# again, and `LockPolicy.fingerprintTouchBudget` is the number it is checked
+# against there).
+if grep -qa 'lock: fingerprint offer withdrawn after 3 touch(es)' "$NESTED_SHELL_LOG"; then
+    nested_pass "the close is in the log, with its count: $(grep -a -m1 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG")"
+elif grep -qa 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG"; then
+    nested_fail "the close logged a count no conversation spent: $(grep -a -m1 'lock: fingerprint offer withdrawn after' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the close left no trace in the log — a withdrawn offer would be undiagnosable (#81)"
 fi
 
 # 5 — the field can hear a keyboard. The IPC above deliberately bypasses it,

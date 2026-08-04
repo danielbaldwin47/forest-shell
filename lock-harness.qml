@@ -80,6 +80,46 @@ ShellRoot {
             return true;
         }
 
+        /// Say something to the lock as *fprintd* would (#168).
+        ///
+        /// Same argument as `say` above, for a different unreachable thing: the
+        /// fingerprint conversation needs a reader and a finger, so no nested
+        /// session can produce one. But which of two messages the surface ends
+        /// up showing is decided in `noteFingerprintMessage`, and that hears
+        /// text — so the script replays the two lines the hardware trace
+        /// recorded, 9.7ms apart, and the real arbitration answers them.
+        ///
+        /// `isError` is real here, unlike faillock's: pam_fprintd reports a
+        /// failed match as a `PAM_ERROR_MSG`, which is the whole reason the
+        /// decision has a flag to go on.
+        function fingersay(text: string, isError: bool): bool {
+            lock.auth.noteFingerprintMessage(text, isError);
+            return true;
+        }
+
+        /// Open the fingerprint offer, as the enrolment probe does (#169).
+        ///
+        /// The probe runs `fprintd-list` against a reader this seam does not
+        /// have, so the offer can only be posed — but everything after it is
+        /// real: the touch count, the arbitration, and the withdrawal below all
+        /// run on the offer being open.
+        function fingeroffer(): bool {
+            lock.auth.pose({ fingerprintActive: true, fingerprintTouches: 0 });
+            return true;
+        }
+
+        /// Close it again, as a completed or failed PAM conversation does.
+        ///
+        /// `spent` is the difference between the budget running out and the
+        /// context never getting started, which is the one thing the closing
+        /// line has to get right. The withdrawal itself is real: what #169 was
+        /// about is that the line has to survive the conversation that put it
+        /// there, and that survival is what a script can watch.
+        function fingerwithdraw(spent: bool): bool {
+            lock.auth.withdrawFingerprint(spent);
+            return true;
+        }
+
         /// The clearing half of the idle retreat, which is what took #161's
         /// lockout off the screen. Called from here because the retreat itself
         /// is a timer on the surface and this seam cannot wait one out; the
@@ -100,7 +140,9 @@ ShellRoot {
                 message: lock.auth.message,
                 messageIsError: lock.auth.messageIsError,
                 lockedOut: lock.auth.lockedOut,
-                conversing: lock.auth.conversing
+                conversing: lock.auth.conversing,
+                fingerprintMessage: lock.auth.fingerprintMessage,
+                fingerprintActive: lock.auth.fingerprintActive
             });
         }
     }

@@ -132,15 +132,15 @@ ShellRoot {
 
     /// What the lock is showing, as a comma-separated set — `quiet` on its own,
     /// or any of `summoned`, `caps`, `notify:N`, `failed`, `lockout`,
-    /// `fingerprint`. Every item in the lock's status strip is gated on
-    /// something about the machine (a discharging battery, a caps-lock key,
-    /// notifications waiting), so a capture that does not pin them photographs
-    /// whatever this laptop happened to be doing. #73's criterion is about the
-    /// icons, and an empty strip answers nothing.
+    /// `fingerprint`, `fingerprintdone`. Every item in the lock's status strip
+    /// is gated on something about the machine (a discharging battery, a
+    /// caps-lock key, notifications waiting), so a capture that does not pin
+    /// them photographs whatever this laptop happened to be doing. #73's
+    /// criterion is about the icons, and an empty strip answers nothing.
     ///
-    /// The last three are #96's half of the failure path: each is gated on a
+    /// The last four are #96's half of the failure path: each is gated on a
     /// PAM answer this seam cannot produce, so they are posed through
-    /// `LockAuth.pose`. The three of them take an optional `:text` suffix
+    /// `LockAuth.pose`. The four of them take an optional `:text` suffix
     /// (`failed:Permission denied`) — no commas in it, since commas separate
     /// the tokens.
     readonly property var lockState: (Quickshell.env("CAPTURE_LOCK_STATE") || "quiet").split(",")
@@ -1128,6 +1128,21 @@ ShellRoot {
                             fingerprintActive: true,
                             fingerprintMessage: text || root.lockPosedText[kind]
                         });
+                    } else if (kind === "fingerprintdone") {
+                        // The withdrawn offer (#169). Its own state rather than
+                        // a `:text` on the one above, because the two differ in
+                        // the gate as well as the words: this line is on screen
+                        // with `fingerprintActive` false, which is the binding
+                        // #169 changed and the reason it is worth a picture.
+                        // The longest string that line ever holds, too — and it
+                        // is not written down here: the offer is posed open and
+                        // then really withdrawn, so the words in the picture are
+                        // the ones LockPolicy would give a user rather than a
+                        // copy of them that can drift.
+                        lockAuth.pose({ fingerprintActive: true });
+                        lockAuth.withdrawFingerprint(true);
+                        if (text)
+                            lockAuth.pose({ fingerprintMessage: text });
                     } else if (kind === "notify") {
                         // The bell is gated on the count *and* on the setting
                         // that allows it to be shown at all, so both are set:

@@ -247,14 +247,114 @@ QtObject {
         return /fingerprints?\s+for\s+user/i.test(fprintdListOutput);
     }
 
-    // A fingerprint attempt that fails is re-armed, because a finger landing
-    // crooked is the normal case — but on a cooldown and only so many times.
-    // This is a rate limit on a *device*, not a retry policy on a secret:
-    // faillock still owns how many passwords may be wrong (#30), and a reader
-    // that has started failing every time must not sit there re-arming a PAM
-    // conversation all night on battery (#22 §5).
-    readonly property int fingerprintRetryDelayMs: 1000
-    readonly property int fingerprintMaxRestarts: 5
+    // How many wrong touches the reader gives you — and whose number that is.
+    //
+    // It is pam_fprintd's, not ours (#169). The module re-prompts *inside* a
+    // single PAM conversation, `max-tries` times, whose default and documented
+    // minimum are both 3, and then answers PAM_MAXTRIES. Measured against
+    // fprintd: three `Failed to match fingerprint` messages about 1.1s apart,
+    // then result 11, with open-fprintd logging exactly three
+    // VerifyStart/VerifyStop cycles before Release. The shell had its own
+    // re-arm on top of this and it never once ran, because the branch it lived
+    // behind excluded the only result the module ever returns.
+    //
+    // So the shell does not re-arm at all: the budget is the module's, and the
+    // way to change it would be to pass `max-tries=` where the context is
+    // opened. Re-arming *through* PAM_MAXTRIES is the other option and is a
+    // different, heavier decision — overriding an authentication module's own
+    // refusal — which #169 declined to take without a ticket that says so. The
+    // password path treats faillock's refusal as authoritative for the same
+    // reason (#161, #164).
+    //
+    // The number can still change under us, since it is configured in a file
+    // this shell does not own, and nothing at seam 1 can ask pam_fprintd what
+    // it is today. Two things bind it instead. This constant cannot be edited
+    // without a recorded conversation that spends the new number, because
+    // `fingerprintTouchesSpent` scores a transcribed hardware run against it in
+    // tests/tst_lockpolicy.qml. And a *live* conversation that disagrees is
+    // caught where a live conversation can be seen: LockAuth warns, and the run
+    // sheet's §3 says that warning is the finding.
+    readonly property int fingerprintTouchBudget: 3
+
+    /// How many touches a fingerprint conversation spent, counted out of the
+    /// messages it emitted. Every touch is a pair — a prompt and then its
+    /// answer — and only a failed match is a touch that cost something.
+    ///
+    /// Scores a whole conversation at once, which is what a recorded one at
+    /// seam 1 is; LockAuth counts the same thing a message at a time, through
+    /// `fingerprintTouchMissed` below, because it hears them as they arrive.
+    function fingerprintTouchesSpent(messages: var): int {
+        let spent = 0;
+        for (let i = 0; i < messages.length; i += 1) {
+            if (fingerprintTouchMissed(messages[i]))
+                spent += 1;
+        }
+        return spent;
+    }
+
+    /// Whether one fingerprint message is a touch that missed. Read out of the
+    /// prose, as §2's faillock lines are: PAM_ERROR_MSG is also how the module
+    /// reports a reader it could not claim, which is not a spent touch.
+    function fingerprintTouchMissed(text: string): bool {
+        if (!text)
+            return false;
+        return /failed to match|match failed/i.test(text);
+    }
+
+    /// Whether a fingerprint conversation that closed had spent the budget,
+    /// rather than ending some other way. `maxTries` is the module saying so
+    /// itself and settles it alone; the count is the fallback for a context
+    /// that goes away without an answer.
+    function fingerprintBudgetSpent(maxTries: bool, touches: int): bool {
+        return maxTries || touches >= fingerprintTouchBudget;
+    }
+
+    /// What the fingerprint line says once its conversation is over (#169).
+    ///
+    /// Before this it said nothing: the line came down, the reader's light went
+    /// out, and the light is the hardware rather than the shell. Three wrong
+    /// touches withdrew the offer in silence, with the password field still
+    /// working and nothing on screen to say so. The two cases are worth
+    /// separating — "out of tries" is a lie about a reader that was never
+    /// asked, which is what a PAM error on startup leaves behind.
+    function fingerprintClosingMessage(spentBudget: bool): string {
+        return spentBudget
+            ? "Out of fingerprint tries — use your password"
+            : "Fingerprint unavailable — use your password";
+    }
+
+    // A failed match is the whole feedback channel for a wrong finger, and
+    // pam_fprintd overwrites it faster than the screen can draw it (#168,
+    // measured on hardware): "Failed to match fingerprint" survives 9.7ms
+    // before the re-prompt lands, where a 60Hz frame is 16.7ms. So a failure
+    // holds the line for a spell of its own, long enough to read a short line
+    // and short enough that the reader's own prompt is not gone for long.
+    readonly property int fingerprintErrorDwellMs: 1500
+
+    /// Whether an arriving fingerprint message may replace the one on screen.
+    ///
+    /// `sinceMs` is how long the current message has been up, and matters only
+    /// while an error is holding: a later error is a second event and replaces
+    /// the first at once, and a message arriving over an ordinary prompt has
+    /// nothing to wait for.
+    ///
+    /// Unlike §2's faillock lines, pam_fprintd's failure genuinely is a
+    /// `PAM_ERROR_MSG`, so `PamContext.messageIsError` is what the caller
+    /// passes for both flags.
+    function fingerprintMessageWins(currentIsError: bool, sinceMs: int,
+                                    incomingIsError: bool): bool {
+        if (incomingIsError || !currentIsError)
+            return true;
+        return sinceMs >= fingerprintErrorDwellMs;
+    }
+
+    /// How long a message that lost must be held before it may be shown. It is
+    /// held rather than dropped — the surface still has to end up saying what
+    /// the reader wants next — so this is the interval that flush waits.
+    function fingerprintDwellRemainingMs(sinceMs: int): int {
+        const remaining = fingerprintErrorDwellMs - sinceMs;
+        return remaining > 0 ? remaining : 0;
+    }
 
     // --- notifications -------------------------------------------------------
 

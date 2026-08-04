@@ -11,6 +11,8 @@
 #   tools/lock-harness.sh --keep     # leave the nested session up afterwards,
 #                                    # for typing at it by hand
 #   tools/lock-harness.sh --attempt  # also send one wrong password to real PAM
+#   tools/lock-harness.sh --latch    # also check the lockout latch (#161) —
+#                                    # costs one more wrong password
 #
 # What it asserts, in the order the lock does them:
 #
@@ -23,6 +25,11 @@
 #   3. a PAM conversation actually opens, and prompts
 #   4. the shell survives opening it
 #   5. the field can hear a keyboard
+#
+# and, opt-in, that a lockout survives being announced badly (`--latch`, #161):
+# faillock's own two lines are replayed into the real message path and a real
+# wrong password completes the attempt, because producing the two lines for real
+# means locking the account of whoever ran this.
 #
 # None of that answers a prompt, and that is deliberate. The lock authenticates
 # against the system `login` stack, so a wrong password sent from here is a
@@ -39,10 +46,12 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
 
 readonly WRONG_PASSWORD="definitely-not-the-password-$$"
 ATTEMPT=0
+LATCH=0
 for arg in "$@"; do
     case "$arg" in
         --keep)    NESTED_KEEP=1 ;;
         --attempt) ATTEMPT=1 ;;
+        --latch)   LATCH=1 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -124,6 +133,53 @@ if (( ATTEMPT )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
         nested_fail "nothing was put on screen for the user to read — state: $state"
     else
         nested_pass "the refusal is on screen: $message"
+    fi
+    nested_note "clear the tally with: sudo faillock --user $USER --reset"
+fi
+
+# 4c — the lockout latch (#161). faillock says two things per refusal and only
+# the first one names the lockout; the second ("(10 minutes left to unlock)") is
+# what `message` remembers. Producing that for real costs `deny` failed logins
+# against the account running this, so the script speaks faillock's two lines
+# into the real `noteMessage` and lets a real wrong password complete the
+# attempt. What is under test is entirely on this side of PAM: whether the
+# completed attempt still knows it was a lockout once the last message it heard
+# was not one.
+if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
+    nested_note "replaying faillock's two lines, then one wrong password — this counts against pam_faillock"
+    ipc locktest say 'Account locked due to 3 failed logins' > /dev/null
+    ipc locktest say '(10 minutes left to unlock)' > /dev/null
+
+    if grep -qa 'lock: faillock lockout recognised in a pam message' "$NESTED_SHELL_LOG"; then
+        nested_pass "faillock's refusal was recognised as a lockout"
+    else
+        nested_fail "faillock's refusal was not recognised — the message patterns missed it (#161)"
+    fi
+
+    ipc locktest type "$WRONG_PASSWORD" > /dev/null
+    ipc locktest enter > /dev/null
+    nested_await "$NESTED_SHELL_LOG" 'lock: password attempt (failed|maxTries)' 20 > /dev/null
+
+    state=$(ipc locktest state)
+    if [[ "$state" != *'"lockedOut":'* ]]; then
+        nested_fail "could not read the lock's state — $state"
+    elif [[ "$state" == *'"lockedOut":true'* ]]; then
+        nested_pass "the lockout latched: the attempt completed locked out even though the last message was not one"
+    else
+        nested_fail "the lockout did not latch — the last message overruled it (#161): $state"
+    fi
+
+    # …and a latched lockout is a message that stays up. This is the second
+    # half of #161: the idle retreat took the lockout off the screen after a
+    # couple of seconds, leaving the user typing into a field that cannot win.
+    ipc locktest retreat > /dev/null
+    state=$(ipc locktest state)
+    if ! message=$(lock_message "$state"); then
+        nested_fail "could not read the lock's state — $state"
+    elif [[ -n "$message" ]]; then
+        nested_pass "the lockout survived the retreat: $message"
+    else
+        nested_fail "the retreat cleared a lockout off the screen (#161)"
     fi
     nested_note "clear the tally with: sudo faillock --user $USER --reset"
 fi

@@ -113,6 +113,27 @@ TestCase {
         verify(policy.isLockout("(Account locked due to 4 failed logins) Try again in 8 minutes"));
     }
 
+    function test_faillock_phrases_its_countdown_backwards() {
+        // What a stock Arch pam_faillock actually says (#161): upstream
+        // Linux-PAM's `_("(%d minutes left to unlock)")`, not the
+        // "Try again in N minutes" the first guess at this pattern assumed.
+        verify(policy.isLockout("(10 minutes left to unlock)"));
+        verify(policy.isLockout("(1 minute left to unlock)"));
+        verify(policy.lockedOutBy("failed", "(10 minutes left to unlock)"));
+    }
+
+    function test_a_lockout_latches_for_the_conversation() {
+        // faillock sends two messages and the second one is the unhelpful one:
+        // the refusal, which reads as a lockout, then the countdown. Whichever
+        // arrived last must not be the whole answer, or a lockout announced in
+        // the first message is forgotten by the time the attempt completes.
+        verify(policy.lockedOutBy("failed", "Authentication failure", true));
+        verify(policy.lockedOutBy("failed", "", true));
+        // …and the latch is the only thing that arm adds: a conversation that
+        // never saw one is still not a lockout.
+        verify(!policy.lockedOutBy("failed", "Authentication failure", false));
+    }
+
     function test_an_ordinary_failure_is_not_a_lockout() {
         // A lockout keeps the message on screen and paints it ember, so a
         // false positive would make every typo look unrecoverable.

@@ -38,8 +38,9 @@ Lock the session as you normally would, then:
    - the field **shakes** — four legs (−8px, +8px, −4px, back to 0; the swing
      is `Theme.space2`) over `Theme.motionFast`, 140ms end to end, so watch for
      it — and the fog pulses;
-   - PAM's own message appears under the field, **verbatim** — on a stock Arch
-     stack that is `Authentication failure`, in `Theme.textPrimary`;
+   - a message appears under the field in `Theme.textPrimary` — on a stock Arch
+     stack that is `Authentication failed`, which is the shell's *own* fallback
+     and not PAM's text (see below);
    - the field clears, stays live, and **keeps asking** — no counter, no
      cooldown of the shell's own (#30: the retry limit is faillock's).
 3. Type the right password. It unlocks.
@@ -49,8 +50,31 @@ deliberately dropped and the fog pulse carries the refusal on its own — still
 visibly a refusal, just not a moving one. Check the knob before calling a
 missing shake a bug.
 
-Record: the exact message string. If it is not `Authentication failure`, note
-it — the point of the verbatim path is that the shell never rewrites it.
+**Which message you get, and why it is not the verbatim one.**
+`LockPolicy.failureText` returns PAM's message when there is one and its own
+wording when there is not, and the two are one letter apart:
+
+    if (pamMessage) return pamMessage;      // PAM verbatim
+    case "failed": return "Authentication failed";   // the shell's fallback
+
+Measured on a real session (2026-08-04, #152): the screen said `Authentication
+failed`, the fallback. Arch's `pam_unix` conveys a plain auth failure by return
+code and sends **nothing** through the conversation, so `password.message` is
+empty at completion and the fallback is what renders. The `authentication
+failure` text people remember is what `pam_unix` writes to the journal, not a
+`PAM_ERROR_MSG` to the conversation. This file previously claimed the opposite;
+it was never checked against a real stack until #152.
+
+So §1 exercises the **fallback** branch. The verbatim branch is §2's — `pam_faillock`
+does message through the conversation, which is why its text arrives unrewritten.
+If §2 also shows a shell fallback (`Too many attempts`), then nothing on that
+stack ever reaches the verbatim path, and that is worth its own ticket.
+
+Record: the exact message string, and which of the two branches it is. `failed`
+is the shell's, `failure` is PAM's — one word, opposite conclusions, so read it
+off the screen rather than from memory. The log cannot settle it: the live path
+logs the *kind* only (`password attempt failed`), never the text, and `posed`
+lines come from the capture harness, so a real session emits none.
 
 ## 2. faillock's lockout
 
@@ -94,6 +118,10 @@ Then:
    unlock with the right password.
 
 Record: the message string, the colour, and whether it survived the timeout.
+Also say whether the string is faillock's own or the shell's fallback (`Too many
+attempts`, the `maxTries` arm of `LockPolicy.failureText`) — §1 established that
+this stack's `pam_unix` sends no message, so §2 is the only step left that can
+show the verbatim path working at all.
 
 ## 3. The fingerprint prompt
 

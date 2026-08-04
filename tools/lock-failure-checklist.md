@@ -184,9 +184,13 @@ service (`system.lock.pamConfig`, default `login`) and is untouched by this.
 1. Lock the session.
 2. The prompt draws under the status strip: the `fingerprint-pattern` glyph and
    whatever fprintd said (`Place your finger on the reader`).
-3. Touch the reader with the wrong finger. The line becomes fprintd's failure
-   text and the prompt re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
-   times, `fingerprintRetryDelayMs` apart.
+3. Touch the reader with the wrong finger. What this file used to promise —
+   the line becoming fprintd's failure text, then the prompt re-arming
+   `LockPolicy.fingerprintMaxRestarts` times `fingerprintRetryDelayMs` apart —
+   is wrong in both halves, measured 2026-08-04 (#152). What actually happens
+   is under **Run on this machine** below. Expect a one-frame flicker and no
+   readable failure text, and expect the whole prompt to vanish for good after
+   three wrong touches.
 4. Touch it with the right finger. It unlocks.
 5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint
    context on a keystroke; it closes when PAM answers, when the retries run
@@ -276,6 +280,44 @@ fingerprint context has nothing to open. Create it, then run steps 1-5.
 
 Record: which half you could run. Both halves need saying — "no reader here, so
 the prompt stayed away" is half the criterion.
+
+**Run on this machine (2026-08-04, #152) — enrolled half, at last.** The prompt
+drew under the strip with its glyph, the right finger unlocked, and typing did
+not abort it. Three of the five steps behaved. The other two did not, and both
+answers came from the same measurement.
+
+The `fprintd` PAM service was driven directly, outside the shell, printing every
+conversation message with a millisecond stamp:
+
+    [ 10915.5 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 10925.2 ms] TEXT_INFO  | Place your finger on the fingerprint reader
+    [ 12047.8 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 12058.0 ms] TEXT_INFO  | Place your finger on the fingerprint reader
+    [ 13547.1 ms] ERROR_MSG  | Failed to match fingerprint
+    [ 13548.9 ms] RESULT     | 11 (Have exhausted maximum number of retries)
+
+**The failure text is real and unreadable.** `Failed to match fingerprint`
+arrives, and the re-prompt replaces it **9.7 ms** later — a frame at 60Hz is
+16.7ms, so it never survives to be drawn. `LockAuth`'s `onPamMessage` assigns
+every message unconditionally, so the error loses to whatever follows it. On
+screen this reads as the prompt blinking: not an animation, a label overwritten
+before it could render. The third error lasts 1.8ms before the result arrives,
+so the last one is invisible too.
+
+**The re-arm never runs.** `pam_fprintd` retries internally — `max-tries`,
+default *and minimum* 3 — so all three touches happen inside one conversation,
+and it then returns `PAM_MAXTRIES`. `LockAuth` treats MaxTries as final and
+closes, which means `fingerprintMaxRestarts` (5) and `fingerprintRetryDelayMs`
+(1000) are unreachable on a stock `pam_fprintd`. The real bound is three
+touches, set by a module option this shell does not pass. The close is also
+silent: the message is cleared, the prompt disappears, the reader's light goes
+out, and nothing says fingerprint has stopped being an option. The password
+field carries on working, and a relock resets it.
+
+Both are filed rather than fixed here — #168 for the unreadable failure text,
+#169 for the unreachable re-arm and the silent withdrawal. What makes them the
+same lesson as #161 one section up: the numbers were written against a re-arm
+that PAM's own module never lets happen.
 
 ---
 

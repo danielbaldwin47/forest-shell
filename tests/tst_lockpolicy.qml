@@ -214,14 +214,42 @@ TestCase {
             + "Fingerprints for user daniel: right-index-finger"));
     }
 
+    function test_a_real_enrolled_finger_is_read_out_of_fprintd_list() {
+        // Verbatim from this machine, 2026-08-04 (#152 §3), on the stack that
+        // actually drives its reader: open-fprintd + python-validity, with the
+        // print stored on the sensor. Note the shape the invented case above
+        // misses — the driver name and press/swipe mode trail the user, and the
+        // fingers are a list below rather than a value after the colon. The
+        // match survives it because it anchors on `Fingerprints for user` and
+        // nothing after it, which is worth having pinned rather than assumed.
+        verify(policy.fingerprintEnrolled(
+            "found 1 devices\n"
+            + "Device at /net/reactivated/Fprint/Device/0\n"
+            + "Using device /net/reactivated/Fprint/Device/0\n"
+            + "Fingerprints for user daniel on DBus driver (press):\n"
+            + " - #0: right-index-finger"));
+    }
+
     function test_a_reader_with_nothing_enrolled_is_not_offered() {
-        // fprintd-list exits 0 either way, so the prose is the answer. A
-        // fingerprint prompt nothing can answer is worse than no prompt (#30 —
-        // enrolment UI is post-v1).
+        // The prose is the answer, not the exit code — the probe reads stdout and
+        // never sees the status. A fingerprint prompt nothing can answer is worse
+        // than no prompt (#30 — enrolment UI is post-v1).
         verify(!policy.fingerprintEnrolled(
             "found 1 devices\nUser daniel has no fingers enrolled for Synaptics Sensors"));
         verify(!policy.fingerprintEnrolled("found 0 devices"));
         verify(!policy.fingerprintEnrolled(""));
+    }
+
+    function test_fprintd_with_no_usable_device_is_not_offered() {
+        // Verbatim from this machine, 2026-08-04 (#152 §3): fprintd 1.94.5 and
+        // libfprint 1.94.100 installed, a Synaptics 06cb:009a reader on the USB
+        // bus, and libfprint claims none of it — `fprintd-list "$USER"` prints
+        // this one line on *stdout* and exits 1. Stdout is what the probe
+        // collects, so this string is what fingerprintEnrolled is really handed
+        // on a machine with an unsupported reader, and none of the strings above
+        // is it. #161 was this same shape at §2: patterns written against wording
+        // nobody had checked.
+        verify(!policy.fingerprintEnrolled("No devices available"));
     }
 
     // The recorded conversation (#169): one `fprintd` verify run driven with

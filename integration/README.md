@@ -31,30 +31,43 @@ prefix holding upstream 0.3.0 (#15). The swap makes plain `qs` the real thing
 and retires the prefix.
 
 The obstacle is that `noctalia-qs` declares `Provides: quickshell` and
-`Conflicts: quickshell`, so pacman cannot hold both. Removing it cascades:
+`Conflicts: quickshell`, so pacman cannot hold both.
 
-```
-noctalia-qs
-├─ dms-shell
-│  └─ dms-shell-niri
-└─ noctalia-shell-git
-```
+What this file used to say next was that removing `noctalia-qs` cascades through
+`dms-shell`, `dms-shell-niri` and `noctalia-shell-git`, and that a single
+`pacman -S extra/quickshell` would list all four for removal. Both halves are
+wrong, and the first attempt at the swap (2026-08-04, #152) stopped on the
+second one:
 
-Those are two of the three shells `shell-switch` can currently switch to. After
-the swap its menu still lists them, but `dms run` and `qs -c noctalia-shell`
-will not start. **Ghibli is the uncertain one**: it is a Quickshell *config*,
-launched with `qs -c ghibli`, so after the swap it runs against upstream 0.3.0
-instead of the fork it was written for. It may work unchanged or it may not —
-nothing here has tested that, and it is the reason to do this with a terminal
-already open rather than over a fresh login.
+    :: quickshell-0.3.0-2 and noctalia-qs-0.0.12-1.1 are in conflict. Remove noctalia-qs? [y/N] y
+    error: failed to prepare transaction (could not satisfy dependencies)
+    :: removing noctalia-qs breaks dependency 'noctalia-qs' required by noctalia-shell-git
+
+`pacman -S` resolves a conflict by removing the conflicting package, but it will
+not remove that package's *dependants* for you — it refuses the transaction
+instead. And only one dependant is a real blocker. `dms-shell` depends on the
+virtual name `quickshell`, which `noctalia-qs` merely provides, so the real
+`extra/quickshell` satisfies it just as well; only `noctalia-shell-git` depends
+on `noctalia-qs` by name. So the cascade is one package, and `dms-shell` and
+`dms-shell-niri` survive the swap with their dependency still satisfied:
 
 ```bash
 # From a TTY or an already-open terminal, not from a fresh login.
-sudo pacman -S extra/quickshell        # pacman will list noctalia-qs, dms-shell,
-                                       # dms-shell-niri and noctalia-shell-git
-                                       # for removal — that is expected
+sudo pacman -R noctalia-shell-git      # the one hard dependant; nothing needs it
+sudo pacman -S extra/quickshell        # now the conflict resolves — it will list
+                                       # noctalia-qs for removal, which is expected
 qs --version                           # must say: Quickshell 0.3.0 (or newer)
 ```
+
+Plain `-R`, not `-Rs`: the recursive form would also take `imagemagick`,
+`ffmpeg`, `wlr-randr` and whatever else it judged unneeded. Orphans are
+harmless; `pacman -Qdtq` afterwards if you want them.
+
+That leaves `qs -c noctalia-shell` dead — `noctalia-shell-git` is gone — while
+`dms run`, `qs -c ghibli` and `dms-shell-niri` are all still *installed* but now
+run against upstream 0.3.0 instead of the fork they were written for. Whether
+any of them still works is untested, and that is the reason to do this with a
+terminal already open rather than over a fresh login.
 
 Then retire the prefix, once `qs` answers correctly:
 
@@ -71,14 +84,28 @@ as you leave the prefix on disk.
 ### Rolling back
 
 `noctalia-qs` is still in the `cachyos` repo and a copy is in the local package
-cache, so the swap is reversible:
+cache, so that half is a `pacman -S` away. **`noctalia-shell-git` is not**: it is
+an AUR package, so `pacman -Si` finds nothing and `/var/cache/pacman/pkg` holds
+no copy. What makes it recoverable without a rebuild is the AUR helper's own
+cache, and that is worth confirming is still there *before* removing it:
+
+```bash
+ls ~/.cache/yay/noctalia-shell-git/*.pkg.tar.zst   # check first — this is the rollback
+```
+
+Order matters on the way back: `noctalia-shell-git` depends on `noctalia-qs` by
+name, so `noctalia-qs` has to be in place first.
 
 ```bash
 sudo pacman -S cachyos/noctalia-qs                 # from the repo
 # or, offline:
 sudo pacman -U /var/cache/pacman/pkg/noctalia-qs-0.0.12-1.1-x86_64.pkg.tar.zst
-sudo pacman -S dms-shell noctalia-shell-git        # the dependants, if wanted
+sudo pacman -U ~/.cache/yay/noctalia-shell-git/noctalia-shell-git-4.7.5.r59.g40dd5f54a-1-any.pkg.tar.zst
 ```
+
+If that file is gone, rebuild it from the AUR — `yay -S noctalia-shell-git`.
+`dms-shell` and `dms-shell-niri` are not removed by the swap and need nothing
+here.
 
 ---
 

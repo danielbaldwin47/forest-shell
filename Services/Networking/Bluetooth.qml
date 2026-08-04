@@ -12,7 +12,16 @@ pragma Singleton
 //     Bluetooth.pressDevice(address)
 //
 // Native (#4 §2.8): `Quickshell.Bluetooth` is a real BlueZ client, so nothing
-// here shells out to `bluetoothctl` and nothing polls.
+// here polls, and every verb but one is a method on the device object.
+//
+// The exception is pairing, and #153 is why. BlueZ hands an authentication
+// request to a *pairing agent* on the bus; with no agent registered, an
+// outgoing `Pair()` bonds and is then torn down seconds later — measured on
+// real hardware, `Paired: yes` at t+5s and `Paired: no` at t+9s. Neither this
+// shell nor the upstream module registers one (checked: the binary carries no
+// `org.bluez.Agent1`), and QML cannot export a DBus object to do it. So the
+// pair verb alone is driven through `bluetoothctl`, which registers an agent
+// for as long as it runs — see `pairer` below.
 //
 // **The upstream module is imported under an alias**, for the reason spelled
 // out in Services/Networking/Networking.qml: it exports a singleton called
@@ -32,6 +41,7 @@ pragma Singleton
 import QtQuick
 import Quickshell
 import Quickshell.Bluetooth as Bz
+import Quickshell.Io
 import qs.Core
 
 Singleton {
@@ -113,7 +123,12 @@ Singleton {
                 connected: device.connected === true,
                 paired: device.paired === true,
                 bonded: device.bonded === true,
-                pairing: device.pairing === true,
+                // A pairing this shell is driving is a pairing in flight, and
+                // BlueZ's own flag does not carry it: the request belongs to
+                // the `bluetoothctl` the facade started, not to this object.
+                // Without this the row would read "Not paired" for the whole
+                // attempt and a second press would start a second one.
+                pairing: device.pairing === true || device.address === root.pairingAddress,
                 trusted: device.trusted === true,
                 battery: device.battery,
                 batteryAvailable: device.batteryAvailable === true,
@@ -150,15 +165,36 @@ Singleton {
     function noteDeviceChanges(): void {
         for (const row of root.deviceCandidates) {
             const was = root.deviceHistory[row.address] ?? null;
-            root.deviceHistory[row.address] = {
-                paired: row.paired, connected: row.connected, pairing: row.pairing
+            const now = {
+                paired: row.paired, connected: row.connected, pairing: row.pairing,
+                trusted: row.trusted
             };
+            root.deviceHistory[row.address] = now;
             if (was === null)
                 continue;
-            for (const line of root.policy.settled(row.name, was,
-                                                   root.deviceHistory[row.address]))
+            for (const line of root.policy.settled(row.name, was, now))
                 Logger.log("bluetooth", line);
+            root.grantTrust(row, was, now);
         }
+    }
+
+    /// Mark a device that has just bonded trusted (#153).
+    ///
+    /// Here and not only in the pair script, because a bond can arrive without
+    /// this shell asking for one — a headset put into pairing mode and paired
+    /// from its own side ends up in exactly the state the ticket describes:
+    /// bonded, untrusted, and unable to reconnect itself afterwards.
+    ///
+    /// `trusted` is one of the two writable properties on the upstream device
+    /// object, so this half needs no helper.
+    function grantTrust(row: var, was: var, now: var): void {
+        if (row.live === null || !root.policy.trustNeeded(was, now))
+            return;
+        row.live.trusted = true;
+        // Written back so the next reading does not see the transition again
+        // before BlueZ's own signal has come round.
+        now.trusted = true;
+        Logger.log("bluetooth", root.policy.trustGranted(row.name));
     }
 
     onDeviceCandidatesChanged: {
@@ -232,19 +268,41 @@ Singleton {
     // subsystem most likely to say no, and a press that does nothing and says
     // nothing is #81 exactly.
 
+    /// The address being paired right now, "" when nothing is. One at a time:
+    /// the helper below is one process holding one agent, and BlueZ's own
+    /// pairing is one at a time anyway.
+    property string pairingAddress: ""
+    property string pairingName: ""
+
     /// Pair and connect, which is one gesture: nobody who presses an unpaired
-    /// headset wants to be paired to it and then have to press it again. BlueZ
-    /// connects on its own after a successful pair for most device classes; the
-    /// ones it does not are covered by pressing the row a second time, which by
-    /// then reads "connect".
+    /// headset wants to be paired to it and then have to press it again.
+    ///
+    /// Through `bluetoothctl` rather than `live.pair()`, for the reason the
+    /// header gives: the native call has no agent behind it, and #153 is what
+    /// that looks like on real hardware — a bond that appears and is torn down
+    /// four seconds later, with the log holding the one hopeful line this
+    /// function writes before it starts.
     function pairDevice(address: string): void {
         const row = root.rowFor(address);
         if (row === null || row.live === null) {
             Logger.warn("bluetooth", root.policy.deviceRefused(address, "no such device"));
             return;
         }
+        if (root.pairingAddress !== "") {
+            Logger.warn("bluetooth",
+                        root.policy.deviceRefused(row.name, "already pairing with "
+                                                  + root.pairingName));
+            return;
+        }
         Logger.log("bluetooth", root.policy.asked("pair", row.name));
-        row.live.pair();
+        root.pairingAddress = row.address;
+        root.pairingName = row.name;
+        // Re-enabled and not merely started: the previous attempt turned
+        // writing off on its way out, and a helper that cannot be written to is
+        // a helper that registers no agent.
+        pairer.stdinEnabled = true;
+        pairer.running = true;
+        pairTimeout.restart();
     }
 
     function cancelPairing(address: string): void {
@@ -254,7 +312,150 @@ Singleton {
             return;
         }
         Logger.log("bluetooth", root.policy.asked("cancel pairing with", row.name));
+        // Both halves: `CancelPairing` is what stops a request already on the
+        // bus, whoever made it, and ending the helper is what takes its agent
+        // back off the bus so a later attempt can register a fresh one.
         row.live.cancelPair();
+        if (root.pairingAddress === address)
+            root.endPairing();
+    }
+
+    // --- the pairing agent (#153) --------------------------------------------
+
+    /// `bluetoothctl`, driven for the length of one pairing and no longer.
+    ///
+    /// Held open for the whole attempt on purpose: the agent lives as long as
+    /// this process does, and a process that exits when its script has been
+    /// written is an agent that goes away halfway through the authentication it
+    /// was registered to answer. What ends it is an answer on stdout, a cancel,
+    /// or the timeout below.
+    Process {
+        id: pairer
+
+        command: ["bluetoothctl"]
+        stdinEnabled: true
+
+        onStarted: {
+            for (const line of root.policy.pairScript(root.pairingAddress))
+                pairer.write(line + "\n");
+        }
+
+        // bluetoothctl narrates the whole scan while it waits, and says the two
+        // things that matter on the same stream.
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: line => root.readPairing(line)
+        }
+
+        stderr: SplitParser {
+            splitMarker: "\n"
+            onRead: line => root.readPairing(line)
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            pairTimeout.stop();
+            if (root.pairingAddress === "")
+                return;     // an answer already ended it — nothing to report
+            const name = root.pairingName;
+            root.forgetPairingFlag(root.pairingAddress);
+            root.pairingAddress = "";
+            root.pairingName = "";
+            Logger.warn("bluetooth", root.policy.paired(name, {
+                ok: false, reason: "bluetoothctl exited " + exitCode
+            }));
+        }
+    }
+
+    /// A pairing nobody ever answers — the headset that was put down, the
+    /// device that stopped advertising mid-attempt. Without this the row reads
+    /// "Pairing…" until the shell restarts.
+    Timer {
+        id: pairTimeout
+
+        interval: 60000
+        onTriggered: {
+            if (root.pairingAddress === "")
+                return;
+            const name = root.pairingName;
+            root.forgetPairingFlag(root.pairingAddress);
+            root.pairingAddress = "";
+            root.pairingName = "";
+            Logger.warn("bluetooth", root.policy.paired(name, { ok: false,
+                                                                reason: "timed out" }));
+            root.stopPairer();
+        }
+    }
+
+    /// One line of the helper's output, which is almost always nothing.
+    function readPairing(line: string): void {
+        if (root.pairingAddress === "")
+            return;
+        const outcome = root.policy.pairOutcome(line);
+        if (!outcome.done)
+            return;
+
+        const address = root.pairingAddress;
+        const name = root.pairingName;
+        root.pairingAddress = "";
+        root.pairingName = "";
+        root.forgetPairingFlag(address);
+        pairTimeout.stop();
+
+        if (outcome.ok)
+            Logger.log("bluetooth", root.policy.paired(name, outcome));
+        else
+            Logger.warn("bluetooth", root.policy.paired(name, outcome));
+        root.stopPairer();
+
+        // The second half of the one gesture. BlueZ connects on its own after a
+        // pair for most device classes and this is the case where it does not;
+        // asking twice costs an `AlreadyConnected` error on the bus, and not
+        // asking costs a headset that is bonded and silent.
+        if (outcome.ok)
+            root.connectAfterPair(address);
+    }
+
+    function connectAfterPair(address: string): void {
+        const row = root.rowFor(address);
+        if (row === null || row.live === null || row.connected)
+            return;
+        Logger.log("bluetooth", root.policy.asked("connect", row.name));
+        row.live.connect();
+    }
+
+    /// Take the in-flight flag back out of the last reading, so the pairing
+    /// this shell drove is not also reported as a transition next door.
+    ///
+    /// `settled` watches the flag going down without a bond and calls that a
+    /// pairing failure (#141) — which is right when BlueZ is the one pairing,
+    /// and a second line saying less when the helper is: it has already
+    /// written the same failure with the reason attached. The flag going down
+    /// after a *cancel* would be a failure line for something the user asked
+    /// for on purpose.
+    function forgetPairingFlag(address: string): void {
+        const seen = root.deviceHistory[address];
+        if (seen)
+            seen.pairing = false;
+    }
+
+    /// End the helper and take its agent off the bus. `running = false`
+    /// terminates rather than closing stdin, for the reason
+    /// Services/System/LogindBridge.qml measured: 0.3.0's `stdinEnabled = false`
+    /// stops writing to the child rather than closing its input, so a child
+    /// waiting on stdin outlives it.
+    function stopPairer(): void {
+        pairer.stdinEnabled = false;
+        pairer.running = false;
+    }
+
+    /// Give up on the pairing in flight without claiming an outcome for it —
+    /// the cancel path, where the line has already been written.
+    function endPairing(): void {
+        pairTimeout.stop();
+        root.forgetPairingFlag(root.pairingAddress);
+        root.pairingAddress = "";
+        root.pairingName = "";
+        root.stopPairer();
     }
 
     function connectDevice(address: string): void {

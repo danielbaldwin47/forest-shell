@@ -148,6 +148,62 @@ TestCase {
         verify(policy.suppressed("", true));
     }
 
+    // --- when the change is the shell's own ------------------------------------
+
+    function test_a_dim_the_idle_ladder_asked_for_does_not_show() {
+        // #175. The ladder dims because nobody is at the machine; announcing
+        // that to the screen it just dimmed is a pill, an animation and a dwell
+        // spent on an event whose premise is that there is nobody to see it.
+        // Services/System/Idle.qml stamps the moment it asks, and this is the
+        // question the OSD puts to the stamp.
+        verify(policy.attributedToIdle("brightness", 10000, 10010));
+    }
+
+    function test_a_change_with_no_claim_behind_it_shows() {
+        // The attribution is to the *source*, not the value, and the source is
+        // a stamp: with no claim standing, the same percent by the same route
+        // is somebody's finger and pops. `0` is Idle.qml's "the backlight is
+        // the user's".
+        verify(!policy.attributedToIdle("brightness", 0, 10010));
+    }
+
+    function test_a_user_change_after_the_claim_lapses_shows() {
+        // The other half of acceptance 1, and the honest version of it: a
+        // brightness key at the ladder's own dim level pops, provided it is
+        // outside the window. Inside it, it does not — the claim covers a
+        // span and not a value — so the second line pins that cost here rather
+        // than leaving it to be discovered.
+        const dimmedAt = 10000;
+        verify(!policy.attributedToIdle("brightness", dimmedAt,
+                                        dimmedAt + policy.attributionMs + 1));
+        verify(policy.attributedToIdle("brightness", dimmedAt, dimmedAt + 500));
+    }
+
+    function test_the_attribution_expires() {
+        // A stamp that never went stale would silence brightness for the rest
+        // of the session. The window has to outlast the whole round trip — a
+        // Process spawn, a sysfs write, the panel's own fade, and the FileView
+        // reload that reports it — which is why it is far wider than the 10ms
+        // #175 measured between the set and the pop.
+        verify(policy.attributedToIdle("brightness", 10000, 10000 + policy.attributionMs));
+        verify(!policy.attributedToIdle("brightness", 10000, 10000 + policy.attributionMs + 1));
+    }
+
+    function test_only_brightness_is_attributable_to_the_ladder() {
+        // The ladder touches one channel. A volume change during a dim is
+        // somebody's keypress, and silencing it would be this ticket's bug
+        // pointed at the other two channels.
+        verify(!policy.attributedToIdle("volume", 10000, 10010));
+        verify(!policy.attributedToIdle("mic", 10000, 10010));
+    }
+
+    function test_a_stamp_from_the_future_is_not_an_attribution() {
+        // Clocks step. A stamp ahead of `now` is not evidence the ladder just
+        // acted, and treating it as one would silence brightness until the
+        // clock caught up.
+        verify(!policy.attributedToIdle("brightness", 10000, 9999));
+    }
+
     // --- what it says ---------------------------------------------------------
 
     function test_the_volume_glyph_agrees_with_the_audio_facade() {
@@ -344,5 +400,7 @@ TestCase {
         compare(policy.suppressedBy("lock"), "suppressed while lock is open");
         compare(policy.armed("brightness", 60), "brightness armed at 60% — not showing");
         compare(policy.refused("nonesuch"), "no such channel: nonesuch");
+        compare(policy.notShown("brightness", 10),
+                "brightness 10% — the idle ladder's own change, not showing");
     }
 }

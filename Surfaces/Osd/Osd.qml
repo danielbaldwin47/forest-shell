@@ -145,8 +145,17 @@ Singleton {
             // Logged, because "the OSD did not pop" has two causes — armed, or
             // broken — and seam 2 has to be able to tell them apart (#81).
             Logger.log("osd", root.policy.armed(channel, state.percent));
-        else if (verdict === "pop")
+        else if (verdict === "pop") {
+            // Checked here and not in `pop()` so that the IPC handler below
+            // stays an honest way to put the pill up: a harness asking for a
+            // pop is asking, and only a change arriving through a facade can
+            // be somebody else's doing.
+            if (root.policy.attributedToIdle(channel, Idle.backlightClaimedAt, now)) {
+                Logger.log("osd", root.policy.notShown(channel, state.percent));
+                return;
+            }
             root.pop(channel, state.percent, state.muted);
+        }
     }
 
     // --- showing it -----------------------------------------------------------

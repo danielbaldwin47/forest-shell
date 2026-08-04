@@ -87,6 +87,27 @@ Singleton {
     readonly property bool dimmed: root.dimmedFrom >= 0
     property bool blanked: false
 
+    /// When this file last asked the backlight to move, or 0 for never (#175).
+    ///
+    /// Published rather than kept private because the OSD's whole question is
+    /// "did somebody ask for this?", and the shell already knows the answer
+    /// here — Surfaces/Osd/OsdPolicy.qml's `attributed()` is what reads it. A
+    /// stamp and not a flag: `Backlight.setPercent` writes sysfs through a
+    /// Process and the level is read back off `actual_brightness` as the panel
+    /// fades, so the change lands well after the call and in more than one
+    /// piece. Nothing clears it — an old stamp is outside the window, which is
+    /// the same as no stamp.
+    property real backlightClaimedAt: 0
+
+    /// The only way this file touches the backlight, so that the stamp is a
+    /// property of the act rather than of remembering to write it: a third
+    /// rung that dimmed on its own would otherwise put #175 back with nothing
+    /// failing.
+    function claimBacklight(percent: int): void {
+        root.backlightClaimedAt = Date.now();
+        Backlight.setPercent(percent);
+    }
+
     // --- dim ------------------------------------------------------------------
 
     IdleRung {
@@ -109,7 +130,7 @@ Singleton {
         }
         root.dimmedFrom = Backlight.percent;
         const level = root.policy.dimLevel(root.settings);
-        Backlight.setPercent(level);
+        root.claimBacklight(level);
         Logger.log("idle", root.policy.reached("dim", "backlight " + root.dimmedFrom
                                                + "% → " + level + "%"));
     }
@@ -123,7 +144,7 @@ Singleton {
             return;
         const restore = root.dimmedFrom;
         root.dimmedFrom = -1;
-        Backlight.setPercent(restore);
+        root.claimBacklight(restore);
         Logger.log("idle", root.policy.woke("dim", "backlight back to " + restore + "%"));
     }
 

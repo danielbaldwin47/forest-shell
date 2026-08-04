@@ -139,6 +139,48 @@ QtObject {
         return locked === true || drawer === "controlcenter";
     }
 
+    /// How long the idle ladder's claim on the backlight stands (#175).
+    ///
+    /// The window has to outlast the whole round trip, because the change the
+    /// OSD sees is several steps removed from the ask: Services/Hardware/
+    /// Backlight.qml spawns a Process to write sysfs, and `percent` is read
+    /// back off `actual_brightness` through a FileView the process reloads
+    /// when it exits — with `watchChanges` free to deliver more readings after
+    /// it if the driver touches the file again while the panel settles. #175
+    /// measured 10ms from the set to the pop on an idle machine; this is two
+    /// orders of margin on a loaded one.
+    ///
+    /// The cost of the width is one silent brightness keypress: a user who
+    /// reaches for the key inside a second and a half of a dim or a wake gets
+    /// the level without the pill. The cost of a narrow window is a late
+    /// reading of the shell's own change popping the pill this ticket is
+    /// about.
+    readonly property int attributionMs: 1500
+
+    /// Whether this change is the idle ladder's own doing rather than the
+    /// user's — `claimedAtMs` is Services/System/Idle.qml's stamp from the
+    /// moment it asked for the level, or 0 for "the backlight is the user's".
+    ///
+    /// Named for the one claimant there is. The ladder is the only thing in
+    /// the shell that moves a value nobody asked it to move: the control
+    /// centre's sliders, the keys and the IPC nudges are all somebody's
+    /// finger, and an OSD is what they are for.
+    ///
+    /// The attribution is to the *source*, not the value. The dim level is one
+    /// the user can also ask for, and a brightness key that lands on it is
+    /// still news; what is not news is the shell telling a screen it dimmed
+    /// because nobody was watching that it has dimmed. The undim is suppressed
+    /// on the same stamp for the reason #175 argues: somebody is there by
+    /// then, but the brightness going back to where they left it is not
+    /// something they need told either.
+    function attributedToIdle(channel: string, claimedAtMs: real, nowMs: real): bool {
+        if (channel !== "brightness" || !(claimedAtMs > 0))
+            return false;
+        const since = nowMs - claimedAtMs;
+        // A stamp ahead of `now` is a stepped clock, not evidence.
+        return since >= 0 && since <= policy.attributionMs;
+    }
+
     // --- what it says ---------------------------------------------------------
 
     /// The glyph. The volume ladder is Services/Media/AudioPolicy.qml's, in
@@ -259,6 +301,11 @@ QtObject {
 
     function suppressedBy(what: string): string {
         return "suppressed while " + what + " is open";
+    }
+
+    function notShown(channel: string, percent: var): string {
+        return channel + " " + policy.clampPercent(percent)
+            + "% — the idle ladder's own change, not showing";
     }
 
     function armed(channel: string, percent: var): string {

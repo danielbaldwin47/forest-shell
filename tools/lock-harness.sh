@@ -182,6 +182,19 @@ if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
         nested_fail "the lockout is dressed as an ordinary message until the attempt completes (#164): $state"
     fi
 
+    # And it is `lockedOut` alone that bought that, which is the whole of #164:
+    # faillock speaks in `pam_info`, so there is no error flag under this
+    # message to fall back on. Asserted because without it the check above
+    # passes on a lockout said as an error too — `messageTone` answers
+    # "lockout" either way — and the seam would stop modelling the bug.
+    if ! errored=$(lock_flag "$state" messageIsError); then
+        nested_fail "could not read the lock's state — $state"
+    elif [[ "$errored" == false ]]; then
+        nested_pass "and it is not riding on an error flag — faillock's is a pam_info"
+    else
+        nested_fail "the harness said faillock's line as an error — the #164 window is unreachable from here: $state"
+    fi
+
     ipc locktest clearmessage > /dev/null
     state=$(ipc locktest state)
     if ! message=$(lock_message "$state"); then

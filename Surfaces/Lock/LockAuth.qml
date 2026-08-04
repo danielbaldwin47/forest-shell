@@ -124,6 +124,13 @@ Scope {
         // promoted mid-conversation would otherwise stand until the next
         // `begin()` cleared it: a fingerprint can let someone in while
         // pam_faillock is still refusing their password.
+        //
+        // Logged for the same reason #161 logged the raising: from a real
+        // session's log, "heard a lockout" and "still showing one" are two
+        // different questions, and a flag that is only ever set in the log
+        // answers neither.
+        if (priv.lockedOut)
+            Logger.log("lock", "faillock lockout dropped with the lock");
         priv.lockedOut = false;
         priv.lockoutSeen = false;
         root.clear();

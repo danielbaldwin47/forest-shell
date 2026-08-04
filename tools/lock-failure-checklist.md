@@ -204,11 +204,35 @@ that verbatim string; before this run every fingerprint case in it was invented
 wording, which is exactly the setup that produced #161 at §2.
 
 The enrolled half is still open, and on *this* machine it is blocked by driver
-support rather than by hardware: 06cb:009a is not in upstream libfprint's
-tables, and the only route to it is a Touch-OEM-Driver stack
-(`libfprint-2-tod1-*`) that replaces the system libfprint. That is a system
-decision, not a test step — either take it deliberately or run the enrolled
-half on a machine whose reader libfprint already supports.
+support rather than by hardware. libfprint has no driver for 06cb:009a —
+enumerated twice, `fprintd` as root and libfprint's own typelib as the user,
+zero devices both times, and enumeration is descriptor matching that happens
+before any device is opened, so this is not permissions and not a sensor left
+in a bad state.
+
+The reader is not a libfprint device at all. 06cb:009a is a Validity-family
+sensor, and the driver that knows it is **python-validity** (`DEV_9a = (0x06cb,
+0x009a)` in `validitysensor/usb.py`), which ships its own daemon,
+`open-fprintd`, implementing fprintd's D-Bus API in fprintd's place. That is
+the stack this machine ran before its current install — CachyOS here dates to
+2026-04-09 and its pacman log, unrotated, first installs `fprintd` on
+2026-08-03.
+
+**What that means for the probe, and it is not obvious.** On the
+python-validity stack the *daemon* is replaced but the *client* is not:
+`fprintd-list` stays the same binary from fprintd's own client tooling, so its
+output format — the `Fingerprints for user` line `fingerprintEnrolled` matches
+on — is unchanged, and `LockAuth`'s probe keeps working. The thing to check
+before trusting a green result there is that the client is actually installed:
+`open-fprintd` pulls it in as a separate package, and a stack that has the
+daemon without the client gives the probe nothing to launch, which reads as
+"nothing enrolled" no matter how many fingers are.
+
+Running the enrolled half here therefore means installing `open-fprintd` +
+`python-validity` (AUR), which displaces `fprintd` and needs the sensor's
+firmware extracted from a vendor installer. That is a deliberate system change,
+not a test step — take it knowingly, or run the enrolled half on a machine
+whose reader libfprint already supports.
 
 Record: which half you could run. Both halves need saying — "no reader here, so
 the prompt stayed away" is half the criterion.

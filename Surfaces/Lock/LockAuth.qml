@@ -304,6 +304,12 @@ Scope {
         priv.fingerprintHeldIsError = isError;
         fingerprintDwell.interval = policy.fingerprintDwellRemainingMs(sinceMs);
         fingerprintDwell.restart();
+        // Logged for #81's reason: this is a new lifecycle — a message
+        // suppressed now and put up as much as a dwell later — and on hardware
+        // a fingerprint line stuck on a stale failure and a fingerprint line
+        // nothing ever sent to are the same screen without this.
+        Logger.log("lock", "fingerprint message held " + fingerprintDwell.interval
+                   + "ms behind a failure");
     }
 
     /// Put a fingerprint message on screen, remembering what it was and when —
@@ -347,8 +353,14 @@ Scope {
             priv.lockedOut = fields.lockedOut;
         if (fields.fingerprintActive !== undefined)
             priv.fingerprintActive = fields.fingerprintActive;
+        // Through the same door a real message uses, so a posed one is not a
+        // message with no stamp beside it (#168): `fingerprintMessageAt` is
+        // what the *next* message asks about, and two writers of one state
+        // where only one keeps the books is how an invariant survives by
+        // accident.
         if (fields.fingerprintMessage !== undefined)
-            priv.fingerprintMessage = fields.fingerprintMessage;
+            root.showFingerprintMessage(fields.fingerprintMessage,
+                                        fields.fingerprintMessageIsError === true);
         Logger.log("lock", "posed " + JSON.stringify(fields));
     }
 

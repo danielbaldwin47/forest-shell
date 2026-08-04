@@ -255,7 +255,7 @@ if (( ATTEMPT || LATCH )); then
     nested_note "clear the tally with: sudo faillock --user $USER --reset"
 fi
 
-# 4c — a failed finger stays readable (#168). The conversation itself needs a
+# 4d — a failed finger stays readable (#168). The conversation itself needs a
 # reader and a finger, so it cannot happen here; but which of two messages ends
 # up on screen is decided in `noteFingerprintMessage`, which hears text. So the
 # two lines the hardware trace recorded are replayed back to back — pam_fprintd
@@ -277,6 +277,10 @@ fi
 # …and it is held, not dropped: the reader's own prompt has to come back once
 # the failure has had its dwell, or the line goes stale on a device that is
 # still waiting for a finger.
+# Longer than `LockPolicy.fingerprintErrorDwellMs` (1500ms) and no longer than
+# it has to be. Coupled to that number on purpose: raise the dwell past this
+# and the check below asserts the opposite of what it says, so they move
+# together.
 sleep 2
 state=$(ipc locktest state)
 if ! message=$(fingerprint_message "$state"); then
@@ -285,6 +289,15 @@ elif [[ "$message" == "$fp_prompt" ]]; then
     nested_pass "the prompt returned once the failure had been read: $message"
 else
     nested_fail "the held prompt never went up — the fingerprint line is stuck (#168): $state"
+fi
+
+# …and the hold said so in the log. On hardware this is the only way to tell a
+# line stuck on a stale failure from a line nothing ever sent to — #81's
+# argument, and the state above cannot make it after the flush has happened.
+if grep -qa 'lock: fingerprint message held' "$NESTED_SHELL_LOG"; then
+    nested_pass "the hold is in the log: $(grep -a -m1 'lock: fingerprint message held' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the hold left no trace in the log — a stuck fingerprint line would be undiagnosable (#81)"
 fi
 
 # 5 — the field can hear a keyboard. The IPC above deliberately bypasses it,

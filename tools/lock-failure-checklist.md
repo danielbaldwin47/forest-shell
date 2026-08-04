@@ -162,8 +162,15 @@ least one. `system.lock.fingerprint` must also be on.
 1. Lock the session.
 2. The prompt draws under the status strip: the `fingerprint-pattern` glyph and
    whatever fprintd said (`Place your finger on the reader`).
-3. Touch the reader with the wrong finger. The line becomes fprintd's failure
-   text and the prompt re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
+3. Touch the reader with the wrong finger. **Read the line before it changes**
+   — this is #168's acceptance, and the only place it can be checked. It must
+   say `Failed to match fingerprint` long enough to be read
+   (`LockPolicy.fingerprintErrorDwellMs`, 1.5s), and then go back to the
+   prompt on its own. Before #168 it did neither: pam_fprintd re-prompts 9.7ms
+   after the failure, inside one 16.7ms frame, so the failure was never drawn
+   and a wrong finger looked identical to a finger the reader never saw. A
+   blink with nothing readable in it is the regression.
+   The prompt then re-arms — bounded, `LockPolicy.fingerprintMaxRestarts`
    times, `fingerprintRetryDelayMs` apart.
 4. Touch it with the right finger. It unlocks.
 5. Start typing instead. The prompt **stays** — nothing aborts the fingerprint

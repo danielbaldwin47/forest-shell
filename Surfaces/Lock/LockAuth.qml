@@ -119,6 +119,13 @@ Scope {
         fingerprint.abort();
         priv.fingerprintActive = false;
         priv.fingerprintMessage = "";
+        // The latch dies with the lock it was raised on (#164). Both success
+        // paths — password and fingerprint — come through here, and a lockout
+        // promoted mid-conversation would otherwise stand until the next
+        // `begin()` cleared it: a fingerprint can let someone in while
+        // pam_faillock is still refusing their password.
+        priv.lockedOut = false;
+        priv.lockoutSeen = false;
         root.clear();
     }
 
@@ -230,15 +237,31 @@ Scope {
         }
     }
 
-    /// Remember that faillock has refused, for the rest of this conversation.
+    /// Remember that faillock has refused, for the rest of this conversation —
+    /// and say so on screen from this moment rather than from the completion of
+    /// whatever attempt is in flight.
     ///
     /// Split out of `noteMessage` because it is the half that cannot wait: the
     /// message handler below returns early on a held Enter, and a lockout heard
     /// on that path would otherwise be forgotten before the attempt completes.
+    ///
+    /// Presentation is promoted here too (#164). faillock announces a locked
+    /// account in pam_faillock's *preauth* phase — before pam_unix puts up the
+    /// password prompt — so leaving `lockedOut` for `onCompleted` left the whole
+    /// span in which the user types their password believing the account was
+    /// open: the lockout line came up `quiet` (a pam_info is not a
+    /// `PAM_ERROR_MSG`, so `messageTone` had nothing else to go on) and
+    /// `clearMessage` was free to retreat it. That window is however long
+    /// someone takes to type, and it is exactly the window in which they are
+    /// deciding whether to bother.
+    ///
+    /// `onCompleted` re-decides this flag below and is not fighting this: it
+    /// passes `lockoutSeen`, which is still true when it asks.
     function latchLockout(text: string): void {
         if (priv.lockoutSeen || !policy.isLockout(text))
             return;
         priv.lockoutSeen = true;
+        priv.lockedOut = true;
         // Logged because #161 was diagnosed from a log that could not
         // distinguish "faillock never said it" from "we did not hear it":
         // ~60 attempts, every one logged `password attempt failed`.

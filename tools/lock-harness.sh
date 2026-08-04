@@ -11,8 +11,10 @@
 #   tools/lock-harness.sh --keep     # leave the nested session up afterwards,
 #                                    # for typing at it by hand
 #   tools/lock-harness.sh --attempt  # also send one wrong password to real PAM
-#   tools/lock-harness.sh --latch    # also check the lockout latch (#161) —
-#                                    # costs one more wrong password
+#   tools/lock-harness.sh --latch    # also check the lockout latch (#161) and
+#                                    # that it is acted on the moment it is
+#                                    # heard (#164) — costs one more wrong
+#                                    # password
 #
 # What it asserts, in the order the lock does them:
 #
@@ -26,10 +28,12 @@
 #   4. the shell survives opening it
 #   5. the field can hear a keyboard
 #
-# and, opt-in, that a lockout survives being announced badly (`--latch`, #161):
-# faillock's own two lines are replayed into the real message path and a real
-# wrong password completes the attempt, because producing the two lines for real
-# means locking the account of whoever ran this.
+# and, opt-in, that a lockout survives being announced badly (`--latch`, #161)
+# and is dressed as a lockout from the moment it is announced rather than from
+# the end of the attempt it interrupted (#164): faillock's own two lines are
+# replayed into the real message path and a real wrong password completes the
+# attempt, because producing the two lines for real means locking the account of
+# whoever ran this.
 #
 # None of that answers a prompt, and that is deliberate. The lock authenticates
 # against the system `login` stack, so a wrong password sent from here is a
@@ -161,6 +165,31 @@ if (( LATCH )) && kill -0 "$NESTED_SHELL_PID" 2>/dev/null; then
         nested_pass "faillock's refusal was recognised as a lockout"
     else
         nested_fail "faillock's refusal was not recognised — the message patterns missed it (#161)"
+    fi
+
+    # …and it is acted on *now*, not at the end of the attempt the user is
+    # still typing (#164). faillock speaks in preauth, before pam_unix prompts,
+    # so everything between here and the completion below is real time with a
+    # live field in it. Read the state before anything is submitted: `lockedOut`
+    # is what buys the message ember instead of `quiet`, and what stops the
+    # retreat.
+    state=$(ipc locktest state)
+    if ! locked=$(lock_flag "$state" lockedOut); then
+        nested_fail "could not read the lock's state — $state"
+    elif [[ "$locked" == true ]]; then
+        nested_pass "the lockout is on screen as one before the attempt completes"
+    else
+        nested_fail "the lockout is dressed as an ordinary message until the attempt completes (#164): $state"
+    fi
+
+    ipc locktest clearmessage > /dev/null
+    state=$(ipc locktest state)
+    if ! message=$(lock_message "$state"); then
+        nested_fail "could not read the lock's state — $state"
+    elif [[ -n "$message" ]]; then
+        nested_pass "the retreat cannot take it off screen mid-attempt: $message"
+    else
+        nested_fail "the retreat cleared a lockout the attempt had not completed yet (#164)"
     fi
 
     # Counted rather than awaited: `nested_await` greps the log from the start,

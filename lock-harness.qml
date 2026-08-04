@@ -68,8 +68,15 @@ ShellRoot {
         /// It cannot let anyone in: the only state it reaches is the message
         /// under the field and the lockout latch, and a latched lockout makes
         /// the lock *refuse* harder (#30 — `lockedOut` is presentation).
+        ///
+        /// Not an error message, which is faillock's own doing: it announces a
+        /// locked account with `pam_info` and not `PAM_ERROR_MSG`. Said as an
+        /// error here, the harness would hand the surface a colour the real
+        /// thing never gives it, and #164 — a lockout dressed `quiet` for as
+        /// long as it takes to type a password — would be unreachable from this
+        /// seam.
         function say(text: string): bool {
-            lock.auth.noteMessage(text, true, false);
+            lock.auth.noteMessage(text, false, false);
             return true;
         }
 

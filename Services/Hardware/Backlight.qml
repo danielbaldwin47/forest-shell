@@ -32,7 +32,7 @@ pragma Singleton
 // later, and a key press that stepped from the 61%). So the value is re-read on
 // demand: `watch()`/`release()` while a surface is showing a level, and a read
 // before a step that is not already ramping. Nothing ticks while no surface is
-// showing brightness.
+// showing brightness, and the read itself is synchronous — see the FileView.
 //
 // Two things this file does that #78 paid for:
 //
@@ -92,9 +92,6 @@ Singleton {
         root.applyQueued();
     }
 
-    /// The direction of a step waiting for a fresh read, or 0 for none.
-    property int pendingStep: 0
-
     function step(direction: int) {
         if (root.queued >= 0) {
             // Stepped off the *queued* value while one is in flight, so holding
@@ -102,24 +99,16 @@ Singleton {
             root.setPercent(root.policy.stepped(root.queued, direction));
             return;
         }
-        // Idle, so the cached value is only as good as the last read and #186
-        // is the case where it is not good at all — anything may have moved the
-        // panel since. Ask, and step when the answer arrives: `reload()` is
-        // asynchronous even with `blockLoading` set (measured — `text()`
-        // immediately after it still returns the previous contents, and the new
-        // one arrives with `loaded`), so stepping now would step from exactly
-        // the stale value the read was for.
-        root.pendingStep = direction;
-        if (!root.refresh())
-            root.takePendingStep();
-    }
-
-    function takePendingStep(): void {
-        if (root.pendingStep === 0)
-            return;
-        const direction = root.pendingStep;
-        root.pendingStep = 0;
-        root.setPercent(root.policy.stepped(root.percent, direction));
+        // Idle, so the cached value is only as good as the last read — and #186
+        // is the case where it is not good at all, because anything may have
+        // moved the panel since. Ask first, and step from the answer rather
+        // than from `percent`: the read is synchronous but the *binding* on it
+        // is not (measured — after a blocking `reload()`, `text()` is the new
+        // contents while a property bound to it is still the old one), so a
+        // step off `percent` here would be a step off the value the read was
+        // for.
+        root.refresh();
+        root.setPercent(root.policy.stepped(root.reading(), direction));
     }
 
     function applyQueued() {
@@ -179,8 +168,16 @@ Singleton {
     property int watchers: 0
 
     /// Re-read the panel if the last read is old enough to be worth doubting.
-    /// Answers whether a read was actually started — the caller that needs the
-    /// value *now* has to know whether to wait for `loaded` or use what it has.
+    /// Synchronous: `percent` is the panel's own by the time this returns.
+    /// Answers whether it actually read, which is a log line's worth of
+    /// difference and nothing a caller has to wait on.
+    /// The panel's level as the file says it is *now*, rather than as the
+    /// bindings have caught up with. Same arithmetic as `percent`, off the same
+    /// read; what differs is only that this one cannot be a frame behind.
+    function reading(): int {
+        return root.policy.percent(root.policy.number(sysfs.text()), root.max);
+    }
+
     function refresh(): bool {
         if (!root.available || !root.policy.readDue(Date.now(), root.lastReadAt))
             return false;
@@ -257,11 +254,15 @@ Singleton {
         watchChanges: true
         printErrors: false
 
-        // A step that asked for a fresh read is finished here, on the read
-        // rather than on the call — see `step()`. `loadFailed` too, because a
-        // step swallowed by an unreadable file is a key that did nothing.
-        onLoaded: root.takePendingStep()
-        onLoadFailed: root.takePendingStep()
+        // Read on this thread rather than on a pool one, which is what makes
+        // `refresh()` answer rather than promise: measured, a `reload()` without
+        // this is asynchronous even with `blockLoading` set — `text()`
+        // immediately after it still returns the previous contents and the new
+        // one arrives with `loaded`, so a step would compute from exactly the
+        // stale value the read was for. Blocking is affordable because the file
+        // is one kernel attribute, four bytes of it, already in memory; the
+        // thread hop it avoids is the more expensive half.
+        blockAllReads: true
     }
 
     onPercentChanged: if (root.available)

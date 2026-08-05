@@ -457,11 +457,12 @@ expect_since "$mark" 'control-centre: slider [a-z]+ built' \
 # Do Not Disturb and Theme are the two controls that change a service without
 # touching the caller's hardware — 8f's problem, and the reason it restores
 # radios — so they are the ones driven here. Each is pressed twice, which puts
-# it back and doubles the number of changes. Theme is the better of the two by
-# accident: it writes a config key, and Core/Config.qml replaces `values`
-# wholesale on every write, so the panel's `sliderOrder` binding gets a new
-# array identity too. That is a second, independent way to reset a `Repeater`,
-# and the latch has to absorb it as well.
+# it back and doubles the number of changes. Theme earns its place twice over:
+# it writes a config key, and Core/Config.qml replaces `values` wholesale on
+# every write, so the panel's `sliderOrder` binding gets a new array identity
+# as well. That reaches the latch by its own path — a `Connections` on the
+# policy rather than `onFactsChanged` — and it is the path where "same list,
+# new array" has to be absorbed by comparing contents rather than references.
 slider_mark=$(log_lines)
 for control in dnd mode dnd mode; do
     nested_ipc call controlcenter press "$control" > /dev/null 2>&1
@@ -469,10 +470,18 @@ for control in dnd mode dnd mode; do
 done
 
 # Asserted before the silences, and the whole reason the silences count: a
-# sweep that drove nothing is silent for free. This is the check that says the
-# services really did change underneath the open panel.
-expect_since "$slider_mark" 'control-centre: mode (on|off)' \
+# sweep that drove nothing is silent for free.
+#
+# Both halves of the pair, not `mode (on|off)` once. That line is a dispatch
+# receipt — ControlCenterActions announces before it routes, and it words the
+# announcement from live state — so a press that dispatched and was then
+# refused logs `mode on` twice and matches the loose pattern perfectly. Only
+# seeing `on` *and* `off` says the state actually flipped, which is the thing
+# the silences below have to be silent about.
+expect_since "$slider_mark" 'control-centre: mode on' \
     'the sweep really did change a service under the open panel'
+expect_since "$slider_mark" 'control-centre: mode off' \
+    'and changed it back, so the state genuinely moved both ways'
 
 # The latch reporting on itself. Useful, but not sufficient on its own — a
 # rebuild that came from somewhere else would leave this quiet.

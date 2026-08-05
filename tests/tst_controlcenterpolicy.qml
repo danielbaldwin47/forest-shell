@@ -404,8 +404,11 @@ TestCase {
     }
 
     function test_same_ids_survives_an_empty_or_missing_list() {
-        // The surface's `sliderIds` starts as `[]` and the first refresh
-        // compares against it, so this is the startup path.
+        // Not the startup path — the surface holds `null` until its first
+        // latch and skips the comparison entirely for it, precisely so an
+        // empty machine still logs. This is the path *after* that: a machine
+        // that latched `[]` and is asked again, which has to compare equal or
+        // it would relatch and relog on every service tick.
         verify(policy.sameIds([], []));
         verify(policy.sameIds(null, []));
         verify(policy.sameIds(undefined, null));

@@ -399,8 +399,8 @@ TestCase {
         // driver is restarted on every resume, so the probe that races it
         // exits non-zero with nothing on stdout — and read as "no reader" that
         // throws the offer away a second before it would have worked.
-        compare(policy.fingerprintProbeOutcome(1, ""), "failed");
-        compare(policy.fingerprintProbeOutcome(0, ""), "failed");
+        compare(policy.fingerprintProbeOutcome(1, ""), "unreachable");
+        compare(policy.fingerprintProbeOutcome(0, ""), "unreachable");
         compare(policy.fingerprintProbeOutcome(
             0, "found 1 devices\nFingerprints for user daniel on DBus driver (press):\n - #0: right-index-finger"),
             "enrolled");
@@ -409,17 +409,21 @@ TestCase {
         // Output that arrived on a failing exit is still a failure: the tool
         // that could not reach the bus has nothing to report about fingers.
         compare(policy.fingerprintProbeOutcome(1, "Fingerprints for user daniel"),
-                "failed");
+                "unreachable");
+        // Named apart from the password path's "failed" result on purpose —
+        // one word for "the module refused an attempt" and "the probe never
+        // asked" is how the two get confused at the call site.
+        verify(policy.fingerprintProbeOutcome(1, "") !== "failed");
     }
 
     function test_the_settle_window_asks_again_only_while_it_has_asks_left() {
         // Bounded, and bounded by its own number rather than the touch budget
         // — nothing here spends a touch, so #169's refusal is untouched.
-        verify(policy.fingerprintProbeShouldRetry("failed", 0));
+        verify(policy.fingerprintProbeShouldRetry("unreachable", 0));
         verify(policy.fingerprintProbeShouldRetry(
-            "failed", policy.fingerprintProbeRetries - 1));
+            "unreachable", policy.fingerprintProbeRetries - 1));
         verify(!policy.fingerprintProbeShouldRetry(
-            "failed", policy.fingerprintProbeRetries));
+            "unreachable", policy.fingerprintProbeRetries));
         // The other two outcomes are answers, not silence.
         verify(!policy.fingerprintProbeShouldRetry("none", 0));
         verify(!policy.fingerprintProbeShouldRetry("enrolled", 0));
@@ -431,12 +435,30 @@ TestCase {
         // line about hardware it does not have — that is why the first probe
         // is silent. After a resume, or once a reader has answered during this
         // lock, silence is #188's screen instead.
-        verify(!policy.fingerprintProbeSpeaks("failed", false, false));
-        verify(policy.fingerprintProbeSpeaks("failed", false, true));
-        verify(policy.fingerprintProbeSpeaks("failed", true, false));
+        verify(!policy.fingerprintProbeSpeaks("unreachable", false, false));
+        verify(policy.fingerprintProbeSpeaks("unreachable", false, true));
+        verify(policy.fingerprintProbeSpeaks("unreachable", true, false));
         // Only a probe that could not run has anything to say.
         verify(!policy.fingerprintProbeSpeaks("none", true, true));
         verify(!policy.fingerprintProbeSpeaks("enrolled", true, true));
+    }
+
+    function test_a_phantom_failure_never_reaches_the_screen() {
+        // Not charging the stranded conversation's failures was half of it.
+        // The ticket asks for the other half in as many words: the unavailable
+        // line must arrive "without a fake failure first", and a failure
+        // pinned for its dwell over a sensor that never lit is exactly that.
+        verify(!policy.fingerprintMessageShown("Failed to match fingerprint", false));
+        verify(policy.fingerprintMessageShown("Failed to match fingerprint", true));
+        // The reader's own prompt is harmless either way, and the closing line
+        // is *itself* delivered after the offer stops being live — swallowing
+        // that would restore the silence #169 fixed.
+        verify(policy.fingerprintMessageShown(
+            "Place your finger on the fingerprint reader", false));
+        verify(policy.fingerprintMessageShown(
+            policy.fingerprintClosingMessage(false), false));
+        verify(policy.fingerprintMessageShown(
+            policy.fingerprintClosingMessage(true), false));
     }
 
     // What fprintd says about a failed match is the whole feedback channel for

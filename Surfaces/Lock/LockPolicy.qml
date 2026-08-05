@@ -261,12 +261,18 @@ QtObject {
     /// away for a reader that was about to be there.
     ///
     /// A zero exit with nothing on stdout is the same conclusion by a different
-    /// road — the tool cannot succeed and stay silent — so it is "failed" too.
+    /// road — the tool cannot succeed and stay silent — so it is "unreachable"
+    /// too.
+    ///
+    /// "unreachable" and not "failed": the password path names a PAM result
+    /// "failed" a few functions down, and one word meaning both "the module
+    /// refused an attempt" and "the probe never got to ask" is how the two get
+    /// confused at the call site.
     function fingerprintProbeOutcome(exitCode: int, output: string): string {
         if (exitCode !== 0)
-            return "failed";
+            return "unreachable";
         if (!output)
-            return "failed";
+            return "unreachable";
         return fingerprintEnrolled(output) ? "enrolled" : "none";
     }
 
@@ -283,7 +289,7 @@ QtObject {
 
     /// Whether a probe that could not run is worth asking again.
     function fingerprintProbeShouldRetry(outcome: string, attempt: int): bool {
-        return outcome === "failed" && attempt < fingerprintProbeRetries;
+        return outcome === "unreachable" && attempt < fingerprintProbeRetries;
     }
 
     /// Whether a probe that never ran should say so on the lock screen.
@@ -296,9 +302,28 @@ QtObject {
     /// a stranded reader gets read as a wrong finger.
     function fingerprintProbeSpeaks(outcome: string, everEnrolled: bool,
                                     afterResume: bool): bool {
-        if (outcome !== "failed")
+        if (outcome !== "unreachable")
             return false;
         return everEnrolled || afterResume;
+    }
+
+    /// Whether an arriving fingerprint message may go on screen at all (#188).
+    ///
+    /// Distinct from `fingerprintMessageWins`, which arbitrates between two
+    /// messages that both belong on screen. This is the question before that
+    /// one: a conversation stranded across a suspend goes on emitting after it
+    /// has been stood down, and what it emits is "Failed to match fingerprint".
+    /// Not charging it was half the fix; the ticket asks for the other half in
+    /// as many words — the unavailable line must arrive "without a fake failure
+    /// first", and a failure nobody caused is exactly that.
+    ///
+    /// Only failures are dropped. The reader's own prompt is harmless, and the
+    /// closing line is *itself* delivered through this door once the offer has
+    /// stopped being live — swallowing that would restore #169's silence.
+    function fingerprintMessageShown(text: string, live: bool): bool {
+        if (live)
+            return true;
+        return !fingerprintTouchMissed(text);
     }
 
     // How many wrong touches the reader gives you — and whose number that is.
@@ -355,10 +380,33 @@ QtObject {
     /// Only negative forms are listed. "device" alone would swallow the
     /// reader's own prompt, and a pattern that eats prompts spends the budget
     /// twice as fast as the hardware does.
+    /// One per line, iterated — the shape `lockoutPatterns` above established,
+    /// and for its reason: a single alternation this long is unreviewable, and
+    /// the next person to add a driver's phrasing should be adding a line.
+    readonly property var deviceUnavailablePatterns: [
+        /no such device/i,
+        /(could not|cannot|can't|failed to|unable to)\s+(claim|open|access)\b/i,
+        /device (was )?not claimed/i,
+        /device (is )?busy/i,
+        /device (is )?disconnected/i,
+        /device not (ready|available)/i,
+        /no (fingerprint )?(devices?|readers?) (available|found)/i,
+        /impossible to enumerate/i,
+        /communication with the device failed/i,
+        // The two open-fprintd is restarting under us produces (#188).
+        /not provided by any/i,
+        /failed to activate service/i,
+        /reader (is )?(unavailable|not available|not ready)/i
+    ]
+
     function fingerprintDeviceUnavailable(text: string): bool {
         if (!text)
             return false;
-        return /no such device|(could not|cannot|can't|failed to|unable to)\s+(claim|open|access)\b|device (was )?not claimed|device (is )?busy|device (is )?disconnected|device not (ready|available)|no (fingerprint )?(devices?|readers?) (available|found)|impossible to enumerate|communication with the device failed|not provided by any|failed to activate service|reader (is )?(unavailable|not available|not ready)/i.test(text);
+        for (let i = 0; i < deviceUnavailablePatterns.length; i += 1) {
+            if (deviceUnavailablePatterns[i].test(text))
+                return true;
+        }
+        return false;
     }
 
     /// Whether one fingerprint message is a touch that missed. Read out of the

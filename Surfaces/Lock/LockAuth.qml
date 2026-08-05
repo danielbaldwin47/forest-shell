@@ -129,10 +129,13 @@ Scope {
     /// `end()` only runs on unlock. So the machine came back to whatever the
     /// stranded conversations had become, and no code path could say otherwise.
     ///
-    /// Everything a fresh `begin()` would clear is cleared here too, minus the
-    /// buffer decision: the typed characters are dropped, because a password
-    /// half-typed before a lid closed is not something the user is still in the
-    /// middle of.
+    /// What is cleared is what belonged to the conversation being replaced: the
+    /// buffer (a password half-typed before a lid closed is not something the
+    /// user is still in the middle of), the message it last showed, and the
+    /// per-conversation lockout latch, which the new conversation has to earn
+    /// again. What is *not* cleared is `lockedOut` itself — that is a decided
+    /// fact about the account rather than a fact about the conversation, and a
+    /// suspend does not unlock anyone.
     function rebuildConversations(reason: string): void {
         if (!priv.begun)
             return;
@@ -151,9 +154,18 @@ Scope {
         priv.busy = false;
         priv.answered = false;
         priv.rearmOnInput = false;
+        // Whatever the dead conversation last said is not about this one.
+        priv.message = "";
+        priv.messageIsError = false;
+        priv.lockoutSeen = false;
         root.clear();
         password.start();
         conversationWatchdog.restart();
+        // The far side of the call, as `begin()` logs it (#81): "we decided to
+        // rebuild" and "the password context is running again" are two facts,
+        // and after a resume the second is the one a stranded lock screen
+        // fails to produce.
+        Logger.log("lock", "password conversation restarted");
 
         root.tearDownFingerprint("rebuilding");
         root.probeFingerprint();
@@ -168,16 +180,21 @@ Scope {
     /// same words a wrong finger produces. Nothing said from here until the
     /// next successful probe is chargeable.
     function tearDownFingerprint(reason: string): void {
+        const wasStanding = priv.fingerprintActive || priv.fingerprintTouches > 0;
         fingerprintProbeRetry.stop();
         priv.fingerprintLive = false;
-        if (!priv.fingerprintActive && !priv.fingerprintTouches)
-            return;
+        // Aborted unconditionally. An offer already withdrawn — the PAM error
+        // path does that with the touch count still at zero — leaves a context
+        // that was started and never closed, and "there is no offer on screen"
+        // is not the same claim as "there is no conversation running". The one
+        // that gets carried into a suspend is the second.
         fingerprint.abort();
         priv.fingerprintActive = false;
         priv.fingerprintTouches = 0;
         root.clearFingerprintMessage();
-        Logger.log("lock", "fingerprint offer torn down (" + reason
-                   + ") — touches discarded");
+        if (wasStanding)
+            Logger.log("lock", "fingerprint offer torn down (" + reason
+                       + ") — touches discarded");
     }
 
     /// Ask the machine whether there is a finger to read, from the top.
@@ -197,8 +214,18 @@ Scope {
     function settleProbe(): void {
         if (!priv.probeExited || !priv.probeStreamDone)
             return;
-        if (!priv.begun || priv.sleeping)
+        if (!priv.begun)
             return;
+        // Logged, because it is the one way the offer can go missing for the
+        // rest of a lock without anything else being wrong: `sleeping` is
+        // raised by the bridge and dropped by the resume that answers it, so a
+        // suspend that is announced and then abandoned leaves it standing.
+        // `end()` drops it with the lock so it can never outlive one, but
+        // within a lock this is the trace that says why there is no prompt.
+        if (priv.sleeping) {
+            Logger.log("lock", "fingerprint probe answered into a sleep — offer not armed");
+            return;
+        }
 
         const outcome = policy.fingerprintProbeOutcome(priv.probeExitCode,
                                                        fingerprintProbeOut.text);
@@ -238,9 +265,16 @@ Scope {
             // Said once, promptly, and with no fake failure in front of it —
             // which is the whole of what the shell can fix if the reader really
             // does not come back (#188 acceptance 1).
-            priv.fingerprintActive = true;
+            //
+            // Not routed through `withdrawFingerprint`: there is no offer to
+            // withdraw, and flipping `fingerprintActive` true purely to get
+            // past that function's guard would log a withdrawal of something
+            // that never opened. This is its own event and says so.
             priv.fingerprintLive = false;
-            root.withdrawFingerprint(false);
+            root.noteFingerprintMessage(policy.fingerprintClosingMessage(false),
+                                        false);
+            Logger.log("lock", "fingerprint unavailable — the probe never ran ("
+                       + priv.probeAttempt + " attempt(s))");
         }
     }
 
@@ -258,6 +292,9 @@ Scope {
         priv.fingerprintActive = false;
         // Nothing an aborted context says on its way out may be charged (#188).
         priv.fingerprintLive = false;
+        // Dropped with the lock, so a sleep that was announced and never
+        // answered by a resume cannot leave the next lock unable to arm.
+        priv.sleeping = false;
         root.clearFingerprintMessage();
         // The latch dies with the lock it was raised on (#164). Both success
         // paths — password and fingerprint — come through here, and a lockout
@@ -444,8 +481,17 @@ Scope {
         // the lifecycle has to answer instead.
         if (policy.fingerprintTouchCharged(text, priv.fingerprintLive))
             priv.fingerprintTouches += 1;
-        else if (priv.fingerprintActive && policy.fingerprintTouchMissed(text))
-            Logger.log("lock", "fingerprint failure not charged — offer is not live");
+
+        // And it does not go on screen either. Not charging a phantom failure
+        // still leaves it pinned for its dwell, which is the "fake failure
+        // first" the ticket rules out in as many words — the user reads a
+        // missed touch they never made, and then the unavailable line behind
+        // it. Dropped rather than held: there is nothing to say later about a
+        // conversation nobody is having.
+        if (!policy.fingerprintMessageShown(text, priv.fingerprintLive)) {
+            Logger.log("lock", "fingerprint failure dropped — offer is not live");
+            return;
+        }
         const sinceMs = Date.now() - priv.fingerprintMessageAt;
         if (policy.fingerprintMessageWins(priv.fingerprintMessageIsError,
                                           sinceMs, isError)) {

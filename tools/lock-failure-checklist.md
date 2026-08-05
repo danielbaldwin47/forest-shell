@@ -437,12 +437,18 @@ means.
 
        lock: fingerprint enrolled — parallel context started
        lock: fingerprint probe could not run (attempt N) — retrying in 750ms
-       lock: fingerprint probe settled: failed after 4 attempt(s)
+       lock: fingerprint probe settled: unreachable after 4 attempt(s)
+       lock: fingerprint unavailable — the probe never ran (4 attempt(s))
 
-   And if any touch was charged for something that happened while the machine
-   was down, this line says so and is the bug reopening:
+   And two lines that are the bug reopening if you see them. This one means a
+   touch was charged for something that happened while the machine was down:
 
        lock: fingerprint offer withdrawn after N touch(es)
+
+   …and the *absence* of this one, next to a failure line on screen, means a
+   phantom failure got past the drop:
+
+       lock: fingerprint failure dropped — offer is not live
 
 ---
 

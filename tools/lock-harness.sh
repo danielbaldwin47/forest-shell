@@ -446,6 +446,23 @@ else
     nested_fail "the suspend charged the user $touches touch(es) they never made (#188): $state"
 fi
 
+# And they are not on screen either. Costing nothing is only half of it: a
+# phantom failure pinned for its dwell is the "fake failure first" the ticket
+# rules out, and on hardware where the reader does not come back it is what the
+# user reads before the unavailable line.
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == *"$fp_fail"* ]]; then
+    nested_fail "a failure nobody caused is on the lock screen (#188): $message"
+else
+    nested_pass "the phantom failures never reached the screen: ${message:-<no fingerprint line>}"
+fi
+if grep -qa 'lock: fingerprint failure dropped' "$NESTED_SHELL_LOG"; then
+    nested_pass "and the drop is in the log: $(grep -a -m1 'lock: fingerprint failure dropped' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the drop left no trace — a fingerprint line that says nothing would be undiagnosable (#81)"
+fi
+
 logind resume > /dev/null
 # The rebuild re-runs the enrolment probe, and that probe has a settle window
 # for the driver restart above — four asks, 750ms apart. Waiting it out here is
@@ -461,6 +478,26 @@ if grep -qa 'lock: rebuilding pam conversations' "$NESTED_SHELL_LOG"; then
     nested_pass "both conversations were rebuilt: $(grep -a -m1 'lock: rebuilding pam conversations' "$NESTED_SHELL_LOG")"
 else
     nested_fail "the conversations were not rebuilt — the password field is stranded too (#188)"
+fi
+
+# The password half, asserted by outcome rather than by intent (#188 acceptance
+# 8). "We decided to rebuild" is not the claim — the claim is that PAM is
+# prompting again on the other side, and a lock screen that will not take a
+# password after a resume is the more serious version of this bug. Both facts
+# are read: the far-side log line, and `conversing`, which only goes true when a
+# real PAM message arrives.
+if [[ $(grep -ca 'lock: pam conversation open' "$NESTED_SHELL_LOG") -ge 2 ]]; then
+    nested_pass "pam is prompting again after the resume ($(grep -ca 'lock: pam conversation open' "$NESTED_SHELL_LOG") conversations opened)"
+else
+    nested_fail "pam never prompted after the resume — the password field is dead (#188)"
+fi
+state=$(ipc locktest state)
+if ! conversing=$(lock_flag "$state" conversing); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$conversing" == "true" ]]; then
+    nested_pass "the rebuilt password conversation is answering: conversing=$conversing"
+else
+    nested_fail "the password conversation is not answering after the resume (#188): $state"
 fi
 
 state=$(ipc locktest state)

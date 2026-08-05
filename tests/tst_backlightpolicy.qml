@@ -9,11 +9,14 @@
 import QtQuick
 import QtTest
 import "../Services/Hardware"
+// For one cross-policy invariant only — see the attribution test at the bottom.
+import "../Surfaces/Osd"
 
 TestCase {
     name: "BacklightPolicy"
 
     BacklightPolicy { id: policy }
+    OsdPolicy { id: osd }
 
     // `brightnessctl -m` output, verbatim from the T480.
     readonly property string probeReply: "intel_backlight,backlight,2,0%,1515\n"
@@ -177,6 +180,16 @@ TestCase {
         // timer would run without ever reading anything.
         verify(policy.pollMs >= policy.staleMs);
         verify(policy.staleMs > 0);
+    }
+
+    function test_a_poll_lands_inside_the_osd_attribution_window() {
+        // #175 suppresses the idle ladder's own dim by attributing a backlight
+        // change to the ladder for `attributionMs` after it claims it. A change
+        // this timer only noticed *after* that window would be announced as the
+        // user's — the pill #175 removed, back again, on the one machine with
+        // the brightness module in its bar. Two policies, one number between
+        // them, so the relationship is asserted rather than remembered.
+        verify(policy.pollMs < osd.attributionMs);
     }
 
     function test_both_edges_of_the_subscription_have_a_line() {

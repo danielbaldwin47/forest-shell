@@ -141,7 +141,16 @@ QtObject {
 
     /// How often to re-read while a surface is displaying a level. Only ever
     /// armed while one is — see `pollRunning`.
-    readonly property int pollMs: 2000
+    ///
+    /// Shorter than OsdPolicy's `attributionMs`, and that is the whole reason
+    /// for the number rather than a rounder one. The OSD suppresses the idle
+    /// ladder's own dim (#175) by attributing a change to the ladder for
+    /// 1500 ms after it claims the backlight; a change this timer only notices
+    /// *after* that window would be announced as the user's, which is the pill
+    /// #175 removed coming back. So a poll always lands inside the window it
+    /// has to be judged in — the invariant is asserted at the first seam,
+    /// across both policies.
+    readonly property int pollMs: 1000
 
     /// Whether a value stamped at `lastReadAt` needs reading again.
     ///
@@ -160,9 +169,14 @@ QtObject {
     /// Whether the re-read timer should be running.
     ///
     /// #186's constraint, and the reason this is a count rather than a flag:
-    /// nothing new may tick while no surface is showing brightness, and the
-    /// drawer and the bar module can each be showing one at the same time. A
-    /// count below zero is a release that ran twice and arms nothing.
+    /// nothing new may tick while no surface is *holding* the panel, and two
+    /// can hold it at once. A count below zero is a release that ran twice and
+    /// arms nothing.
+    ///
+    /// What may hold one is the constraint's real content — a surface that
+    /// comes and goes, not a permanent readout. A bar module that subscribed
+    /// would be a timer for the life of the session, and that is measured: 5.57
+    /// context switches/s against a budget of 5.
     function pollRunning(watchers: int, available: bool): bool {
         return available === true && watchers > 0;
     }

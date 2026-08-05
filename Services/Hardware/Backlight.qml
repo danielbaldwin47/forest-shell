@@ -151,16 +151,24 @@ Singleton {
     // --- keeping it true (#186) ----------------------------------------------
     //
     // `watchChanges` below cannot deliver an external change, so the value is
-    // re-read on demand instead. Two demands: a surface that displays a level
-    // holds a subscription while it is on screen, and a step asks before it
-    // computes its next notch.
+    // re-read on demand instead. Three demands:
     //
-    //     Backlight.watch() / Backlight.release()   // while a level is on screen
+    //     Backlight.watch() / Backlight.release()   // a surface that comes and goes
+    //     Backlight.refreshIfStale()                // a readout, as it appears
+    //     — and a step, which reads before it computes its next notch.
     //
     // The subscription is the same shape as SystemStats and Weather —
     // `Component.onCompleted` / `Component.onDestruction` on the surface — and
-    // it is a count rather than a flag because the drawer's slider and the bar's
-    // module can both be showing a level at once.
+    // it is a count rather than a flag because two surfaces can be showing a
+    // level at once.
+    //
+    // What holds one is the part worth stating: a surface that *comes and
+    // goes*, which in practice is the control centre. A bar module is never not
+    // on screen, so a subscription there would be a timer running for the life
+    // of the session — measured at 5.57 context switches/s against a budget of
+    // 5, up from 1.9 (tools/idle-budget.sh, with the module in the bar). The
+    // permanent readout therefore reads as it appears and lives off the reads
+    // everything else causes.
 
     /// When the panel was last read, as a millisecond clock, or 0 for never.
     property real lastReadAt: 0

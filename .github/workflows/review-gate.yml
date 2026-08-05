@@ -7,16 +7,8 @@ name: review-gate
 # same contentless token. A held finding must be written out and resolved,
 # not tokenized past the gate.
 #
-# INSTALL (one-time, needs `workflow` token scope — agents' OAuth token lacks it):
-#   gh auth refresh -s workflow        # once, interactive
-#   git mv .claude/pending/review-gate.yml .github/workflows/review-gate.yml
-#   git commit -m 'ci: install review gate' && git push
-# then make it a hard block on main:
-#   gh api --method PUT repos/danielbaldwin47/forest-shell/branches/main/protection \
-#     -f 'required_status_checks[strict]=false' \
-#     -f 'required_status_checks[checks][][context]=review-line' \
-#     -F enforce_admins=false \
-#     -F required_pull_request_reviews=null -F restrictions=null
+# Installed 2026-08-05 (workflow token scope granted); `review-line` is a
+# required status check on main via branch protection.
 
 on:
   pull_request:
@@ -26,7 +18,7 @@ jobs:
   review-line:
     runs-on: ubuntu-latest
     steps:
-      - name: Require "Review: clean" in the PR body
+      - name: 'Require "Review: clean" in the PR body'
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |

@@ -43,6 +43,22 @@ its clicks by writing the bar's module layout into the scratch config and
 reading the bar's own rect out of `hyprctl layers` rather than guessing at icon
 widths.
 
+**The cursor is drivable here too, and it is a protocol read rather than a
+picture** (#185). A cursor shape is not something the client draws — it is a
+`wp_cursor_shape_device_v1.set_shape` request it sends — so `WAYLAND_DEBUG=1` in
+`NESTED_ENV` puts every one of them in the shell log, and hovering a control is
+an assertion (`4` is the hand, `1` is the arrow). `tools/cursor-harness.sh` is
+the worked example. Two things it had to learn: a headless seat advertises no
+pointer capability at all, so `movecursor` alone reaches no client and a hover
+is a warp plus a middle click to make `tools/nested-click.c`'s virtual pointer
+exist; and the debug log is colourised even into a file, so a pattern like
+`wl_pointer@` matches nothing and reads exactly like a shell that never asked.
+Asserting the *absence* of something needs a control the way #78's blur run did:
+a module decides its own `shown`, so a readout that hid itself leaves bare strip
+under the pointer, which is an arrow too — each readout is configured in front
+of a control that never hides, so an empty slot fails the check rather than
+passing it.
+
 This seam is also the only place the shell is ever on more than one screen.
 `NESTED_MONITORS` declares the layout and `nested_output_add` /
 `nested_output_remove` plug one in and out mid-run, so per-screen geometry and

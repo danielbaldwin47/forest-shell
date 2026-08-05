@@ -438,6 +438,27 @@ nested_click() {
     nested_env "$NESTED_CLICK_BIN" "$button" || return 1
 }
 
+## The bar's layer surface as `<monitor> <x> <y> <w> <h>`, or nothing at all if
+## it never mapped.
+##
+## Here rather than in a harness because two of them aim at the bar and both had
+## copied the same awk (#185): the rect is read from `hyprctl layers` rather than
+## assumed from `NESTED_MONITORS`, and the monitor name comes from the same lines
+## as the rect — with the backend's own output dropped (`NESTED_HEADLESS_ONLY`)
+## the first declared name is not the one that exists. Coordinates *derived* from
+## the rect stay in the harness: what counts as the launcher's x is that
+## harness's business, and only the reading is shared.
+nested_bar_rect() {
+    nested_hyprctl layers | awk '
+        /^Monitor / { mon = $2; sub(/:$/, "", mon) }
+        /forest-shell:bar/ && !found {
+            if (match($0, /xywh: [0-9-]+ [0-9-]+ [0-9-]+ [0-9-]+/)) {
+                print mon, substr($0, RSTART + 6, RLENGTH - 6)
+                found = 1
+            }
+        }'
+}
+
 ## Build tools/nested-click.c against the vendored protocol, once per run.
 ##
 ## Built rather than vendored as a binary, and built into the run's own scratch

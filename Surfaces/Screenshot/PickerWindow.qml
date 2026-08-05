@@ -128,6 +128,9 @@ Variants {
             Keys.onEscapePressed: Screenshot.cancel("escape")
 
             MouseArea {
+                // pointer-exempt: a region picker aims rather than presses —
+                // the crosshair below is the affordance, and a hand would say
+                // the pixel under it is a control (#185).
                 id: pointer
                 anchors.fill: parent
                 hoverEnabled: true

@@ -247,6 +247,85 @@ QtObject {
         return /fingerprints?\s+for\s+user/i.test(fprintdListOutput);
     }
 
+    /// What one run of the probe actually established (#188). Three outcomes,
+    /// where the surface used to see two.
+    ///
+    /// "ran and found nothing" and "could not run" were the same empty string,
+    /// and after a resume they are emphatically not the same thing. This
+    /// machine's driver stack (`open-fprintd` + `python-validity`) is restarted
+    /// on every resume by `python3-validity-suspend-hotfix.service`
+    /// (`WantedBy=suspend.target`), so a probe fired the instant the machine
+    /// comes back races that restart and asks a bus name nothing is serving
+    /// yet: `fprintd-list` exits non-zero, says its piece on stderr, and leaves
+    /// stdout empty. Read as "no reader" that is a fingerprint offer thrown
+    /// away for a reader that was about to be there.
+    ///
+    /// A zero exit with nothing on stdout is the same conclusion by a different
+    /// road — the tool cannot succeed and stay silent — so it is "unreachable"
+    /// too.
+    ///
+    /// "unreachable" and not "failed": the password path names a PAM result
+    /// "failed" a few functions down, and one word meaning both "the module
+    /// refused an attempt" and "the probe never got to ask" is how the two get
+    /// confused at the call site.
+    function fingerprintProbeOutcome(exitCode: int, output: string): string {
+        if (exitCode !== 0)
+            return "unreachable";
+        if (!output)
+            return "unreachable";
+        return fingerprintEnrolled(output) ? "enrolled" : "none";
+    }
+
+    // How long to let the driver come back, and how many times to ask.
+    //
+    // The restart above is `systemctl --no-block restart`, so it is in flight
+    // while logind is still handing out resume notifications. These two are a
+    // settle window for that, and they are *not* a retry of anything the user
+    // does: no touch is spent here, and pam_fprintd's own budget is untouched
+    // (#169's refusal stands — see `fingerprintTouchBudget`). The thing being
+    // retried is a question about the machine, asked before any offer exists.
+    readonly property int fingerprintProbeRetryMs: 750
+    readonly property int fingerprintProbeRetries: 4
+
+    /// Whether a probe that could not run is worth asking again.
+    function fingerprintProbeShouldRetry(outcome: string, attempt: int): bool {
+        return outcome === "unreachable" && attempt < fingerprintProbeRetries;
+    }
+
+    /// Whether a probe that never ran should say so on the lock screen.
+    ///
+    /// Silence is right the first time a machine is asked: a desktop with the
+    /// setting on and no reader in it would otherwise grow a line about
+    /// hardware it does not have. It stops being right once we know better —
+    /// after a resume, or once a reader has already answered during this lock —
+    /// because that is exactly #188's screen, and saying nothing there is how
+    /// a stranded reader gets read as a wrong finger.
+    function fingerprintProbeSpeaks(outcome: string, everEnrolled: bool,
+                                    afterResume: bool): bool {
+        if (outcome !== "unreachable")
+            return false;
+        return everEnrolled || afterResume;
+    }
+
+    /// Whether an arriving fingerprint message may go on screen at all (#188).
+    ///
+    /// Distinct from `fingerprintMessageWins`, which arbitrates between two
+    /// messages that both belong on screen. This is the question before that
+    /// one: a conversation stranded across a suspend goes on emitting after it
+    /// has been stood down, and what it emits is "Failed to match fingerprint".
+    /// Not charging it was half the fix; the ticket asks for the other half in
+    /// as many words — the unavailable line must arrive "without a fake failure
+    /// first", and a failure nobody caused is exactly that.
+    ///
+    /// Only failures are dropped. The reader's own prompt is harmless, and the
+    /// closing line is *itself* delivered through this door once the offer has
+    /// stopped being live — swallowing that would restore #169's silence.
+    function fingerprintMessageShown(text: string, live: bool): bool {
+        if (live)
+            return true;
+        return !fingerprintTouchMissed(text);
+    }
+
     // How many wrong touches the reader gives you — and whose number that is.
     //
     // It is pam_fprintd's, not ours (#169). The module re-prompts *inside* a
@@ -292,13 +371,72 @@ QtObject {
         return spent;
     }
 
+    /// Whether one fingerprint message is the reader saying it is not there —
+    /// a device it could not claim, a bus name nothing is serving, a driver
+    /// mid-restart (#188). PAM_ERROR_MSG carries these on the same channel as a
+    /// failed match, and the old code's comment named this gap without closing
+    /// it.
+    ///
+    /// Only negative forms are listed. "device" alone would swallow the
+    /// reader's own prompt, and a pattern that eats prompts spends the budget
+    /// twice as fast as the hardware does.
+    /// One per line, iterated — the shape `lockoutPatterns` above established,
+    /// and for its reason: a single alternation this long is unreviewable, and
+    /// the next person to add a driver's phrasing should be adding a line.
+    readonly property var deviceUnavailablePatterns: [
+        /no such device/i,
+        /(could not|cannot|can't|failed to|unable to)\s+(claim|open|access)\b/i,
+        /device (was )?not claimed/i,
+        /device (is )?busy/i,
+        /device (is )?disconnected/i,
+        /device not (ready|available)/i,
+        /no (fingerprint )?(devices?|readers?) (available|found)/i,
+        /impossible to enumerate/i,
+        /communication with the device failed/i,
+        // The two open-fprintd is restarting under us produces (#188).
+        /not provided by any/i,
+        /failed to activate service/i,
+        /reader (is )?(unavailable|not available|not ready)/i
+    ]
+
+    function fingerprintDeviceUnavailable(text: string): bool {
+        if (!text)
+            return false;
+        for (let i = 0; i < deviceUnavailablePatterns.length; i += 1) {
+            if (deviceUnavailablePatterns[i].test(text))
+                return true;
+        }
+        return false;
+    }
+
     /// Whether one fingerprint message is a touch that missed. Read out of the
     /// prose, as §2's faillock lines are: PAM_ERROR_MSG is also how the module
     /// reports a reader it could not claim, which is not a spent touch.
     function fingerprintTouchMissed(text: string): bool {
         if (!text)
             return false;
+        if (fingerprintDeviceUnavailable(text))
+            return false;
         return /failed to match|match failed/i.test(text);
+    }
+
+    /// Whether an arriving message may actually charge the user a touch.
+    ///
+    /// The prose above catches a reader that admits it is missing. #188 is the
+    /// case where it does not admit it: a conversation opened before a suspend
+    /// and left holding a D-Bus name that got restarted underneath it reports
+    /// "Failed to match fingerprint" three times, in the same words a wrong
+    /// finger produces, while the sensor's illuminator never comes on. No
+    /// regex can separate those two strings, because they are one string.
+    ///
+    /// So the lifecycle separates them instead. `live` is false from the moment
+    /// a sleep is announced until the offer has been rebuilt on the other side,
+    /// and nothing said across that gap is chargeable — the user was not in the
+    /// room, so no touch of theirs is in the transcript.
+    function fingerprintTouchCharged(text: string, live: bool): bool {
+        if (!live)
+            return false;
+        return fingerprintTouchMissed(text);
     }
 
     /// Whether a fingerprint conversation that closed had spent the budget,
@@ -307,6 +445,22 @@ QtObject {
     /// that goes away without an answer.
     function fingerprintBudgetSpent(maxTries: bool, touches: int): bool {
         return maxTries || touches >= fingerprintTouchBudget;
+    }
+
+    /// The same question asked of a conversation that has just closed, which is
+    /// the only caller that knows *how* it closed (#188).
+    ///
+    /// `kind` is the PAM result named the way the password path names it:
+    /// "maxTries", "error", "failed". The error case is the whole point. A
+    /// `PamResult.Error` is the module never getting as far as the reader, and
+    /// the old code did not branch on it at all — it fell through to the count,
+    /// so an error arriving on top of three unchargeable messages produced "Out
+    /// of fingerprint tries" for a sensor that never lit up. An error is never
+    /// a spent budget, whatever the count says.
+    function fingerprintClosedSpent(kind: string, touches: int): bool {
+        if (kind === "error")
+            return false;
+        return fingerprintBudgetSpent(kind === "maxTries", touches);
     }
 
     /// What the fingerprint line says once its conversation is over (#169).

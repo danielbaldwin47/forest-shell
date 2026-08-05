@@ -86,6 +86,14 @@ Row {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
 
+                // Set here and not inherited: this is the one bar module that
+                // has to roll its own input, because `BarIndicator` accepts the
+                // left button alone and a tray icon needs all three. The
+                // pointer is the same one the base gives everything else (#185)
+                // — unconditional, because a tray icon that exists is a tray
+                // icon that takes a click.
+                cursorShape: Qt.PointingHandCursor
+
                 // The facade decides what each button means and performs the
                 // half that needs no window; a menu needs both a window and a
                 // position, which only this file has.

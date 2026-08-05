@@ -88,6 +88,21 @@ lock_flag() {
     sed "s/.*\"$key\":\([a-z]*\).*/\1/" <<< "$state"
 }
 
+# And the same again for a count (#188). `lock_flag`'s `[a-z]*` matches nothing
+# against a number, and "nothing" compares equal to plenty of things — the touch
+# count is the whole claim of §6, so it needs a reader that can fail.
+lock_number() {
+    local state="$1" key="$2"
+    [[ "$state" == *"\"$key\":"* ]] || return 1
+    sed "s/.*\"$key\":\([0-9]*\).*/\1/" <<< "$state"
+}
+
+# The sleep and resume verbs the bridge already exposes (#188). Driven here for
+# the same reason tools/idle-harness.sh drives them: this seam has no suspend
+# and needs none — what is being tested is what the shell does when logind says
+# the machine is going and when it says the machine is back.
+logind() { nested_ipc call logind "$@"; }
+
 nested_up || exit 1
 nested_shell lock-harness.qml 'harness: lock harness ready' || exit 1
 
@@ -359,6 +374,149 @@ if grep -qa 'lock: field has focus on' "$NESTED_SHELL_LOG"; then
     nested_pass "the field took keyboard focus on its surface"
 else
     nested_fail "the field never took focus — typing would go nowhere: $(grep -a 'lock: field' "$NESTED_SHELL_LOG" | tail -1)"
+fi
+
+echo
+# 6 — a suspend and a resume, with no suspend (#188).
+#
+# The reported bug is that waking the machine produces "failed to match" three
+# times over a sensor that never lights up, then "Out of fingerprint tries". The
+# cause has nothing to do with the reader: the shell locks *inside* logind's
+# delay inhibitor, which opens the PAM conversations, and then the machine
+# suspends on top of them. On this hardware
+# `python3-validity-suspend-hotfix.service` restarts open-fprintd on every
+# resume, so what the conversation is holding on the other side is a bus name
+# nothing owns any more.
+#
+# None of that needs a real suspend to drive. The bridge already exposes `sleep`
+# and `resume` over IPC, and those two calls are the entire lifecycle — the
+# suspend in between is the one part the shell never sees.
+
+# An offer mid-flight, with touches already on it, which is the state a lid
+# close finds. Posed, because the probe needs a reader (§4's argument).
+ipc locktest fingeroffer > /dev/null
+ipc locktest fingersay "$fp_fail" true > /dev/null
+ipc locktest fingersay "$fp_prompt" false > /dev/null
+state=$(ipc locktest state)
+if ! touches=$(lock_number "$state" fingerprintTouches); then
+    nested_fail "could not read the touch count — $state"
+elif [[ "$touches" == "1" ]]; then
+    nested_pass "a live offer charges a missed touch: $touches"
+else
+    nested_fail "a live offer did not charge the touch it was given: $state"
+fi
+
+logind sleep > /dev/null
+sleep 1
+
+# The teardown is the acceptance: nothing fingerprint-shaped may be carried
+# into a suspend, and the touches that were on it do not survive either.
+if grep -qa 'lock: sleep announced' "$NESTED_SHELL_LOG"; then
+    nested_pass "the lock heard the sleep: $(grep -a -m1 'lock: sleep announced' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the lock never heard the sleep — its conversations go into the suspend live (#188)"
+fi
+if grep -qa 'lock: fingerprint offer torn down' "$NESTED_SHELL_LOG"; then
+    nested_pass "the offer stood down: $(grep -a -m1 'lock: fingerprint offer torn down' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the offer was carried into the suspend (#188)"
+fi
+
+state=$(ipc locktest state)
+if ! touches=$(lock_number "$state" fingerprintTouches); then
+    nested_fail "could not read the touch count — $state"
+elif [[ "$touches" == "0" ]]; then
+    nested_pass "the suspend discarded the touches it found: $touches"
+else
+    nested_fail "touches were carried across the suspend and will be charged (#188): $state"
+fi
+
+# Anything the stranded conversation says now is the machine talking to itself.
+# It arrives in the wrong finger's exact words, so the only thing that can
+# refuse it is the offer not being live.
+ipc locktest fingersay "$fp_fail" true > /dev/null
+ipc locktest fingersay "$fp_fail" true > /dev/null
+ipc locktest fingersay "$fp_fail" true > /dev/null
+state=$(ipc locktest state)
+if ! touches=$(lock_number "$state" fingerprintTouches); then
+    nested_fail "could not read the touch count — $state"
+elif [[ "$touches" == "0" ]]; then
+    nested_pass "three failures across the suspend cost the user nothing: $touches"
+else
+    nested_fail "the suspend charged the user $touches touch(es) they never made (#188): $state"
+fi
+
+# And they are not on screen either. Costing nothing is only half of it: a
+# phantom failure pinned for its dwell is the "fake failure first" the ticket
+# rules out, and on hardware where the reader does not come back it is what the
+# user reads before the unavailable line.
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == *"$fp_fail"* ]]; then
+    nested_fail "a failure nobody caused is on the lock screen (#188): $message"
+else
+    nested_pass "the phantom failures never reached the screen: ${message:-<no fingerprint line>}"
+fi
+if grep -qa 'lock: fingerprint failure dropped' "$NESTED_SHELL_LOG"; then
+    nested_pass "and the drop is in the log: $(grep -a -m1 'lock: fingerprint failure dropped' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the drop left no trace — a fingerprint line that says nothing would be undiagnosable (#81)"
+fi
+
+logind resume > /dev/null
+# The rebuild re-runs the enrolment probe, and that probe has a settle window
+# for the driver restart above — four asks, 750ms apart. Waiting it out here is
+# the difference between reading the answer and reading the question.
+sleep 5
+
+if grep -qa 'lock: resume observed' "$NESTED_SHELL_LOG"; then
+    nested_pass "the lock heard the resume: $(grep -a -m1 'lock: resume observed' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the lock never heard the resume — the already-begun guard still holds it shut (#188)"
+fi
+if grep -qa 'lock: rebuilding pam conversations' "$NESTED_SHELL_LOG"; then
+    nested_pass "both conversations were rebuilt: $(grep -a -m1 'lock: rebuilding pam conversations' "$NESTED_SHELL_LOG")"
+else
+    nested_fail "the conversations were not rebuilt — the password field is stranded too (#188)"
+fi
+
+# The password half, asserted by outcome rather than by intent (#188 acceptance
+# 8). "We decided to rebuild" is not the claim — the claim is that PAM is
+# prompting again on the other side, and a lock screen that will not take a
+# password after a resume is the more serious version of this bug. Both facts
+# are read: the far-side log line, and `conversing`, which only goes true when a
+# real PAM message arrives.
+if [[ $(grep -ca 'lock: pam conversation open' "$NESTED_SHELL_LOG") -ge 2 ]]; then
+    nested_pass "pam is prompting again after the resume ($(grep -ca 'lock: pam conversation open' "$NESTED_SHELL_LOG") conversations opened)"
+else
+    nested_fail "pam never prompted after the resume — the password field is dead (#188)"
+fi
+state=$(ipc locktest state)
+if ! conversing=$(lock_flag "$state" conversing); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$conversing" == "true" ]]; then
+    nested_pass "the rebuilt password conversation is answering: conversing=$conversing"
+else
+    nested_fail "the password conversation is not answering after the resume (#188): $state"
+fi
+
+state=$(ipc locktest state)
+if ! touches=$(lock_number "$state" fingerprintTouches); then
+    nested_fail "could not read the touch count — $state"
+elif [[ "$touches" == "0" ]]; then
+    nested_pass "the rebuilt offer starts unspent: $touches touch(es)"
+else
+    nested_fail "the offer was rebuilt with touches already on it (#188): $state"
+fi
+
+# Whatever the probe found on the other side, the one thing the screen may not
+# say is that the user ran out of tries: they touched nothing.
+if ! message=$(fingerprint_message "$state"); then
+    nested_fail "could not read the lock's state — $state"
+elif [[ "$message" == *"Out of fingerprint tries"* ]]; then
+    nested_fail "the resume produced the out-of-tries line over an untouched reader (#188): $message"
+else
+    nested_pass "the resume did not claim the user was out of tries: ${message:-<no fingerprint line>}"
 fi
 
 echo

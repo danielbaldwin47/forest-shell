@@ -45,6 +45,14 @@ python=$(command -v python3 || true)
 # is the one tool that provably cannot match a NUL.
 "$python" tst_control_bytes.py
 
+# Every click target the shell draws shows a pointer (#185). Also a tree walk
+# rather than a QML test: these widgets pull in
+# Theme and Config, which qmltestrunner cannot load, so nothing here can be
+# instantiated. It is the breadth half of the check — every target, every run —
+# and tools/cursor-harness.sh is the half that reads what the shell actually
+# asks the compositor for.
+"$python" tst_pointer_affordance.py
+
 # The blur measurement's arithmetic (#97). The harness that takes the two
 # captures needs a real compositor, but "does this pair show a blur" is a
 # decision, and a box blur applied here is the picture the compositor is

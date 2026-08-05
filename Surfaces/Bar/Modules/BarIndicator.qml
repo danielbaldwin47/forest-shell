@@ -68,15 +68,15 @@ Item {
     /// Off by default: most of what the bar shows is a readout, and a pointer
     /// that silently does something over one glyph and nothing over the next is
     /// worse than one that never does anything.
+    ///
+    /// This one flag decides the input *and* the cursor (#185). #184 split them
+    /// — the cursor followed a second `opensPanel` flag, on the argument that a
+    /// hand means a door and the brightness readout has none — and nine shipped
+    /// controls then hovered as a plain arrow, which is the bug #185 was filed
+    /// as. The bar draws no hover highlight by decision, so the cursor is the
+    /// only affordance there is: it has to mean "this does something", which is
+    /// what this flag already gates.
     property bool interactive: false
-
-    /// Whether a click here *goes* somewhere — which is a narrower thing than
-    /// `interactive` and the reason it is a second property rather than a
-    /// consequence of the first (#184). The brightness readout is interactive
-    /// and is not this: it steps on the wheel and does nothing on a click, and
-    /// a hand cursor over it would promise a door it does not have. The four
-    /// indicators that open a control-centre panel set both.
-    property bool opensPanel: false
 
     /// One notch of the wheel, up (1) or down (-1). The direction and not the
     /// delta: a high-resolution wheel sends many small deltas, and a value that
@@ -139,10 +139,11 @@ Item {
         // the handler that is already here rather than a `HoverHandler` beside
         // it: those three have no MouseArea to hang it off and this does.
         //
-        // Gated on `opensPanel` and not on `interactive`, so the wheel
-        // alone never grows a cursor — #184's rule that the readouts with no
-        // panel gain no affordance is enforced here rather than trusted.
-        cursorShape: indicator.opensPanel ? Qt.PointingHandCursor : Qt.ArrowCursor
+        // The same flag that enables the handler, so the two cannot drift: a
+        // module that becomes interactive later gains the pointer without being
+        // edited, and a readout that accepts nothing never grows one. That is
+        // the whole of #185 — the nine modules it lists are edited nowhere.
+        cursorShape: indicator.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
 
         onClicked: indicator.clicked()
         // `angleDelta.y` is in eighths of a degree and a notch is 120; only the

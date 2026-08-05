@@ -312,6 +312,155 @@ TestCase {
         verify(/password/i.test(gone));
     }
 
+    // #188: a fingerprint offer armed just before a suspend, left holding a
+    // D-Bus name that gets restarted underneath it, and read on wake as three
+    // wrong fingers.
+
+    function test_a_reader_that_says_it_is_missing_is_not_a_missed_touch() {
+        // The prose half. Every one of these is PAM_ERROR_MSG, on the same
+        // channel a failed match arrives on, and none of them is the user
+        // touching anything.
+        const notTouches = [
+            "Could not claim device",
+            "failed to claim device",
+            "No such device",
+            "Device was not claimed before use",
+            "Device is busy",
+            "device disconnected",
+            "Device not ready",
+            "No devices available",
+            "Impossible to enumerate devices",
+            "Communication with the device failed",
+            "The name net.reactivated.Fprint was not provided by any .service files",
+            "Failed to activate service 'net.reactivated.Fprint'",
+            "Reader is not available"
+        ];
+        for (let i = 0; i < notTouches.length; i += 1) {
+            verify(policy.fingerprintDeviceUnavailable(notTouches[i]),
+                   "should read as unavailable: " + notTouches[i]);
+            verify(!policy.fingerprintTouchMissed(notTouches[i]),
+                   "should not spend a touch: " + notTouches[i]);
+        }
+        compare(policy.fingerprintTouchesSpent(notTouches), 0);
+    }
+
+    function test_the_readers_own_prompt_is_still_not_a_device_error() {
+        // The pattern above names a device only in its negative forms, because
+        // the reader's prompt says "reader" too. One that swallowed the prompt
+        // would never charge a touch at all.
+        verify(!policy.fingerprintDeviceUnavailable(
+            "Place your finger on the fingerprint reader"));
+        verify(!policy.fingerprintDeviceUnavailable("Failed to match fingerprint"));
+        verify(policy.fingerprintTouchMissed("Failed to match fingerprint"));
+        verify(!policy.fingerprintDeviceUnavailable(""));
+    }
+
+    function test_nothing_said_across_a_suspend_is_charged_to_the_user() {
+        // The lifecycle half, and the one the prose cannot do. A stranded
+        // conversation reports the failed match in the *same words* a wrong
+        // finger does — the strings are identical, so the only thing that
+        // separates them is whether the user was in the room.
+        const stranded = "Failed to match fingerprint";
+        verify(policy.fingerprintTouchCharged(stranded, true));
+        verify(!policy.fingerprintTouchCharged(stranded, false));
+        // And the prose still applies while the offer is live.
+        verify(!policy.fingerprintTouchCharged("Could not claim device", true));
+    }
+
+    function test_a_pam_error_never_reads_as_running_out_of_tries() {
+        // The defect exactly: three unchargeable messages had already pushed
+        // the count to the budget, and the close did not branch on the error
+        // result at all — so a reader that was never asked said the user was
+        // out of tries.
+        verify(!policy.fingerprintClosedSpent("error", 3));
+        verify(!policy.fingerprintClosedSpent("error", 99));
+        // The other two results are unchanged, and still delegate to the
+        // arithmetic #169 recorded.
+        verify(policy.fingerprintClosedSpent("maxTries", 0));
+        verify(policy.fingerprintClosedSpent("failed", 3));
+        verify(!policy.fingerprintClosedSpent("failed", 2));
+    }
+
+    function test_an_unavailable_reader_gets_the_unavailable_line() {
+        // The two lines already existed (#169); #188 is that the wrong one was
+        // chosen. Asserted through the pair, so this fails if either the
+        // branch or the wording drifts.
+        compare(policy.fingerprintClosingMessage(
+                    policy.fingerprintClosedSpent("error", 3)),
+                policy.fingerprintClosingMessage(false));
+        verify(/unavailable/i.test(
+            policy.fingerprintClosingMessage(policy.fingerprintClosedSpent("error", 3))));
+        verify(/out of/i.test(
+            policy.fingerprintClosingMessage(policy.fingerprintClosedSpent("maxTries", 3))));
+    }
+
+    function test_a_probe_that_could_not_run_is_not_a_machine_without_a_reader() {
+        // One empty string used to mean both. On this machine's stack the
+        // driver is restarted on every resume, so the probe that races it
+        // exits non-zero with nothing on stdout — and read as "no reader" that
+        // throws the offer away a second before it would have worked.
+        compare(policy.fingerprintProbeOutcome(1, ""), "unreachable");
+        compare(policy.fingerprintProbeOutcome(0, ""), "unreachable");
+        compare(policy.fingerprintProbeOutcome(
+            0, "found 1 devices\nFingerprints for user daniel on DBus driver (press):\n - #0: right-index-finger"),
+            "enrolled");
+        compare(policy.fingerprintProbeOutcome(
+            0, "found 1 devices\nNo fingers enrolled for user daniel"), "none");
+        // Output that arrived on a failing exit is still a failure: the tool
+        // that could not reach the bus has nothing to report about fingers.
+        compare(policy.fingerprintProbeOutcome(1, "Fingerprints for user daniel"),
+                "unreachable");
+        // Named apart from the password path's "failed" result on purpose —
+        // one word for "the module refused an attempt" and "the probe never
+        // asked" is how the two get confused at the call site.
+        verify(policy.fingerprintProbeOutcome(1, "") !== "failed");
+    }
+
+    function test_the_settle_window_asks_again_only_while_it_has_asks_left() {
+        // Bounded, and bounded by its own number rather than the touch budget
+        // — nothing here spends a touch, so #169's refusal is untouched.
+        verify(policy.fingerprintProbeShouldRetry("unreachable", 0));
+        verify(policy.fingerprintProbeShouldRetry(
+            "unreachable", policy.fingerprintProbeRetries - 1));
+        verify(!policy.fingerprintProbeShouldRetry(
+            "unreachable", policy.fingerprintProbeRetries));
+        // The other two outcomes are answers, not silence.
+        verify(!policy.fingerprintProbeShouldRetry("none", 0));
+        verify(!policy.fingerprintProbeShouldRetry("enrolled", 0));
+        verify(policy.fingerprintProbeRetryMs > 0);
+    }
+
+    function test_a_reader_that_never_came_back_says_so_but_a_desktop_stays_quiet() {
+        // A machine with the setting on and no reader in it must not grow a
+        // line about hardware it does not have — that is why the first probe
+        // is silent. After a resume, or once a reader has answered during this
+        // lock, silence is #188's screen instead.
+        verify(!policy.fingerprintProbeSpeaks("unreachable", false, false));
+        verify(policy.fingerprintProbeSpeaks("unreachable", false, true));
+        verify(policy.fingerprintProbeSpeaks("unreachable", true, false));
+        // Only a probe that could not run has anything to say.
+        verify(!policy.fingerprintProbeSpeaks("none", true, true));
+        verify(!policy.fingerprintProbeSpeaks("enrolled", true, true));
+    }
+
+    function test_a_phantom_failure_never_reaches_the_screen() {
+        // Not charging the stranded conversation's failures was half of it.
+        // The ticket asks for the other half in as many words: the unavailable
+        // line must arrive "without a fake failure first", and a failure
+        // pinned for its dwell over a sensor that never lit is exactly that.
+        verify(!policy.fingerprintMessageShown("Failed to match fingerprint", false));
+        verify(policy.fingerprintMessageShown("Failed to match fingerprint", true));
+        // The reader's own prompt is harmless either way, and the closing line
+        // is *itself* delivered after the offer stops being live — swallowing
+        // that would restore the silence #169 fixed.
+        verify(policy.fingerprintMessageShown(
+            "Place your finger on the fingerprint reader", false));
+        verify(policy.fingerprintMessageShown(
+            policy.fingerprintClosingMessage(false), false));
+        verify(policy.fingerprintMessageShown(
+            policy.fingerprintClosingMessage(true), false));
+    }
+
     // What fprintd says about a failed match is the whole feedback channel for
     // a wrong finger, and pam_fprintd overwrites it faster than a frame (#168).
 

@@ -59,7 +59,19 @@ Singleton {
     /// The machine came back. Services/System/Idle.qml listens for this to put
     /// the screen back on — DPMS state does not survive a suspend, and neither
     /// does the ladder's idea of what it had already done.
+    /// Surfaces/Lock/LockAuth.qml listens for it to rebuild its conversations,
+    /// which do not survive one either (#188).
     signal resumed()
+
+    /// The machine is about to go, and we are still holding the delay lock —
+    /// so there is time to put things down before it does (#188).
+    ///
+    /// Emitted from `sleep()` below, *before* the lock is raised, because the
+    /// lock is what opens the PAM conversations and the whole point is that
+    /// none of them should be carried into a suspend. Anything that must not
+    /// be live on the other side listens here; there is no second sleep
+    /// detection path, for the same reason there is no second resume one.
+    signal sleeping()
 
     // --- the delay lock -------------------------------------------------------
 
@@ -207,6 +219,12 @@ Singleton {
     function sleep(): void {
         Logger.log("logind", root.policy.sleeping(SessionLock.locked));
         root.askedAt = Date.now();
+
+        // Announced before the lock is raised (#188). A lock raised here opens
+        // the PAM conversations, and a conversation opened on this side of the
+        // suspend is the bug: whoever needs to stand down has to hear about it
+        // first, not be handed a fresh conversation to strand.
+        root.sleeping();
 
         if (root.policy.mustLockFirst(SessionLock.locked))
             SessionLock.lock("sleep");

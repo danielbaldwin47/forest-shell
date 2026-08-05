@@ -55,18 +55,8 @@ QtObject {
     /// bar: the window keeps its full height while hidden and masks itself down
     /// to the one-pixel reveal strip along the screen edge (`revealStrip` in
     /// Bar.qml). So a hidden bar's rect is that one pixel, and a revealed one's
-    /// is the whole band.
-    ///
-    /// **The hidden pixel is deliberately still a rect**, rather than nothing.
-    /// A drawer that punched no hole at all while the bar was away would cover
-    /// the reveal strip, and hovering the screen edge would stop revealing the
-    /// bar — which is the only way an auto-hidden bar comes back. Worse, it
-    /// would be a loop that cannot be entered: the hole exists because the bar
-    /// is revealed, and the bar is revealed because the pointer reached it
-    /// through the hole. Leaving the pixel always reachable breaks the loop at
-    /// the one place it costs nothing — a click a pixel from the edge is not a
-    /// click anyone aims, and #199's own acceptance asks that a click *where the
-    /// bar would be* still dismisses, which the other 31 rows of the band do.
+    /// is the whole band. Both are reported honestly; whether either is worth
+    /// cutting a hole for is `cutout`'s decision, not this one's.
     function stripRect(ctx: var): var {
         const marginH = ctx.floating ? Math.max(0, ctx.marginH) : 0;
         const marginV = ctx.floating ? Math.max(0, ctx.marginV) : 0;
@@ -86,13 +76,17 @@ QtObject {
         const y = ctx.atTop ? marginV
                             : Math.max(0, ctx.screenH - marginV - height);
 
-        return { x: x, y: y, width: width, height: height, reserves: ctx.reserves };
+        return {
+            x: x, y: y, width: width, height: height,
+            reserves: ctx.reserves,
+            revealed: ctx.revealed
+        };
     }
 
     /// The hole a drawer window subtracts from its input mask, in that window's
     /// own coordinates. A zero rect means "punch nothing".
     ///
-    /// Three of the four answers are zero, and each is a case where a hole would
+    /// Four of the five answers are zero, and each is a case where a hole would
     /// be wrong rather than merely unnecessary:
     ///
     /// - No strip published for this screen. A screen with no bar on it, or one
@@ -100,6 +94,16 @@ QtObject {
     /// - The strip reserves space. #187's geometry already applies: the fog is
     ///   laid out below the bar and never overlapped it, so a hole here would
     ///   punch through fog that is somewhere else entirely.
+    /// - **The bar is not showing.** There is nothing behind the fog to reach:
+    ///   the bar's own dismiss handler lives inside `content`, which is parked
+    ///   outside the window while the bar is away, so a hole cut over the reveal
+    ///   strip would land on a surface with nothing in it — a row of the band
+    ///   that neither acts nor dismisses. #199's second acceptance criterion
+    ///   asks the opposite of that in as many words: with the bar hidden, a
+    ///   click where the bar would be reaches the fog and dismisses. So the
+    ///   whole band stays fog, and that is also how the bar comes back — the
+    ///   click puts the drawer away, and hovering the edge works again the
+    ///   moment there is no fog over it.
     /// - The drawer window is not the size of its screen. Something reserved an
     ///   exclusive zone — another bar, a dock, a panel that is not ours — so the
     ///   window's origin is offset from the screen's by an amount this file
@@ -114,6 +118,8 @@ QtObject {
             return none;
         if (strip.reserves)
             return none;
+        if (!strip.revealed)
+            return none;
         if (windowW !== screenW || windowH !== screenH)
             return none;
 
@@ -126,6 +132,32 @@ QtObject {
             return none;
 
         return { x: x, y: y, width: width, height: height };
+    }
+
+    /// The registry map with one screen's strip set, and with it removed.
+    ///
+    /// Both return a *new* map rather than editing the one they were given. A
+    /// property bound to `strips[name]` does not re-evaluate when a key inside
+    /// the object changes, and the drawer's input mask is exactly such a
+    /// binding — this is the QML binding trap #50 measured three of. Doing it
+    /// here rather than in the singleton next door is what puts it within reach
+    /// of tests/: Core/BarStrips.qml imports Quickshell and qmltestrunner
+    /// cannot load it.
+    function withStrip(strips: var, screenName: string, strip: var): var {
+        const next = {};
+        for (const name in (strips || {}))
+            next[name] = strips[name];
+        next[screenName] = strip;
+        return next;
+    }
+
+    function withoutStrip(strips: var, screenName: string): var {
+        const next = {};
+        for (const name in (strips || {})) {
+            if (name !== screenName)
+                next[name] = strips[name];
+        }
+        return next;
     }
 
     function isEmpty(rect: var): bool {

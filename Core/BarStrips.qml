@@ -30,20 +30,13 @@ Singleton {
     /// reach it (tests/tst_barstrips.qml).
     readonly property BarStripsPolicy policy: BarStripsPolicy {}
 
-    /// screen name → `{ x, y, width, height, reserves }` in screen coordinates.
-    ///
-    /// Replaced wholesale rather than mutated: a property bound to
-    /// `strips[name]` does not re-evaluate when a key inside the object
-    /// changes, and the drawer's input mask is exactly such a binding. This is
-    /// the QML binding trap that #50 measured three of.
+    /// screen name → `{ x, y, width, height, reserves, revealed }` in screen
+    /// coordinates. Replaced wholesale rather than mutated, for the reason
+    /// `BarStripsPolicy.withStrip` gives.
     property var strips: ({})
 
     function publish(screenName: string, strip: var) {
-        const next = {};
-        for (const name in root.strips)
-            next[name] = root.strips[name];
-        next[screenName] = strip;
-        root.strips = next;
+        root.strips = root.policy.withStrip(root.strips, screenName, strip);
     }
 
     /// A screen that went away, or a bar window that did. The drawer's window
@@ -53,12 +46,7 @@ Singleton {
     function forget(screenName: string) {
         if (root.strips[screenName] === undefined)
             return;
-        const next = {};
-        for (const name in root.strips) {
-            if (name !== screenName)
-                next[name] = root.strips[name];
-        }
-        root.strips = next;
+        root.strips = root.policy.withoutStrip(root.strips, screenName);
     }
 
     /// The strip on a screen, or `null`. `null` and not `undefined` so the

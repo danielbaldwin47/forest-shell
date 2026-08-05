@@ -49,9 +49,9 @@
 # before it asserts anything a click did through it: a pinned bar must produce
 # no cutout at all — it does not need one and a hole would be punched through
 # fog that is somewhere else — and an auto-hidden one must produce a cutout the
-# size of whatever the bar is currently showing. #187's own lesson is why that
-# check exists: a click check can pass for the wrong reason, and the verb was
-# never the broken part.
+# size of its whole band while it is out, and none at all once it goes away.
+# #187's own lesson is why that check exists: a click check can pass for the
+# wrong reason, and the verb was never the broken part.
 #
 # The auto-hide pass pins the bar out with `ipc call bar reveal` rather than by
 # hovering the screen edge. It is the same state — an override of `shown` still
@@ -253,7 +253,7 @@ measure_bar() {
         nested_fail "$(say 'the bar never mapped a layer surface — nothing to click')"
         return 1
     fi
-    nested_note "bar at ${bar_x},${bar_y} ${bar_w}×${bar_h} on $bar_screen"
+    nested_note "$(say "bar at ${bar_x},${bar_y} ${bar_w}×${bar_h} on $bar_screen")"
 
     mid_y=$(( bar_y + bar_h / 2 ))
     launcher_x=$(( bar_x + 20 ))
@@ -267,6 +267,14 @@ measure_bar() {
 
 # --- the table ---------------------------------------------------------------
 
+## #187's nine checks, run once per pass.
+##
+## Deliberately not parameterised: it reads the target coordinates `measure_bar`
+## sets — `mid_y`, `launcher_x`, `control_x`, `keyboard_x`, `dead_x`, `away_y`,
+## `bar_screen` — and the pass it is running is `pass_label`, which every
+## assertion carries into its own name. They are globals because they were
+## globals when this was a straight-line script, and passing seven coordinates
+## through a positional interface would be less legible rather than more.
 run_table() {
 
 # --- 1. the aim is right, and the bar works with nothing open -----------------
@@ -447,11 +455,12 @@ check_no_cutout() {
     sleep 0.5
 }
 
-## An auto-hidden bar gets one, and it is the size of what the bar is currently
-## showing rather than of the bar's window — the window keeps its full height
-## while the bar is away and masks itself down to a one-pixel reveal strip, and
-## the hole has to follow the mask or it would swallow the whole band while
-## there was nothing there to click.
+## An auto-hidden bar gets one while it is out, and none at all once it goes
+## away. Not a smaller one: while the bar is away there is nothing behind the
+## fog to reach — its dismiss handler is parked outside the window with the rest
+## of `content` — so a hole over the reveal strip would be a row of the band
+## that neither acts nor dismisses. The whole band stays fog instead, which is
+## #199's second acceptance criterion in as many words.
 check_cutout_tracks_the_bar() {
     nested_ipc call bar reveal > /dev/null
     nested_ipc call controlcenter toggle > /dev/null
@@ -462,8 +471,8 @@ check_cutout_tracks_the_bar() {
     # Away, and the pointer parked well clear so nothing holds it out.
     nested_hyprctl dispatch movecursor "$keyboard_x" "$away_y" > /dev/null
     nested_ipc call bar auto > /dev/null
-    expect_cutout "cutout on $bar_screen: ${bar_w}×1+" \
-        'and the hole shrinks to the reveal strip when the bar goes away'
+    expect_cutout "no bar cutout on $bar_screen" \
+        'and the hole closes entirely when the bar goes away'
 
     # The cutout line says the *shell* has decided, not that the compositor has
     # applied the new input region — those are two surfaces committing

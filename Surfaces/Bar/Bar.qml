@@ -250,7 +250,15 @@ Scope {
                     settings.floatMarginH, settings.floatMarginV,
                     modelData.width, modelData.height))
 
-            onStripChanged: BarStrips.publish(window.modelData.name, window.strip)
+            // Against the cached name, never `modelData`, for the reason
+            // `Component.onDestruction` caches it: a hotplug can re-evaluate
+            // this binding while the `ShellScreen` behind it is being taken
+            // away. Empty until `Component.onCompleted`, which does the first
+            // publish itself.
+            onStripChanged: {
+                if (window.screenName !== "")
+                    BarStrips.publish(window.screenName, window.strip);
+            }
 
             screen: modelData
 

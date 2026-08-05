@@ -142,9 +142,9 @@ Variants {
         // Less the bar's strip, when there is one to subtract. That is the
         // auto-hide case the header calls out: a bar that reserves nothing is
         // not laid out around, so the fog covers it and only a hole in this
-        // region puts the clicks back (#199). The hole follows the bar as it
-        // reveals and hides — it is a pixel at the screen edge while the bar is
-        // away, which is what keeps hover-to-reveal working through the fog.
+        // region puts the clicks back (#199). The hole opens while the bar is
+        // out and closes entirely once it goes away — there is nothing behind
+        // the fog to reach then, and the band dismissing is what #199 asks for.
         mask: Region {
             width: window.anyOpen ? window.width : 0
             height: window.anyOpen ? window.height : 0
@@ -165,8 +165,14 @@ Variants {
         // The hole is a state change worth a line of its own: #187's lesson was
         // that a click check can pass for the wrong reason, so seam 2 asserts
         // the hole exists before it asserts what a click through it did.
+        // Against the cached name rather than `modelData`, which a hotplug can
+        // take away underneath a re-evaluation — the same reason Bar.qml caches
+        // one for its own destruction line.
         onBarCutoutChanged: {
-            const line = BarStrips.policy.cutoutLine(window.modelData.name,
+            if (window.screenName === "")
+                return;
+
+            const line = BarStrips.policy.cutoutLine(window.screenName,
                                                      window.barCutout);
             if (line !== window.lastCutoutLine) {
                 window.lastCutoutLine = line;
@@ -178,6 +184,9 @@ Variants {
         // most of those land on the same rect. Logging the rect rather than the
         // recompute keeps the line meaningful.
         property string lastCutoutLine: ""
+        property string screenName: ""
+
+        Component.onCompleted: window.screenName = window.modelData.name
 
         onDrawerChanged: {
             if (window.drawer === "")

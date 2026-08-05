@@ -129,10 +129,21 @@ TestCase {
         compare(hole.height, 32);
     }
 
-    function test_d_an_auto_hidden_hidden_bar_gets_only_its_pixel() {
+    /// #199's second acceptance criterion, at the seam that decides it. There is
+    /// nothing behind the fog to reach while the bar is away — its dismiss
+    /// handler is parked outside the window with the rest of `content` — so the
+    /// whole band stays fog and a click anywhere in it dismisses.
+    function test_d_a_bar_that_is_away_gets_no_hole_at_all() {
         const strip = rectOf({ reserves: false, revealed: false });
-        const hole = policy.cutout(strip, 1920, 1080, 1920, 1080);
-        compare(hole.height, 1);
+        verify(policy.isEmpty(policy.cutout(strip, 1920, 1080, 1920, 1080)));
+    }
+
+    /// Including the pixel it would have been reachable through. A hole there
+    /// would be a row of the band that neither acts nor dismisses.
+    function test_d_not_even_over_the_reveal_strip() {
+        const strip = { x: 0, y: 0, width: 1920, height: 1,
+                        reserves: false, revealed: false };
+        verify(policy.isEmpty(policy.cutout(strip, 1920, 1080, 1920, 1080)));
     }
 
     function test_d_a_screen_with_no_bar_gets_no_hole() {
@@ -150,7 +161,8 @@ TestCase {
     }
 
     function test_d_a_hole_is_clamped_to_the_window() {
-        const strip = { x: 1900, y: 1070, width: 400, height: 400, reserves: false };
+        const strip = { x: 1900, y: 1070, width: 400, height: 400,
+                        reserves: false, revealed: true };
         const hole = policy.cutout(strip, 1920, 1080, 1920, 1080);
         compare(hole.x, 1900);
         compare(hole.y, 1070);
@@ -159,13 +171,61 @@ TestCase {
     }
 
     function test_d_a_strip_entirely_off_the_window_is_no_hole() {
-        const strip = { x: 4000, y: 0, width: 100, height: 32, reserves: false };
+        const strip = { x: 4000, y: 0, width: 100, height: 32,
+                        reserves: false, revealed: true };
         verify(policy.isEmpty(policy.cutout(strip, 1920, 1080, 1920, 1080)));
     }
 
     function test_d_a_zero_height_strip_is_no_hole() {
-        const strip = { x: 0, y: 0, width: 1920, height: 0, reserves: false };
+        const strip = { x: 0, y: 0, width: 1920, height: 0,
+                        reserves: false, revealed: true };
         verify(policy.isEmpty(policy.cutout(strip, 1920, 1080, 1920, 1080)));
+    }
+
+    // --- the registry map ----------------------------------------------------
+    //
+    // The merge lives on this side of the line so it can be checked here; the
+    // singleton that holds the map (Core/BarStrips.qml) imports Quickshell and
+    // qmltestrunner cannot load it.
+
+    function test_f_a_strip_is_added_without_touching_the_others() {
+        const before = { "DP-1": { width: 1 } };
+        const after = policy.withStrip(before, "DP-2", { width: 2 });
+        compare(after["DP-1"].width, 1);
+        compare(after["DP-2"].width, 2);
+    }
+
+    /// A new map every time, or a binding on `strips[name]` never re-evaluates.
+    function test_f_the_original_map_is_left_alone() {
+        const before = { "DP-1": { width: 1 } };
+        const after = policy.withStrip(before, "DP-2", { width: 2 });
+        compare(before["DP-2"], undefined);
+        verify(before !== after);
+    }
+
+    function test_f_publishing_the_same_screen_twice_replaces_it() {
+        let map = policy.withStrip({}, "DP-1", { width: 1 });
+        map = policy.withStrip(map, "DP-1", { width: 9 });
+        compare(map["DP-1"].width, 9);
+    }
+
+    function test_f_a_screen_is_dropped_and_the_rest_survive() {
+        const before = policy.withStrip(policy.withStrip({}, "DP-1", { width: 1 }),
+                                        "DP-2", { width: 2 });
+        const after = policy.withoutStrip(before, "DP-1");
+        compare(after["DP-1"], undefined);
+        compare(after["DP-2"].width, 2);
+        compare(before["DP-1"].width, 1);
+    }
+
+    function test_f_dropping_a_screen_that_is_not_there_is_harmless() {
+        const after = policy.withoutStrip({ "DP-1": { width: 1 } }, "DP-9");
+        compare(after["DP-1"].width, 1);
+    }
+
+    function test_f_an_absent_map_is_treated_as_an_empty_one() {
+        compare(policy.withStrip(null, "DP-1", { width: 1 })["DP-1"].width, 1);
+        compare(policy.withoutStrip(undefined, "DP-1")["DP-1"], undefined);
     }
 
     // --- the line seam 2 reads ----------------------------------------------

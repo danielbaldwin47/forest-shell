@@ -412,6 +412,25 @@ TestCase {
         verify(!policy.sameIds([], ["volume"]));
     }
 
+    function test_a_latched_delegate_gets_its_own_row() {
+        const row = policy.sliderRow("volume", fullFacts());
+        compare(row.id, "volume");
+        compare(row.percent, 45);
+        compare(row.present, true);
+    }
+
+    function test_a_slider_whose_hardware_went_says_it_is_not_there() {
+        // The one turn between hardware going away and the latch catching up.
+        // The row has to be *marked* rather than merely zeroed: the surface
+        // hides a row that says it is gone, and a 0% row it drew instead would
+        // animate the fill down to empty — this ticket backwards.
+        const facts = fullFacts();
+        facts.mic.available = false;
+        const row = policy.sliderRow("mic", facts);
+        compare(row.present, false);
+        compare(row.id, "mic");
+    }
+
     function test_a_machine_with_no_sliders_at_all_has_an_empty_id_list() {
         const facts = fullFacts();
         facts.volume.available = false;

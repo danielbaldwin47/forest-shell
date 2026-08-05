@@ -220,15 +220,6 @@ FocusScope {
                    + (next.length > 0 ? next.join(", ") : "(none)"));
     }
 
-    /// The row for one slider, bound per delegate rather than baked into the
-    /// model. A slider whose hardware disappears is still in `sliderIds` until
-    /// the latch above catches up, so this hands the delegate a blank track for
-    /// that moment rather than a null it would fault on.
-    function sliderRow(id: string): var {
-        return root.policy.slider(id, root.facts)
-            ?? root.policy.track(id, 0, "", "", false, false);
-    }
-
     onFactsChanged: root.refreshSliderIds()
 
     // --- what a press does ---------------------------------------------------
@@ -316,10 +307,24 @@ FocusScope {
                         // The id, not the row: see `sliderIds` above. The row
                         // is a binding of this delegate's own, so a level
                         // change reaches it without the model moving.
+                        //
+                        // `root.facts` is read here, in the binding, and not
+                        // inside a function this calls — #50 measured that a
+                        // binding does not reliably pick up a dependency read
+                        // one call deep, and a slider that captured nothing
+                        // would sit frozen at the level it was built with,
+                        // which is this bug wearing the opposite face.
                         required property string modelData
+                        readonly property var row:
+                            root.policy.sliderRow(modelData, root.facts)
 
                         Layout.fillWidth: true
-                        model: root.sliderRow(modelData)
+                        // A slider whose hardware went away is a delegate on
+                        // its way out — the latch drops it in the same turn.
+                        // Hidden for that turn rather than drawn as a
+                        // placeholder, because a placeholder reads 0%.
+                        visible: row.present
+                        model: row
                         policy: root.policy
 
                         onMoved: percent => ControlCenterActions.slide(modelData, percent)
@@ -650,8 +655,11 @@ FocusScope {
     Component.onDestruction: ControlCenterActions.back("drawer")
 
     Component.onCompleted: {
-        // Before the count, so the first `slider set:` line is the one that
-        // built the model rather than a change to it.
+        // A backstop, not the usual path: `facts` evaluating its binding
+        // during creation normally fires `onFactsChanged` and fills the model
+        // before this runs. `refreshSliderIds` reassigns nothing when the set
+        // has not moved, so calling it twice costs a comparison and guarantees
+        // the panel never completes with an empty slider column.
         root.refreshSliderIds();
         Logger.log("control-centre",
             root.tiles.length + " tile(s), " + root.sliderIds.length + " slider(s)");

@@ -438,6 +438,8 @@ expect_since "$mark" 'control-centre: [0-9]+ tile\(s\), [0-9]+ slider\(s\)' \
 # never appears proves nothing about a line that must not repeat.
 expect_since "$mark" 'control-centre: slider set: ' \
     'the slider model latched to the sliders this machine has'
+expect_since "$mark" 'control-centre: slider [a-z]+ built' \
+    'and the sliders behind it were built'
 
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then
@@ -740,7 +742,13 @@ check_press() {
 # empty on any change anywhere in the panel. The sliders are the one thing in
 # here that cannot be driven at this seam (see 8g: they move the caller's own
 # sound card), so the proof is taken from the other side: two dozen service
-# changes, and the latch must not report a new set for any of them.
+# changes, and nothing may be rebuilt for any of them.
+#
+# Two lines, because they answer different questions and only the second one is
+# about the bug. `slider set:` is the latch reporting on itself — useful, but a
+# rebuild that came from somewhere else entirely would leave it quiet. `slider
+# <id> built` is a ControlSlider announcing its own birth, so it stays silent
+# only if the delegates genuinely survived.
 slider_latch_mark=$(log_lines)
 
 # The three with no hardware to be missing: state and a config key, so both
@@ -802,9 +810,12 @@ check_press nonesuch 'control-centre: nonesuch unchanged — no such control' \
     'a press for a control that does not exist explains itself'
 
 # The silence #192 bought: none of the presses above touched which sliders
-# exist, so none of them may have moved the slider model.
+# exist, so none of them may have moved the slider model — and, the line that
+# is actually about the bug, none of them may have rebuilt a slider.
 expect_quiet_since "$slider_latch_mark" 'control-centre: slider set: ' \
-    'no service change rebuilt the slider model'
+    'no service change moved the slider model'
+expect_quiet_since "$slider_latch_mark" 'control-centre: slider [a-z]+ built' \
+    'and no service change rebuilt a slider, so no fill replayed'
 
 restore_host
 

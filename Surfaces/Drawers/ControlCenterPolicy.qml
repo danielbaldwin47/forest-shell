@@ -309,6 +309,24 @@ QtObject {
         return policy.sliders(facts).map(row => row.id);
     }
 
+    /// The row one latched delegate draws: its slider, or a placeholder if the
+    /// machine no longer has it.
+    ///
+    /// The placeholder exists because the latch is one step behind by
+    /// construction — hardware goes away, and for the turn before `sliderIds`
+    /// is reassigned there is a delegate with no slider under it. It is
+    /// `present: false` and the surface hides it rather than drawing it,
+    /// because a row at 0% would run the fill animation *down to empty*, which
+    /// is #192 backwards.
+    function sliderRow(id: string, facts: var): var {
+        const row = policy.slider(id, facts ?? ({}));
+        if (row !== null)
+            return row;
+        const gone = policy.track(id, 0, "", "", false, false);
+        gone.present = false;
+        return gone;
+    }
+
     /// Whether two id lists name the same things in the same order.
     ///
     /// The latch above needs this because it cannot compare references: every
@@ -335,10 +353,14 @@ QtObject {
         return null;
     }
 
+    /// `present` is "this machine still has this slider", and it is false on
+    /// exactly one row: the placeholder `sliderRow()` hands a delegate whose
+    /// hardware has gone. Every row `sliders()` returns has it true.
     function track(id: string, percent: var, icon: string, label: string,
                    muted: bool, mutable: bool): var {
         return { id: id, percent: policy.clampPercent(percent), icon: icon,
-                 label: label, muted: muted === true, mutable: mutable === true };
+                 label: label, muted: muted === true, mutable: mutable === true,
+                 present: true };
     }
 
     function volumeSlider(volume: var): var {

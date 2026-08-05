@@ -168,8 +168,13 @@ QtObject {
     }
 
     /// #81: a subscription that logs nothing is a wakeup nobody can account for
-    /// later.
+    /// later — and both edges get a line, because "it stopped when the drawer
+    /// closed" is the half a harness can only see by reading for it.
     function watching(watchers: int, intervalMs: int): string {
         return "re-reading every " + intervalMs + "ms for " + watchers + " watcher(s)";
+    }
+
+    function idle(): string {
+        return "nothing showing brightness — stopped re-reading";
     }
 }

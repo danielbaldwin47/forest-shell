@@ -179,11 +179,14 @@ TestCase {
         verify(policy.staleMs > 0);
     }
 
-    function test_the_watch_line_names_the_count_and_the_interval() {
+    function test_both_edges_of_the_subscription_have_a_line() {
         // #81: a subscription that logs nothing is a wakeup nobody can account
-        // for later.
+        // for later, and a stop with no line is the half that cannot be told
+        // from a leak.
         const line = policy.watching(2, 2000);
         verify(line.indexOf("2") >= 0);
         verify(line.indexOf("2000") >= 0);
+        verify(policy.idle().length > 0);
+        verify(policy.idle() !== line);
     }
 }

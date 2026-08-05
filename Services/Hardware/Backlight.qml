@@ -106,8 +106,9 @@ Singleton {
         // is not (measured — after a blocking `reload()`, `text()` is the new
         // contents while a property bound to it is still the old one), so a
         // step off `percent` here would be a step off the value the read was
-        // for.
-        root.refresh();
+        // for. Unconditional, not `refreshIfStale()`: a step is exactly the
+        // caller that must not be handed a remembered value.
+        root.readNow();
         root.setPercent(root.policy.stepped(root.reading(), direction));
     }
 
@@ -167,10 +168,6 @@ Singleton {
     /// How many surfaces are currently displaying a level.
     property int watchers: 0
 
-    /// Re-read the panel if the last read is old enough to be worth doubting.
-    /// Synchronous: `percent` is the panel's own by the time this returns.
-    /// Answers whether it actually read, which is a log line's worth of
-    /// difference and nothing a caller has to wait on.
     /// The panel's level as the file says it is *now*, rather than as the
     /// bindings have caught up with. Same arithmetic as `percent`, off the same
     /// read; what differs is only that this one cannot be a frame behind.
@@ -178,12 +175,23 @@ Singleton {
         return root.policy.percent(root.policy.number(sysfs.text()), root.max);
     }
 
-    function refresh(): bool {
-        if (!root.available || !root.policy.readDue(Date.now(), root.lastReadAt))
-            return false;
+    /// Read the panel, and remember when. Synchronous — `reading()` is the new
+    /// value the moment this returns.
+    function readNow(): void {
+        if (!root.available)
+            return;
         root.lastReadAt = Date.now();
         sysfs.reload();
-        return true;
+    }
+
+    /// Read the panel unless the last read is recent enough to still be worth
+    /// trusting. What a subscription does on arrival and on every tick, so that
+    /// several surfaces appearing in the same frame are one read; a step does
+    /// not use this, because a step is the one caller that must not be handed a
+    /// remembered value.
+    function refreshIfStale(): void {
+        if (root.policy.readDue(Date.now(), root.lastReadAt))
+            root.readNow();
     }
 
     function watch(): void {
@@ -193,13 +201,16 @@ Singleton {
         // The level on screen the moment the surface appears is the one #186
         // was reported against: a drawer opened after an external change showed
         // whatever the shell last happened to write.
-        root.refresh();
+        root.refreshIfStale();
     }
 
     function release(): void {
         root.watchers = Math.max(0, root.watchers - 1);
+        // Both edges are logged, and both are a policy line: "it stopped when
+        // the drawer closed" is the half of the subscription a harness can only
+        // see by reading for it (Services/README.md, and SystemStats next door).
         if (root.watchers === 0)
-            Logger.log("backlight", "nothing showing brightness — stopped re-reading");
+            Logger.log("backlight", root.policy.idle());
     }
 
     Timer {
@@ -209,7 +220,7 @@ Singleton {
         running: root.policy.pollRunning(root.watchers, root.available)
         interval: root.policy.pollMs
         repeat: true
-        onTriggered: root.refresh()
+        onTriggered: root.refreshIfStale()
     }
 
     // --- finding the panel ---------------------------------------------------

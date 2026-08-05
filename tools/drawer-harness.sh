@@ -449,6 +449,25 @@ expect_since "$mark" 'control-centre: slider set: ' \
 expect_since "$mark" 'control-centre: slider [a-z]+ built' \
     'and the sliders behind it were built'
 
+# #186's subscription, on the machine that has one. sysfs never announces a
+# brightness the shell did not set — the value is a poll() wakeup rather than an
+# inotify event — so the panel's level was whatever the shell last wrote, and
+# the facade now re-reads while a surface is showing one. Both edges are
+# asserted, because a subscription that starts and never stops is a wakeup
+# nobody would see: the stop is checked after the toggle that shuts the panel,
+# further down.
+#
+# No hardware is moved here and none needs to be: the claim is the
+# subscription, and the log lines are it. The *reading* half is
+# tools/services-harness.sh check 6b, which does move the panel and puts it
+# back.
+if grep -qa 'backlight: panel ' "$NESTED_SHELL_LOG"; then
+    expect_since "$mark" 'backlight: re-reading every [0-9]+ms for 1 watcher\(s\)' \
+        'the open control centre subscribed to the panel'
+else
+    nested_note 'no backlight on this machine — the brightness subscription is skipped'
+fi
+
 # #192, and it has to be here rather than with the toggle sweep in 8f: 8f runs
 # with the panel *shut*, and DrawerSlot.qml loads the centre from a
 # `sourceComponent`, so there is no ControlSlider in existence there and any
@@ -686,6 +705,14 @@ expect_since "$mark" 'sysmon: sampling stopped — nothing is watching' \
 mark=$(log_lines)
 nested_ipc call controlcenter toggle > /dev/null
 expect_since "$mark" 'drawers: controlcenter closed \(toggle\)' 'and it toggles shut'
+
+# #186's other edge, and the one that matters for the idle budget: the panel
+# that subscribed to the backlight above has to let go of it, or the shell
+# re-reads /sys every couple of seconds for a level nothing is showing.
+if grep -qa 'backlight: panel ' "$NESTED_SHELL_LOG"; then
+    expect_since "$mark" 'backlight: nothing showing brightness — stopped re-reading' \
+        'and the panel let go of the backlight on the way out'
+fi
 
 if nested_ipc show | sed -n '/^target dashboard$/,/^target /p' \
         | grep -qa 'function show('; then

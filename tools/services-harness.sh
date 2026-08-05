@@ -494,11 +494,19 @@ if (( CHECK_BACKLIGHT )) && [[ "$(snapshot_field "$snapshot" backlight.available
     was_raw=$(cat "/sys/class/backlight/$device/brightness" 2>/dev/null)
     was_percent=$(snapshot_field "$snapshot" backlight.percent)
 
-    sysfs_percent=$(python3 -c "
+    # What the panel is doing, as a percent, read the way the service reads it.
+    # Asked for twice — once to check the service agrees with /sys, once after
+    # an external change — so it is a function rather than the same three lines
+    # of python written out again.
+    panel_percent() {
+        python3 -c "
 import sys
 raw, mx = int(sys.argv[1]), int(sys.argv[2])
 print(round(raw / mx * 100))
-" "$(cat "/sys/class/backlight/$device/actual_brightness")" "$(cat "/sys/class/backlight/$device/max_brightness")")
+" "$(cat "/sys/class/backlight/$1/actual_brightness")" "$(cat "/sys/class/backlight/$1/max_brightness")"
+    }
+
+    sysfs_percent=$(panel_percent "$device")
     if [[ "$was_percent" == "$sysfs_percent" ]]; then
         nested_pass "the backlight service reads the panel ($device at $was_percent%)"
     else
@@ -528,11 +536,7 @@ print(round(raw / mx * 100))
     external=$(( was_percent < 50 ? 70 : 30 ))
     brightnessctl -q -d "$device" set "${external}%" 2>/dev/null
     sleep 0.3
-    ext_percent=$(python3 -c "
-import sys
-raw, mx = int(sys.argv[1]), int(sys.argv[2])
-print(round(raw / mx * 100))
-" "$(cat "/sys/class/backlight/$device/actual_brightness")" "$(cat "/sys/class/backlight/$device/max_brightness")")
+    ext_percent=$(panel_percent "$device")
     # The same grid the policy steps on: one notch down snaps to a multiple of
     # 5 rather than landing 5 below an arbitrary level.
     expected=$(python3 -c "

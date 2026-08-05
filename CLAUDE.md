@@ -237,8 +237,33 @@ through context; an Edit sends only the hunk. On a schema-sized file that is
 an order of magnitude.
 ## Session workflow
 
-If you implemented anything during a session, when fully done: push the branch,
-open a PR, and merge it.
+Push the branch after the first commit — pushed work survives a lost
+session — but do **not** open a PR yet: a pre-review PR has no valid
+`Review:` line, so it is born gate-red and forces a second full review after
+fixes land just to satisfy the check. The review happens on the branch,
+before the PR exists. Review weight follows what the diff touches, not how
+simple it looks:
+
+- **Anything executable** — QML, `tools/`, `tests/`, `.claude/hooks/`,
+  workflow YAML — gets `/code-review` (the two-axis skill, run as Context
+  discipline specifies). Hooks and workflows count: they are config that
+  executes, and a broken gate fails silently for weeks.
+- **Pure prose** — docs, README, CLAUDE.md — gets one lightweight inline
+  pass, and the line reads `Review: clean — prose only, single-pass`.
+
+If the review finds issues, fix them and re-check the fix diff — a focused
+pass over what changed, not a second full review. One full review per PR is
+the default; a fresh full pass is only for fixes large enough to be a new
+diff. Then open the PR with the review record already in the body: findings
+and their resolutions (if any) first, ending with the `Review:` line. The
+gate (`.github/workflows/review-gate.yml`, a required status check) reads
+only the **last** `Review:` line in the body and passes only `Review: clean`
+(optionally followed by a summary) — any other last line blocks merge — so a
+PR opened this way is green from its first gate run. If a PR gains commits
+after opening, re-review the new diff and append a fresh `Review:` line; the
+earlier lines stay above it as the record.
+
+When fully done: merge the PR.
 
 If the work came from a ticket, close the ticket once the PR is open and the
 work is complete — even when you cannot merge (background sessions can't).

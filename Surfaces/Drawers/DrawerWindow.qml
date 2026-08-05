@@ -208,6 +208,9 @@ Variants {
         // and empty for exactly this. The only thing it does not cover is the
         // bar's own strip, which the bar routes itself (#187).
         MouseArea {
+            // pointer-exempt: the fog is the way out, not a control. A hand
+            // over the whole screen while a drawer is open would say every
+            // pixel behind it is a button (#185).
             anchors.fill: parent
             enabled: window.anyOpen
             onClicked: Drawers.close("clicked away")

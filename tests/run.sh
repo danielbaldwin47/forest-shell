@@ -45,6 +45,14 @@ python=$(command -v python3 || true)
 # is the one tool that provably cannot match a NUL.
 "$python" tst_control_bytes.py
 
+# Every click target on the bar, the drawers and the notifications shows a
+# pointer (#185). Also a tree walk rather than a QML test, and for a harder
+# reason: no seam can see a cursor at all — it is not in the client's scene, it
+# is a request with no pixels, and the widgets do not load offscreen. A
+# regression guard against the next bare widget, not a proof; the proof is
+# hovering them on a real session.
+"$python" tst_pointer_affordance.py
+
 # The blur measurement's arithmetic (#97). The harness that takes the two
 # captures needs a real compositor, but "does this pair show a blur" is a
 # decision, and a box blur applied here is the picture the compositor is

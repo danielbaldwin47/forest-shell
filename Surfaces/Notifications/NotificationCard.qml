@@ -146,6 +146,10 @@ Rectangle {
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        // The whole card is a click target, so the whole card shows the pointer
+        // (#185) — including under the buttons above it, which are click
+        // targets of their own and set the same thing.
+        cursorShape: Qt.PointingHandCursor
         onClicked: mouse => {
             if (mouse.button === Qt.MiddleButton || !card.defaultAction)
                 card.toast.dismiss();
@@ -278,6 +282,7 @@ Rectangle {
 
                         MouseArea {
                             anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: card.toast.invoke(button.modelData)
                         }
                     }
@@ -294,6 +299,7 @@ Rectangle {
             implicitWidth: 20
             implicitHeight: 20
             hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
             opacity: hover.hovered ? 1 : 0
             onClicked: card.toast.dismiss()
 

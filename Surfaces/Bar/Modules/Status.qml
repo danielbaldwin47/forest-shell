@@ -57,7 +57,6 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
 
         interactive: true
-        opensPanel: true
         onClicked: SurfaceBus.barIndicator("wifi")
     }
 
@@ -69,7 +68,6 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
 
         interactive: true
-        opensPanel: true
         onClicked: SurfaceBus.barIndicator("bluetooth")
     }
 
@@ -94,7 +92,6 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
 
         interactive: true
-        opensPanel: true
         onClicked: SurfaceBus.barIndicator("volume")
         onStepped: direction => Audio.stepVolume(direction)
     }
@@ -125,9 +122,9 @@ Row {
         // back, then the mic row. #184 chose it anyway, for the consistency the
         // pointer promises across the cluster — if that trade reads wrong on a
         // real session, the fallback is this one indicator keeping
-        // `Audio.toggleSourceMute()` and its `opensPanel: false`.
+        // `Audio.toggleSourceMute()` — which under #185 costs it no pointer,
+        // since every interactive indicator now shows one either way.
         interactive: true
-        opensPanel: true
         onClicked: SurfaceBus.barIndicator("mic")
     }
 }

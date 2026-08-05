@@ -269,7 +269,15 @@ FocusScope {
                                     }
                                 }
 
-                                HoverHandler { id: groupHover }
+                                // The handler that already draws the highlight
+                                // carries the cursor too (#185): the header is
+                                // the `TapHandler` below, and one hover is
+                                // enough to say so.
+                                HoverHandler {
+                                    id: groupHover
+
+                                    cursorShape: Qt.PointingHandCursor
+                                }
 
                                 TapHandler {
                                     onTapped: root.expanded = group.open ? ""

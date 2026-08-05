@@ -487,6 +487,10 @@ Scope {
                 // a shell where each module grew its own dismissal is the thing
                 // #187 asks for one home for.
                 MouseArea {
+                    // pointer-exempt: dead strip, not a control. Everything the
+                    // bar offers sits above this and takes the press first; a
+                    // hand over the gaps between them would advertise a button
+                    // that is not there (#185).
                     anchors.fill: parent
                     onClicked: SurfaceBus.barClick("")
                 }

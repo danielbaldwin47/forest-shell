@@ -91,6 +91,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // Before the rows, so an action is hit-tested first and this only
+        // catches what misses them (#193).
+        PressCatcher {}
+
         ColumnLayout {
             id: rows
 

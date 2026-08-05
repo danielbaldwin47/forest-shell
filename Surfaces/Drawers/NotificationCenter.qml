@@ -108,6 +108,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // Before the layout, so a notification and its buttons are hit-tested
+        // first and this only catches what misses them (#193).
+        PressCatcher {}
+
         // Sized *from* the panel rather than anchored to it, which is not a
         // style choice: the panel's height comes from this layout's implicit
         // height, and an `anchors.fill` would make the layout's height come

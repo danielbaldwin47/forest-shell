@@ -283,6 +283,12 @@ FocusScope {
             border.width: Theme.hairline
             border.color: Theme.borderSubtle
 
+            // Before everything with text on it, so the field and the results
+            // are hit-tested first and this only catches what misses them
+            // (#193). The launcher is a clearing rather than a panel, so the
+            // dark around the card still dismisses — this covers the card.
+            PressCatcher {}
+
             // Top-lit: a 4–6% lightness delta down the surface (brief §3.2).
             Rectangle {
                 anchors.fill: parent

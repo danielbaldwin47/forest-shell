@@ -292,6 +292,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // Before the stack, so the tiles are hit-tested first and this only
+        // catches what misses them (#193).
+        PressCatcher {}
+
         // Both views live in here, and only during a transition are both drawn.
         // Clipped, so the one on its way out disappears at the card's padding
         // rather than over the edge of it.

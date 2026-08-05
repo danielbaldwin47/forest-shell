@@ -414,7 +414,7 @@ TestCase {
         // here. So the assertion is not "the lines are written down somewhere"
         // but "the file the integration guide tells you to source contains
         // them, verbatim, uncommented".
-        const conf = testCase.readConf("../integration/hyprland/forest-autostart.conf");
+        const conf = repo.read("../integration/hyprland/forest-autostart.conf");
         verify(conf !== null, "no autostart config at integration/hyprland/forest-autostart.conf");
 
         const live = conf.split("\n").map(line => line.trim())
@@ -423,18 +423,7 @@ TestCase {
             verify(live.indexOf(line) >= 0, "not shipped: " + line);
     }
 
-    /// The file at `path` relative to this test, or `null` when there is none.
-    /// Qt gates file:// reads behind QML_XHR_ALLOW_FILE_READ, which tests/run.sh
-    /// sets; a missing file comes back status 0 rather than 404.
-    function readConf(path: string): var {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", Qt.resolvedUrl(path), false);
-        xhr.send();
-        if (xhr.status !== 200 && xhr.status !== 0)
-            return null;
-        const text = String(xhr.responseText ?? "");
-        return text.length > 0 ? text : null;
-    }
+    RepoFile { id: repo }
 
     // --- what the log says ---------------------------------------------------
 

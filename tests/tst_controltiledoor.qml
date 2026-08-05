@@ -34,7 +34,13 @@
 //    the property deleted from the shipped tile, which is the one regression
 //    worth catching; reading a checked-in file to check it still contains the
 //    line the shell depends on is the seam-1 shape #140 already established
-//    (tests/tst_clipboardpolicy.qml reads the autostart conf the same way).
+//    (tests/RepoFile.qml, which tests/tst_clipboardpolicy.qml reads the
+//    autostart conf with).
+//
+// Point 1 is a characterization test of Qt rather than of this shell: if some
+// later Qt stops letting two handlers claim the same press, it goes red while
+// the shell is perfectly correct. That is the point — the fix is a workaround
+// for a routing rule, and the day the rule changes is the day to re-read it.
 //
 // What no seam checks: that the chevron is where a finger lands. That is a
 // picture (seam 3) and a live press (a real session) — this file only decides
@@ -51,8 +57,11 @@ TestCase {
     width: 200
     height: 120
 
-    // The tile's own numbers: a 24px door inset from the top-right corner by
-    // `Theme.space1`, which is 4.
+    // The tile's own numbers at the time of writing — a 24px door inset from the
+    // top-right corner by `Theme.space1`, which is 4. Nothing here depends on
+    // them staying that: all they have to do is put one click inside the corner
+    // target and one well clear of it. The tile's real geometry is seam 3's
+    // (tools/capture-harness.sh --surface controlcenter).
     readonly property int doorSize: 24
     readonly property int doorMargin: 4
 
@@ -137,26 +146,23 @@ TestCase {
     // --- 3. the shipped tile -------------------------------------------------
 
     function test_the_tile_ships_the_exclusive_grab() {
-        const source = readSource("../Surfaces/Drawers/ControlTile.qml");
+        const source = repo.read("../Surfaces/Drawers/ControlTile.qml");
         verify(source !== null, "no tile at Surfaces/Drawers/ControlTile.qml");
 
+        // Bounded to the door's own handler rather than "somewhere below
+        // `id: door`": the property is only the fix while it is on the handler
+        // that opens the panel, and a loose search would stay green if it drifted
+        // onto some later one.
         const doorAt = source.indexOf("id: door");
         verify(doorAt >= 0, "ControlTile.qml no longer declares `id: door`");
 
-        const policyAt = source.indexOf("gesturePolicy: TapHandler.ReleaseWithinBounds", doorAt);
-        verify(policyAt >= 0, "the door's TapHandler dropped its gesturePolicy — #183 is back");
+        const drillAt = source.indexOf("onTapped: tile.drillRequested()", doorAt);
+        verify(drillAt >= 0, "the door no longer opens the panel");
+
+        const handler = source.slice(doorAt, drillAt);
+        verify(/gesturePolicy\s*:\s*TapHandler\.ReleaseWithinBounds/.test(handler),
+               "the door's TapHandler dropped its gesturePolicy — #183 is back");
     }
 
-    /// The file at `path` relative to this test, or `null` when there is none.
-    /// Qt gates file:// reads behind QML_XHR_ALLOW_FILE_READ, which tests/run.sh
-    /// sets; a missing file comes back status 0 rather than 404.
-    function readSource(path: string): var {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", Qt.resolvedUrl(path), false);
-        xhr.send();
-        if (xhr.status !== 200 && xhr.status !== 0)
-            return null;
-        const text = String(xhr.responseText ?? "");
-        return text.length > 0 ? text : null;
-    }
+    RepoFile { id: repo }
 }

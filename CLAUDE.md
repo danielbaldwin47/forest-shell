@@ -173,7 +173,9 @@ where available, Explore otherwise), which returns an address or a
 conclusion, not the files. Reserve main-session Read for files about to be
 edited — and do not re-read a file after editing it: Edit and Write fail
 loudly when a change misses, so the re-read buys nothing (measured: 11 of 24
-sessions did it anyway, always on a script the session had just written).
+sessions did it anyway, and prose alone barely moved it — ~46% to ~39% — so
+`.claude/hooks/read-guard.py` now blocks a whole-file Read of a file the
+session has edited; a ranged Read stays allowed).
 
 **Code review means the two-axis skill, not a lone reviewer agent.** When a
 session is told to `/code-review` its work, invoke the

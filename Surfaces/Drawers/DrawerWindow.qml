@@ -27,8 +27,16 @@
 // and a click anywhere else reaches this window's own mask.
 //
 // The one case the geometry does not cover is an auto-hidden bar, which
-// reserves nothing to be laid out around; there the fog does cover the strip
-// and the bar is a revealed window over it.
+// reserves nothing to be laid out around; there the fog does cover the strip,
+// and #199 is what that cost — every row of #187's table failed again, because
+// the two `WlrLayer.Top` surfaces are ordered by map order and this one maps
+// second, so the revealed bar sits *under* the fog rather than over it.
+//
+// What covers it instead is a hole in this window's input mask over the bar's
+// current rect, which the bar publishes per screen through Core/BarStrips.qml
+// and Core/BarStripsPolicy.qml decides the shape of. Geometry is still the
+// mechanism wherever geometry reaches; the hole is only ever cut in the case
+// where it does not.
 //
 // ## Why every screen gets one
 //
@@ -119,13 +127,57 @@ Variants {
         // The fog is drawn, not the window.
         color: "transparent"
 
+        /// The bar's own input rect on this screen, cut back out of the fog
+        /// (#199). A zero rect for every case #187's geometry already covers —
+        /// see Core/BarStripsPolicy.qml for which those are.
+        readonly property var barCutout: BarStrips.policy.cutout(
+            BarStrips.stripOn(window.modelData.name),
+            window.width, window.height,
+            window.modelData.width, window.modelData.height)
+
         // Input over the whole screen while a drawer is open *anywhere*, and
         // none at all while one is leaving: a fog that is fading out has
         // already stopped being a thing to click on.
+        //
+        // Less the bar's strip, when there is one to subtract. That is the
+        // auto-hide case the header calls out: a bar that reserves nothing is
+        // not laid out around, so the fog covers it and only a hole in this
+        // region puts the clicks back (#199). The hole follows the bar as it
+        // reveals and hides — it is a pixel at the screen edge while the bar is
+        // away, which is what keeps hover-to-reveal working through the fog.
         mask: Region {
             width: window.anyOpen ? window.width : 0
             height: window.anyOpen ? window.height : 0
+
+            Region {
+                intersection: Intersection.Subtract
+
+                x: window.barCutout.x
+                y: window.barCutout.y
+                // Only while something is open. The outer region is already
+                // empty otherwise, and subtracting from nothing is at best a
+                // no-op the compositor still has to be told about.
+                width: window.anyOpen ? window.barCutout.width : 0
+                height: window.anyOpen ? window.barCutout.height : 0
+            }
         }
+
+        // The hole is a state change worth a line of its own: #187's lesson was
+        // that a click check can pass for the wrong reason, so seam 2 asserts
+        // the hole exists before it asserts what a click through it did.
+        onBarCutoutChanged: {
+            const line = BarStrips.policy.cutoutLine(window.modelData.name,
+                                                     window.barCutout);
+            if (line !== window.lastCutoutLine) {
+                window.lastCutoutLine = line;
+                Logger.log("drawers", line);
+            }
+        }
+
+        // The cutout is recomputed on every bar reveal, hide and reflow, and
+        // most of those land on the same rect. Logging the rect rather than the
+        // recompute keeps the line meaningful.
+        property string lastCutoutLine: ""
 
         onDrawerChanged: {
             if (window.drawer === "")

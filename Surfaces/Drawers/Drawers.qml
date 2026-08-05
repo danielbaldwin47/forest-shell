@@ -143,7 +143,12 @@ Singleton {
             if (action === "dismiss")
                 root.close("bar");
             else if (action === "toggle")
-                root.toggle(target);
+                // Back out through the bus rather than straight to `toggle()`
+                // next door. It is the same verb either way, but the bus is
+                // where a bar button's log line and its absent-surface warning
+                // live (#37), and a door should not lose those for having come
+                // through the routing table.
+                SurfaceBus.toggle(target);
         }
     }
 

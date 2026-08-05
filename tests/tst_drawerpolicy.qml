@@ -2,10 +2,10 @@
 // screen, what a hotplug does to that, and the timings the cross-drawer swap
 // needs that are not already a design-system step.
 //
-// The window itself is a `PanelWindow` with a `HyprlandFocusGrab` in it and so
-// cannot be loaded here; that half is driven over IPC in a nested compositor by
-// tools/drawer-harness.sh, and photographed by tools/capture-harness.sh
-// --surface drawer.
+// The window itself is a `PanelWindow` and so cannot be loaded here. That half
+// is driven over IPC in a nested compositor by tools/drawer-harness.sh, clicked
+// at by tools/bar-click-harness.sh, and photographed by
+// tools/capture-harness.sh --surface drawer.
 import QtQuick
 import QtTest
 import "../Surfaces/Drawers"
@@ -35,8 +35,8 @@ TestCase {
     }
 
     function test_asking_for_a_second_drawer_swaps_rather_than_stacking() {
-        // One window, one focus grab: two drawers open at once is the state
-        // this topology exists to make unrepresentable (#12).
+        // One window, one name: two drawers open at once is the state this
+        // topology exists to make unrepresentable (#12).
         compare(policy.next("session", "launcher"), "launcher");
         compare(policy.next("launcher", "session"), "session");
     }
@@ -44,7 +44,7 @@ TestCase {
     function test_the_launcher_is_a_drawer() {
         // #39 lands in the shared window rather than in a surface of its own,
         // which is what makes the swap above a transition instead of two
-        // windows racing for the focus grab.
+        // windows racing for focus.
         compare(policy.known("launcher"), true);
         compare(oneDrawer.known("launcher"), false);
     }
@@ -98,11 +98,21 @@ TestCase {
     // tools/bar-click-harness.sh, at seam 2.
 
     function test_a_bar_click_with_nothing_open_routes_nowhere() {
-        // The everyday case, and the one that must stay cheap: with no drawer
-        // open the bar is just a bar, and dead space does nothing at all.
+        // With no drawer open the bar is just a bar: dead space does nothing,
+        // and neither does a control.
         compare(policy.barClick("", ""), "none");
-        compare(policy.barClick("", "launcher"), "none");
         compare(policy.barClick("", "mute"), "none");
+    }
+
+    function test_a_door_opens_its_drawer_with_nothing_open() {
+        // The everyday case, and the one this table broke on its way in: every
+        // bar click routes through here now, doors included, so a door has to
+        // answer "toggle" whether or not something is already open. Answering
+        // "none" made the launcher button dead on an idle bar — caught at
+        // seam 2, by tools/bar-click-harness.sh check 1, which exists to make
+        // exactly this falsifiable.
+        compare(policy.barClick("", "launcher"), "toggle");
+        compare(policy.next("", "launcher"), "launcher");
     }
 
     function test_a_drawers_own_door_closes_it() {

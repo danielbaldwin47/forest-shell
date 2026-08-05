@@ -28,9 +28,16 @@
 #   5. with a drawer open, a click on an interactive control that is not a door
 #      runs the control and leaves the drawer alone
 #   6. a click on the desktop still dismisses, still as `clicked away`
-#   7. the control centre's own button opens it, and Escape still closes a
-#      drawer that a bar click opened
+#   7. the control centre's own button opens *and* closes it, and Escape still
+#      closes a drawer that a bar click opened
 #   8. the launcher global — what super+space runs — still toggles
+#   9. with a second screen plugged in, a click on it dismisses too
+#
+# What it does not cover, and the code says so where it lives: an auto-hidden
+# bar. That bar reserves nothing, so the fog is laid out over its strip instead
+# of below it and every row of the table above fails — the drawer maps second
+# and is above. It fails that way on `main` too; this ticket did not introduce
+# it and does not fix it (see the header of Surfaces/Drawers/DrawerWindow.qml).
 #
 # ## How the targets are aimed
 #
@@ -261,6 +268,17 @@ click "$control_x" "$mid_y"
 expect_since "$mark" 'drawers: controlcenter opened on ' \
     'the control centre button opens it'
 
+# The ticket's first acceptance criterion, in its own words and with its own
+# surface: check 2 makes the same claim about the launcher, and the launcher is
+# at the other end of the bar in the other cluster, so both are worth having.
+mark=$(log_lines)
+click "$control_x" "$mid_y"
+expect_since "$mark" 'drawers: controlcenter closed \(toggle\)' \
+    "the control centre's own button closes it"
+
+click "$control_x" "$mid_y"
+expect_open controlcenter true 'and opens it again, to press Escape at'
+
 mark=$(log_lines)
 nested_key_focused escape
 expect_since "$mark" 'drawers: controlcenter closed \(escape\)' \
@@ -288,6 +306,35 @@ mark=$(log_lines)
 nested_hyprctl dispatch global forest-shell:launcher > /dev/null
 expect_since "$mark" 'drawers: launcher closed \(toggle\)' \
     'and still closes it'
+
+# --- 9. a click on a screen the drawer is not on still dismisses -------------
+#
+# The grab's last job, inherited by geometry. The drawer window now maps on
+# every screen while one is open — fog on the drawer's own screen, an empty
+# input mask everywhere else — because dismissing from a second monitor used to
+# be the grab consuming clicks everywhere it did not name. That is a new claim
+# and this is the only seam that can hold more than one screen (#98), so it is
+# asserted rather than asserted-in-a-comment.
+#
+# The output is plugged in *before* the drawer opens, deliberately: a screen set
+# that changes under an open drawer is the hotplug reset (`survivesScreenChange`)
+# and would close it for an entirely different reason.
+
+SECOND="HEADLESS-9"
+if nested_output_add "$SECOND, 1280x800@60, 1280x0, 1"; then
+    sleep 1.5
+    nested_ipc call controlcenter toggle > /dev/null
+    expect_open controlcenter true 'the control centre is open on the first screen'
+
+    mark=$(log_lines)
+    click 1920 400
+    expect_since "$mark" 'drawers: controlcenter closed \(clicked away\)' \
+        'a click on the other screen dismisses the drawer'
+
+    nested_output_remove "$SECOND" > /dev/null
+else
+    nested_fail "could not plug in $SECOND — the second-screen claim is untested"
+fi
 
 nested_down
 exit $(( nested_fail_count > 0 ))

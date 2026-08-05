@@ -26,5 +26,9 @@ BarIndicator {
     icon: "search"
 
     interactive: true
-    onClicked: SurfaceBus.toggle("launcher")
+    // `barClick` and not `toggle`, like every other door on this bar (#187):
+    // what a bar click means depends on what is already open — the same button
+    // opens, closes and swaps — and that table has one home
+    // (Surfaces/Drawers/DrawerPolicy.qml). It reaches `toggle` from there.
+    onClicked: SurfaceBus.barClick("launcher")
 }

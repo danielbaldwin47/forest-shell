@@ -120,9 +120,35 @@ Singleton {
     /// `target` is what the click landed on: `""` for dead space or a readout,
     /// a drawer's name for one of its doors. The answer is the controller's —
     /// see Surfaces/Drawers/DrawerPolicy.qml `barClick` for the table.
+    ///
+    /// **Every** click on the bar comes here, doors included, which is what
+    /// makes that table the one home the ticket asked for rather than a
+    /// description of behaviour decided in four other places. A door's answer
+    /// is `toggle`, and the controller sends it straight back through `toggle`
+    /// above — so the bus's own name check, its absent-surface warning and its
+    /// log line are all still on the path a bar button takes.
     function barClick(target: string): void {
-        if (root.barHandler === null || typeof root.barHandler.barClick !== "function")
+        if (root.barHandler === null) {
+            // A door pressed before the drawers arm still has something to say,
+            // and it is `toggle`'s to say: #37 wants a button for a surface
+            // that has not landed to log the miss rather than fail silently.
+            if (target !== "")
+                root.toggle(target);
+            // Dead space, though, is a click with nothing to put away — and the
+            // bar is clickable from its first frame, so this is the ordinary
+            // state for a moment on every start. Nothing to report.
             return;
+        }
+
+        // A registered handler that cannot answer is the other thing entirely —
+        // a wiring mistake, and one that would otherwise present as dead space
+        // that stopped dismissing. `toggle` warns about its own version of this
+        // for the same reason.
+        if (typeof root.barHandler.barClick !== "function") {
+            Logger.warn("surfaces", "the bar's click handler has no barClick()");
+            return;
+        }
+
         root.barHandler.barClick(target);
     }
 }

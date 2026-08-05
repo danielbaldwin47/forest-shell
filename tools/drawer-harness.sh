@@ -5,7 +5,7 @@
 #   tools/drawer-harness.sh --keep   # leave the nested session up to poke at
 #
 # The drawer is a lifecycle, which is the class of thing `tests/` cannot see at
-# all: whether the window actually maps, whether the focus grab dismisses it,
+# all: whether the window actually maps, whether clicking away dismisses it,
 # whether the state resets, whether the IPC door is callable at all. The
 # decisions behind it — which drawer is open, which screen, what a hotplug does
 # — are unit-checked in tests/tst_drawerpolicy.qml; this is the half that needs

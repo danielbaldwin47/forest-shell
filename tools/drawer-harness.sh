@@ -441,6 +441,48 @@ expect_since "$mark" 'control-centre: slider set: ' \
 expect_since "$mark" 'control-centre: slider [a-z]+ built' \
     'and the sliders behind it were built'
 
+# #192, and it has to be here rather than with the toggle sweep in 8f: 8f runs
+# with the panel *shut*, and DrawerSlot.qml loads the centre from a
+# `sourceComponent`, so there is no ControlSlider in existence there and any
+# silence asserted over it would be free. Here the panel is open and the three
+# sliders have just announced themselves, which is what makes the two silences
+# below mean something.
+#
+# The bug: `facts` is rebuilt on every service change, and the slider model was
+# bound straight to it, so every change destroyed and re-created all three
+# ControlSlider delegates — and a re-created slider animates its fill up from
+# empty, because a `Behavior` does not run during creation. The level therefore
+# "refilled" on every volume key and every brightness step.
+#
+# Do Not Disturb and Theme are the two controls that change a service without
+# touching the caller's hardware — 8f's problem, and the reason it restores
+# radios — so they are the ones driven here. Each is pressed twice, which puts
+# it back and doubles the number of changes. Theme is the better of the two by
+# accident: it writes a config key, and Core/Config.qml replaces `values`
+# wholesale on every write, so the panel's `sliderOrder` binding gets a new
+# array identity too. That is a second, independent way to reset a `Repeater`,
+# and the latch has to absorb it as well.
+slider_mark=$(log_lines)
+for control in dnd mode dnd mode; do
+    nested_ipc call controlcenter press "$control" > /dev/null 2>&1
+    sleep 0.3
+done
+
+# Asserted before the silences, and the whole reason the silences count: a
+# sweep that drove nothing is silent for free. This is the check that says the
+# services really did change underneath the open panel.
+expect_since "$slider_mark" 'control-centre: mode (on|off)' \
+    'the sweep really did change a service under the open panel'
+
+# The latch reporting on itself. Useful, but not sufficient on its own — a
+# rebuild that came from somewhere else would leave this quiet.
+expect_quiet_since "$slider_mark" 'control-centre: slider set: ' \
+    'a service change does not move the slider model'
+# The one that is actually about the bug: a ControlSlider announcing its own
+# birth. Silent only if the delegates genuinely survived the change.
+expect_quiet_since "$slider_mark" 'control-centre: slider [a-z]+ built' \
+    'and does not rebuild a slider, so no fill replays from empty'
+
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then
     nested_pass 'the control centre agrees it is open'
@@ -744,13 +786,6 @@ check_press() {
 # sound card), so the proof is taken from the other side: two dozen service
 # changes, and nothing may be rebuilt for any of them.
 #
-# Two lines, because they answer different questions and only the second one is
-# about the bug. `slider set:` is the latch reporting on itself — useful, but a
-# rebuild that came from somewhere else entirely would leave it quiet. `slider
-# <id> built` is a ControlSlider announcing its own birth, so it stays silent
-# only if the delegates genuinely survived.
-slider_latch_mark=$(log_lines)
-
 # The three with no hardware to be missing: state and a config key, so both
 # halves are exact.
 check_press dnd 'control-centre: dnd on' 'pressing Do Not Disturb asks for it on'
@@ -808,14 +843,6 @@ nested_ipc call controlcenter back > /dev/null 2>&1
 # and a keybind that does nothing deserves the one line saying why.
 check_press nonesuch 'control-centre: nonesuch unchanged — no such control' \
     'a press for a control that does not exist explains itself'
-
-# The silence #192 bought: none of the presses above touched which sliders
-# exist, so none of them may have moved the slider model — and, the line that
-# is actually about the bug, none of them may have rebuilt a slider.
-expect_quiet_since "$slider_latch_mark" 'control-centre: slider set: ' \
-    'no service change moved the slider model'
-expect_quiet_since "$slider_latch_mark" 'control-centre: slider [a-z]+ built' \
-    'and no service change rebuilt a slider, so no fill replayed'
 
 restore_host
 

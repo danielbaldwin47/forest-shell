@@ -283,7 +283,7 @@ QtObject {
     // --- the sliders ---------------------------------------------------------
 
     /// The sliders this machine can offer: `{ id, percent, icon, label, muted,
-    /// mutable }`. A tower on a DisplayPort monitor has no
+    /// mutable, present }`. A tower on a DisplayPort monitor has no
     /// `/sys/class/backlight` and a machine with no microphone has no source —
     /// in both cases a slider that moves nothing is worse than an absent one.
     function sliders(facts: var): var {

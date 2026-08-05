@@ -207,11 +207,17 @@ FocusScope {
     // going away, or the user reordering them. A level change is then a
     // property update on a live delegate, and the fill tweens from where it
     // was, which is what the `Behavior` was written for.
-    property var sliderIds: []
+    /// `null` until the first latch, and a list — possibly an empty one —
+    /// after it. The distinction is not decoration: a machine with no sound
+    /// card, no microphone and no backlight latches `[]`, and starting this at
+    /// `[]` would make that indistinguishable from "not latched yet" and log
+    /// nothing at all on the one machine whose empty slider column most wants
+    /// explaining.
+    property var sliderIds: null
 
     function refreshSliderIds(): void {
         const next = root.policy.sliderIds(root.facts);
-        if (root.policy.sameIds(root.sliderIds, next))
+        if (root.sliderIds !== null && root.policy.sameIds(root.sliderIds, next))
             return;
         root.sliderIds = next;
         // The line seam 2 asserts on: drive the volume and this must not
@@ -298,7 +304,7 @@ FocusScope {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space1
-                visible: root.sliderIds.length > 0
+                visible: (root.sliderIds ?? []).length > 0
 
                 Repeater {
                     model: root.sliderIds
@@ -662,6 +668,7 @@ FocusScope {
         // the panel never completes with an empty slider column.
         root.refreshSliderIds();
         Logger.log("control-centre",
-            root.tiles.length + " tile(s), " + root.sliderIds.length + " slider(s)");
+            root.tiles.length + " tile(s), "
+            + (root.sliderIds ?? []).length + " slider(s)");
     }
 }

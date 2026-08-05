@@ -90,4 +90,39 @@ Singleton {
         Logger.log("surfaces", name + " toggled from the bar");
         handler.toggle();
     }
+
+    // --- a click on the bar that no control wanted -----------------------------
+    //
+    // #187: while a drawer is open, the bar is the only surface over its own
+    // strip, so a click on the gaps between modules reaches nothing. It should
+    // put the drawer away — and the bar cannot decide that itself, because it
+    // does not know which of five drawers is open and must not learn. That is
+    // the same problem `toggle` above solves, one step further along: not "open
+    // the surface called X" but "here is what happened on the bar, do whatever
+    // it means to you".
+
+    /// Who answers that. Registered once, by the surface that covers the
+    /// desktop; `null` until it does, and a click before then is a no-op rather
+    /// than a warning — an early click on a bar whose drawers have not armed
+    /// yet means nothing and has nothing to put away.
+    ///
+    /// A slot of its own rather than a sixth name in `handlers`, because it is
+    /// not a name being asked for: every drawer is one tenant of one controller,
+    /// and it is that controller — not a drawer — that knows whether anything is
+    /// open at all.
+    property var barHandler: null
+
+    function registerBar(handler: var): void {
+        root.barHandler = handler;
+        Logger.log("surfaces", "bar clicks routed to the drawers");
+    }
+
+    /// `target` is what the click landed on: `""` for dead space or a readout,
+    /// a drawer's name for one of its doors. The answer is the controller's —
+    /// see Surfaces/Drawers/DrawerPolicy.qml `barClick` for the table.
+    function barClick(target: string): void {
+        if (root.barHandler === null || typeof root.barHandler.barClick !== "function")
+            return;
+        root.barHandler.barClick(target);
+    }
 }

@@ -88,6 +88,64 @@ TestCase {
         compare(policy.next("dashboard", "launcher"), "launcher");
     }
 
+    // --- a click on the bar --------------------------------------------------
+    //
+    // #187's table. Worth saying once, here, what these can and cannot show:
+    // the defect #187 reported was a click that never arrived, and no test on
+    // this side of the line can see that — the state machine above was already
+    // correct and passed while the shell was broken. What is checked here is
+    // the routing the fix adds. That the click arrives at all is
+    // tools/bar-click-harness.sh, at seam 2.
+
+    function test_a_bar_click_with_nothing_open_routes_nowhere() {
+        // The everyday case, and the one that must stay cheap: with no drawer
+        // open the bar is just a bar, and dead space does nothing at all.
+        compare(policy.barClick("", ""), "none");
+        compare(policy.barClick("", "launcher"), "none");
+        compare(policy.barClick("", "mute"), "none");
+    }
+
+    function test_a_drawers_own_door_closes_it() {
+        // Row 1: the button that opened it closes it. Through `next()`, which
+        // is what makes this the same gesture as the keybind rather than a
+        // second spelling of it.
+        compare(policy.barClick("controlcenter", "controlcenter"), "toggle");
+        compare(policy.next("controlcenter", "controlcenter"), "");
+    }
+
+    function test_another_drawers_door_swaps() {
+        // Row 2, and the reporter's own case: control centre open, launcher
+        // button clicked, one gesture.
+        compare(policy.barClick("controlcenter", "launcher"), "toggle");
+        compare(policy.next("controlcenter", "launcher"), "launcher");
+    }
+
+    function test_dead_space_dismisses() {
+        // Row 3. `""` is what the bar sends when nothing claimed the click —
+        // the gaps, and the indicators that are readouts rather than buttons.
+        compare(policy.barClick("controlcenter", ""), "dismiss");
+        compare(policy.barClick("launcher", ""), "dismiss");
+    }
+
+    function test_an_interactive_control_leaves_the_drawer_alone() {
+        // Row 4, and the row worth being explicit about: mute, the media
+        // transport, the keyboard layout and the recorder are reached for
+        // *while* a panel is open. Closing the panel under the user for using
+        // one would be a worse bug than the one this ticket fixes.
+        compare(policy.barClick("controlcenter", "mute"), "none");
+        compare(policy.barClick("controlcenter", "media"), "none");
+        compare(policy.barClick("dashboard", "recorder"), "none");
+    }
+
+    function test_a_door_for_a_drawer_nobody_built_is_not_a_dismissal() {
+        // The hazard the toggle test above is written against, on this table
+        // too: an unbuilt name must not fall through to "dismiss", or a bar
+        // button for a surface that has not landed would close the drawer that
+        // is open — which is exactly what #37 says a missing surface must not
+        // do. `notepad` is not on any build plan.
+        compare(policy.barClick("session", "notepad"), "none");
+    }
+
     // --- which screen --------------------------------------------------------
 
     function test_a_drawer_opens_on_the_focused_screen() {

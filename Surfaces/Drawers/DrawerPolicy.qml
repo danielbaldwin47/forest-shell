@@ -55,6 +55,37 @@ QtObject {
         return current === requested ? "" : requested;
     }
 
+    /// What a click on the *bar* does to the open drawer (#187).
+    ///
+    /// The whole table, in one place, because the alternative is four bar
+    /// modules each growing their own idea of dismissal:
+    ///
+    ///     the open drawer's own door      →  "toggle"   — it closes
+    ///     a different drawer's door       →  "toggle"   — swap, in one gesture
+    ///     dead space, or a readout        →  "dismiss"  — put it away
+    ///     an interactive control          →  "none"     — it acts, drawer stays
+    ///
+    /// `target` is what the click landed on: a drawer's name for a door, `""`
+    /// for anything that claimed nothing, and any other name for a control that
+    /// is not a door. The last row is the one worth saying out loud — mute, the
+    /// media transport, the keyboard layout and the recorder are things you
+    /// reach for *while* a panel is open, and a shell that closed the panel
+    /// under you for using one would be worse than one that swallowed the click.
+    ///
+    /// Toggling is `next()` above and not a separate answer here: a door's
+    /// close and a door's swap are the same verb from the same table, which is
+    /// what makes the swap a transition rather than a close and then an open.
+    ///
+    /// With nothing open there is nothing to route: every one of these is
+    /// "none", and the control — if there is one — does what it always did.
+    function barClick(current: string, target: string): string {
+        if (current === "")
+            return "none";
+        if (policy.known(target))
+            return "toggle";
+        return target === "" ? "dismiss" : "none";
+    }
+
     // --- which screen --------------------------------------------------------
 
     /// The screen a drawer opens on: the focused one, by name.

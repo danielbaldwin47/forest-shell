@@ -81,14 +81,21 @@
 # shellcheck source=qs-runtime.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qs-runtime.sh"
 
+# Where this file's own siblings are — nested-click.c and the protocol it is
+# built against. Resolved once, at source time, because `nested_click` is
+# called from harnesses that have long since `cd`'d somewhere else.
+NESTED_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- state, all owned by this file ------------------------------------------
 
 NESTED_DISPLAY=""       # the wayland-N socket the nested compositor is on
 NESTED_SIGNATURE=""     # the nested Hyprland's instance signature — see nested_up
 NESTED_WORK=""          # scratch dir: configs, logs, captures
 NESTED_ENV=()           # extra `KEY=value` for the shell — see nested_shell
+NESTED_CONFIG=()        # extra hyprland.conf lines — see nested_up
 NESTED_HYPR_LOG=""
 NESTED_HYPR_PID=""
+NESTED_CLICK_BIN=""     # the click tool, built on first use — see nested_click
 NESTED_SHELL_LOG=""
 NESTED_SHELL_PID=""
 NESTED_ENTRY=""        # the entry point running in there; `ipc` needs it too
@@ -186,6 +193,16 @@ animations { enabled = false }
 misc { disable_hyprland_logo = true, disable_splash_rendering = true }
 bind = SUPER, Q, exit
 EOF
+        # Anything else the harness needs the *compositor* configured with, one
+        # line per entry: `NESTED_CONFIG=('input { kb_layout = us,de }')`. Here
+        # because some of what the shell shows is a fact about the session it is
+        # in rather than about the shell — the keyboard-layout module is not on
+        # the bar at all on a one-layout machine, so a harness that needs to
+        # click it has to give the compositor two (#187).
+        local line
+        for line in "${NESTED_CONFIG[@]}"; do
+            printf '%s\n' "$line"
+        done
     } > "$NESTED_WORK/hyprland.conf"
 
     # Which socket is ours, by set difference rather than "the newest one" —
@@ -392,6 +409,73 @@ nested_key() {
 ## form that reaches a layer shell (measured on Hyprland 0.56.1).
 nested_key_focused() {
     nested_hyprctl dispatch sendshortcut ", $1, " > /dev/null
+}
+
+## Click inside the nested session, at a point in the compositor's *global*
+## coordinates: `nested_click 24 24`, `nested_click 640 400 right`.
+##
+## Two halves, because no one instrument does both. `hyprctl dispatch
+## movecursor` warps the cursor and re-runs hit testing, which is the only form
+## that spans several outputs — and it cannot press a button. `sendshortcut`
+## carries mouse buttons and answers `ok`, but resolves its target as a
+## *toplevel*, so against the bar, a drawer or the lock it delivers nothing at
+## all and says so nowhere (measured on Hyprland 0.56.1, with a drawer open and
+## with none: the shell's log stayed silent for every spelling of it). So the
+## button goes in through a virtual pointer instead — tools/nested-click.c,
+## above libinput and below anything the shell can see, so the click is
+## hit-tested, focus-grabbed and delivered exactly as a real one is. That is
+## what makes *delivery* assertable, which is the whole of #187.
+##
+## Aim it with `hyprctl layers`: a layer surface reports the `xywh` this takes.
+nested_click() {
+    local x="$1" y="$2" button="${3:-left}"
+    nested_click_tool || return 1
+    nested_hyprctl dispatch movecursor "$x" "$y" > /dev/null || return 1
+    # The warp is a compositor-side event the surface under it has to be told
+    # about before the button lands on it; without the pause the press arrives
+    # in the same breath as the enter and the client has not laid out yet.
+    sleep 0.2
+    nested_env "$NESTED_CLICK_BIN" "$button" || return 1
+}
+
+## Build tools/nested-click.c against the vendored protocol, once per run.
+##
+## Built rather than vendored as a binary, and built into the run's own scratch
+## dir rather than cached: a stale click tool is the kind of failure that reads
+## as the shell being broken, and 0.3s of `cc` per harness run buys never
+## having to wonder. Needs `wayland-scanner` and a C compiler — the same class
+## of dependency `wtype` already is, and the failure says which one is missing.
+nested_click_tool() {
+    [[ -n "${NESTED_CLICK_BIN:-}" && -x "${NESTED_CLICK_BIN:-}" ]] && return 0
+    [[ -n "$NESTED_WORK" ]] || { echo "no nested session to click in" >&2; return 1; }
+
+    local build="$NESTED_WORK/click"
+    local xml="$NESTED_TOOLS/protocols/wlr-virtual-pointer-unstable-v1.xml"
+    mkdir -p "$build"
+
+    local missing=()
+    command -v wayland-scanner > /dev/null || missing+=(wayland-scanner)
+    command -v cc > /dev/null || missing+=(cc)
+    pkg-config --exists wayland-client 2> /dev/null || missing+=(wayland-client)
+    if (( ${#missing[@]} )); then
+        echo "cannot build the click tool — missing: ${missing[*]}" >&2
+        return 1
+    fi
+
+    {
+        wayland-scanner client-header "$xml" \
+            "$build/wlr-virtual-pointer-unstable-v1-client-protocol.h" &&
+        wayland-scanner private-code "$xml" \
+            "$build/wlr-virtual-pointer-unstable-v1-protocol.c" &&
+        cc -O1 -o "$build/nested-click" "$NESTED_TOOLS/nested-click.c" \
+            "$build/wlr-virtual-pointer-unstable-v1-protocol.c" \
+            -I"$build" $(pkg-config --cflags --libs wayland-client)
+    } > "$build/build.log" 2>&1 || {
+        echo "the click tool did not build — see $build/build.log" >&2
+        return 1
+    }
+
+    NESTED_CLICK_BIN="$build/nested-click"
 }
 
 ## Run a shell entry point inside the nested session, and wait for it to say it

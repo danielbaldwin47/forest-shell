@@ -23,10 +23,25 @@ thin.
 **2. `tools/nested-session.sh` — the real shell inside a nested Hyprland.**
 Everything that only exists once a compositor is involved: lifecycles that
 depend on real Wayland protocol events, IPC, layer-shell behaviour, keyboard
-focus, anything `Quickshell.*`. Drive it over IPC or with `nested_key`, and
-assert on the log. `tools/lock-harness.sh` and `tools/settings-harness.sh` are
-the worked examples; a harness that edits config sets `NESTED_ENV` to a scratch
-`XDG_CONFIG_HOME` so it does not touch the session running it.
+focus, anything `Quickshell.*`. Drive it over IPC, with `nested_key`, or with
+`nested_click`, and assert on the log. `tools/lock-harness.sh` and
+`tools/settings-harness.sh` are the worked examples; a harness that edits config
+sets `NESTED_ENV` to a scratch `XDG_CONFIG_HOME` so it does not touch the
+session running it, and one that needs the *compositor* configured differently —
+two keyboard layouts, say — sets `NESTED_CONFIG`.
+
+**Pointer delivery is drivable here too, and it is not the same seam as IPC**
+(#187). `nested_click x y` warps with `hyprctl` and presses through a virtual
+pointer (`tools/nested-click.c`), so the button is hit-tested and focus-routed
+exactly as a real one is. Reach for it whenever the claim is that a *click*
+does something: #187 was a bar whose buttons were unreachable while a drawer
+was open, and every IPC-driven check passed throughout, because the verb was
+never the broken part. `hyprctl dispatch sendshortcut` is the trap — it carries
+mouse buttons, answers `ok`, and delivers nothing to a layer surface, which the
+whole shell is. `tools/bar-click-harness.sh` is the worked example, and it aims
+its clicks by writing the bar's module layout into the scratch config and
+reading the bar's own rect out of `hyprctl layers` rather than guessing at icon
+widths.
 
 This seam is also the only place the shell is ever on more than one screen.
 `NESTED_MONITORS` declares the layout and `nested_output_add` /

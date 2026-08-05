@@ -26,7 +26,9 @@ Item {
     id: slider
 
     /// The row ControlCenterPolicy handed over: `{ id, percent, icon, label,
-    /// muted, mutable }`.
+    /// muted, mutable, present }`. `present` is false on the placeholder the
+    /// policy returns for a slider whose hardware has gone; the control centre
+    /// hides that row rather than drawing it, so nothing here has to read it.
     required property var model
     required property ControlCenterPolicy policy
 

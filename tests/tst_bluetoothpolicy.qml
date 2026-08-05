@@ -142,6 +142,74 @@ TestCase {
         verify(policy.deviceSignature(before) !== policy.deviceSignature(after));
     }
 
+    // --- #189: a handle BlueZ re-created ------------------------------------
+    //
+    // The signature is what decides whether the panel is rebuilt, and until #189
+    // it was made only of facts about the *device*: address, name, and the three
+    // flags. A BlueZ device object that goes away and comes back — the adapter
+    // cycling, the device leaving and re-entering range — carries every one of
+    // those unchanged, so the gate held the list still and the rows went on
+    // pointing at a destroyed handle. A press then threw to the QML console
+    // instead of connecting anything, which is one of the three ways #189's
+    // dead button looks identical from the outside.
+    //
+    // Identity cannot be read off a single reading, so it is counted: the
+    // generation for an address goes up when the handle behind it is not the
+    // handle that was there before, and the signature carries the number.
+
+    function test_a_handle_that_has_not_moved_keeps_its_generation() {
+        const handle = { marker: 1 };
+        const rows = [device("00:01", { live: handle })];
+        const first = policy.handleGenerations(rows, ({}));
+        compare(first["00:01"].generation, 0);
+        compare(policy.handleGenerations(rows, first)["00:01"].generation, 0);
+    }
+
+    function test_a_re_created_handle_bumps_the_generation() {
+        const before = policy.handleGenerations(
+            [device("00:01", { live: { marker: 1 } })], ({}));
+        const after = policy.handleGenerations(
+            [device("00:01", { live: { marker: 2 } })], before);
+        compare(after["00:01"].generation, 1);
+    }
+
+    function test_a_re_created_handle_republishes_behind_an_unchanged_signature() {
+        // Every field the old signature was made of is identical here: same
+        // address, same name, same flags. Only the object differs.
+        const facts = { name: "Zen Zone", paired: true, bonded: true };
+        const oldHandle = { marker: 1 };
+        const newHandle = { marker: 2 };
+
+        const first = [device("00:01", Object.assign({ live: oldHandle }, facts))];
+        const firstGen = policy.handleGenerations(first, ({}));
+        const before = policy.deviceRows(first, firstGen);
+
+        const second = [device("00:01", Object.assign({ live: newHandle }, facts))];
+        const after = policy.deviceRows(second, policy.handleGenerations(second, firstGen));
+
+        compare(before[0].name, after[0].name);
+        verify(policy.deviceSignature(before) !== policy.deviceSignature(after));
+        // And the row the panel gets points at the new object, not the dead one.
+        compare(after[0].live.marker, 2);
+    }
+
+    function test_generations_are_absent_by_default_and_that_is_not_a_change() {
+        // The bar builds rows without a generation map at all — the gate is the
+        // panel's business. A missing map must not read as "everything moved".
+        const rows = [device("00:01", { live: { marker: 1 } })];
+        compare(policy.deviceSignature(policy.deviceRows(rows)),
+                policy.deviceSignature(policy.deviceRows(rows)));
+    }
+
+    function test_a_device_bluez_has_forgotten_leaves_the_map() {
+        const first = policy.handleGenerations(
+            [device("00:01", { live: { marker: 1 } }),
+             device("00:02", { live: { marker: 2 } })], ({}));
+        const after = policy.handleGenerations(
+            [device("00:01", { live: { marker: 1 } })], first);
+        compare(after["00:02"], undefined);
+    }
+
     // --- what a press means --------------------------------------------------
 
     function test_an_unpaired_device_pairs() {
@@ -175,6 +243,122 @@ TestCase {
             { connected: true, batteryAvailable: true, battery: 80 })), "Connected · 80%");
         compare(policy.deviceDetail(device("00:01",
             { connected: true, batteryAvailable: false, battery: 0 })), "Connected");
+    }
+
+    // --- #189: the words while a connect is in flight ------------------------
+    //
+    // "Paired" before the press and "Paired" after it is the whole of what the
+    // ticket describes: a row that cannot be told apart from a dead button. The
+    // press needs an acknowledgement and the attempt needs an ending, and both
+    // of them are words on this line.
+
+    function test_a_connect_in_flight_says_so() {
+        compare(policy.deviceDetail(device("00:01", { paired: true, connecting: true })),
+                "Connecting…");
+    }
+
+    function test_a_connect_that_failed_says_so_before_it_goes_back_to_resting() {
+        compare(policy.deviceDetail(device("00:01", { paired: true, failed: true })),
+                "Connect failed");
+        // And with the marker gone the row is a paired device again, not a
+        // permanent failure.
+        compare(policy.deviceDetail(device("00:01", { paired: true })), "Paired");
+    }
+
+    function test_pairing_outranks_connecting_and_connected_outranks_both() {
+        // A device BlueZ is bonding is not also connecting, and a device that
+        // arrived is not still trying. Ordered so that a stale marker on either
+        // side cannot outrank the fact that the headset is now audible.
+        compare(policy.deviceDetail(device("00:01", { pairing: true, connecting: true })),
+                "Pairing…");
+        compare(policy.deviceDetail(
+            device("00:01", { connected: true, connecting: true })), "Connected");
+        compare(policy.deviceDetail(
+            device("00:01", { connected: true, failed: true })), "Connected");
+    }
+
+    function test_a_failed_connect_does_not_outrank_a_second_attempt() {
+        // Press again while the failure is still on screen: the row has to read
+        // as trying, or the second press looks as dead as the first.
+        compare(policy.deviceDetail(
+            device("00:01", { paired: true, failed: true, connecting: true })),
+            "Connecting…");
+    }
+
+    function test_an_unpaired_row_still_reads_as_unpaired_while_it_pairs() {
+        // The distinguishing affordance the ticket asks for: the two gestures
+        // are one press, and which one it was is legible from the words — an
+        // unpaired row says "Not paired" and reads "Pairing…" once pressed,
+        // where a paired one says "Paired" and reads "Connecting…".
+        compare(policy.deviceDetail(device("00:01")), "Not paired");
+        compare(policy.deviceDetail(device("00:01", { pairing: true })), "Pairing…");
+    }
+
+    // --- #189: how long an attempt gets --------------------------------------
+
+    function test_a_connect_is_given_less_than_a_pairing() {
+        // A pairing waits on a human — reading a code off a screen, holding a
+        // button. A connect waits on a radio that is either there or is not, so
+        // it is the shorter of the two. Both are bounded: an attempt with no
+        // ending is the row stuck on "Connecting…" until the shell restarts.
+        compare(policy.connectTimeoutMs, 15000);
+        verify(policy.connectTimeoutMs < policy.pairTimeoutMs);
+    }
+
+    function test_a_failure_is_shown_for_long_enough_to_read_and_no_longer() {
+        compare(policy.failedShownMs, 4000);
+        verify(policy.failedShownMs < policy.connectTimeoutMs);
+    }
+
+    // --- #189: what the log says about a connect -----------------------------
+
+    // --- #189: a press on the LE transport -----------------------------------
+
+    function test_a_press_on_a_bonded_le_shadow_is_reported() {
+        // The row `foldTransports` keeps on purpose: bonded, so it holds the verb
+        // for what is happening, and useless for audio. #153's silent no-sound
+        // bond is this row being pressed with nothing said about it.
+        const rows = [device("00:01", { name: "Zen Zone", paired: true }),
+                      device("00:02", { name: "LE-Zen Zone", paired: true })];
+        verify(policy.leShadow(rows[1], rows));
+        verify(!policy.leShadow(rows[0], rows));
+        verify(policy.leWarning("LE-Zen Zone").indexOf("LE-Zen Zone") === 0);
+    }
+
+    function test_an_le_device_with_no_classic_twin_is_not_a_shadow() {
+        // Half the mice, the tags, the watches: LE is the only transport it has,
+        // and a warning here would be a warning on every press.
+        const rows = [device("00:02", { name: "LE-Tile", paired: true })];
+        verify(!policy.leShadow(rows[0], rows));
+    }
+
+    // --- #189: what the panel says about the scan ----------------------------
+
+    function test_the_activity_line_follows_the_radio_and_not_the_request() {
+        // A panel holding a scan the adapter is not running had no words at all
+        // before this, which reads as a panel that never asked.
+        compare(policy.activity(true, true), "scanning…");
+        compare(policy.activity(true, false), "not scanning");
+        // Closed panels make no claim about the radio, whatever it is doing —
+        // somebody else's scan is not this panel's news.
+        compare(policy.activity(false, true), "");
+        compare(policy.activity(false, false), "");
+    }
+
+    function test_a_scan_that_was_already_running_is_still_a_log_line() {
+        verify(policy.discoveryShared() !== "");
+        verify(policy.discoveryShared() !== policy.discovery(true));
+    }
+
+    function test_a_connect_that_worked_says_so() {
+        compare(policy.connectOutcome("Zen Zone", ""), "connected Zen Zone");
+    }
+
+    function test_a_connect_that_did_not_says_why() {
+        compare(policy.connectOutcome("Zen Zone", "timed out"),
+                "Zen Zone not connected — timed out");
+        compare(policy.connectOutcome("Zen Zone", "refused by bluez"),
+                "Zen Zone not connected — refused by bluez");
     }
 
     function test_the_glyph_follows_the_bluez_device_class() {

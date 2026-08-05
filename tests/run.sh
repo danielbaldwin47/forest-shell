@@ -46,11 +46,11 @@ python=$(command -v python3 || true)
 "$python" tst_control_bytes.py
 
 # Every click target on the bar, the drawers and the notifications shows a
-# pointer (#185). Also a tree walk rather than a QML test, and for a harder
-# reason: no seam can see a cursor at all — it is not in the client's scene, it
-# is a request with no pixels, and the widgets do not load offscreen. A
-# regression guard against the next bare widget, not a proof; the proof is
-# hovering them on a real session.
+# pointer (#185). Also a tree walk rather than a QML test: these widgets pull in
+# Theme and Config, which qmltestrunner cannot load, so nothing here can be
+# instantiated. It is the breadth half of the check — every target, every run —
+# and tools/cursor-harness.sh is the half that reads what the shell actually
+# asks the compositor for.
 "$python" tst_pointer_affordance.py
 
 # The blur measurement's arithmetic (#97). The harness that takes the two

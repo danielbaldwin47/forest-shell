@@ -9,13 +9,13 @@ that had one (the clock, the workspace strip) had rolled their own input and
 happened to get it right. That is the drift this guard exists to stop: the next
 widget that grows a `MouseArea` and no `cursorShape`.
 
-None of the three seams can see the fix itself. The pointer is not in the
-client's own scene, so a seam-3 capture never holds it; cursor shape is a
-client-side request with no pixels attached and nothing logs it, so seam 2
-cannot assert on it; and the widgets pull in the shell's theme and config
-modules, which `qmltestrunner` cannot load. So this is a source-level check in
-the shape of `tst_control_bytes.py` — a regression guard, not a proof. The proof
-is hovering the things on a real session.
+This is a source-level check in the shape of `tst_control_bytes.py`, because the
+widgets pull in the shell's theme and config modules and `qmltestrunner` cannot
+load either — nothing here instantiates a thing. What it buys is breadth: every
+click target in three directories, checked on every run. What it cannot do is
+say the pixels are right, which is `tools/cursor-harness.sh`'s job (#185 was
+filed believing no seam could; a cursor turns out to be a request on the wire,
+and seam 2 can read it). A regression guard, not a proof.
 
 Two rules, and the second is the one that keeps the first from being restated
 per widget:
@@ -55,6 +55,13 @@ HANDLED = re.compile(r"\bon(Clicked|Tapped|Pressed|DoubleTapped|PressAndHold|Whe
 
 EXEMPT = re.compile(r"//\s*pointer-exempt\b")
 
+# The *hand*, and not merely some cursor. A `cursorShape: Qt.ArrowCursor` on a
+# click target is the bug this guard is for, spelled out — checking only that
+# the property is present would have passed the nine modules #185 was filed
+# about. A conditional counts: `dimmed ? Qt.ArrowCursor : Qt.PointingHandCursor`
+# is a row that shows the hand whenever it is clickable at all.
+POINTER = re.compile(r"cursorShape\s*:[^\n]*PointingHandCursor")
+
 # `Type {` — an object declaration, as against `anchors {`, `onClicked: {` or a
 # JavaScript block, all of which open a brace after something lowercase.
 DECLARATION = re.compile(r"([A-Z]\w*(?:\.\w+)*)\s*$")
@@ -78,8 +85,7 @@ class Block:
         self.own = ""
 
     def has(self, pattern) -> bool:
-        return bool(re.search(pattern, self.own)) if isinstance(pattern, str) \
-            else bool(pattern.search(self.own))
+        return bool(re.search(pattern, self.own))
 
 
 def blank_noise(text: str) -> str:
@@ -106,17 +112,22 @@ def blank_noise(text: str) -> str:
                 out[j] = " "
             i += 2
         elif ch in "\"'`":
+            # A quote only opens a string if it closes on the same line. QML has
+            # no multi-line string literal, and the alternative reading is worse
+            # than useless: the quote inside a regular expression — `/'/g`, which
+            # this tree has — would otherwise swallow the rest of the file, and a
+            # file blanked to nothing looks exactly like a file with no bare
+            # click targets in it.
             quote = ch
-            i += 1
-            while i < n and text[i] != quote:
-                if text[i] == "\\":
-                    out[i] = " "
-                    i += 1
-                if i < n:
-                    if text[i] != "\n":
-                        out[i] = " "
-                    i += 1
-            i += 1
+            close = i + 1
+            while close < n and text[close] not in (quote, "\n"):
+                close += 2 if text[close] == "\\" else 1
+            if close < n and text[close] == quote:
+                for j in range(i + 1, close):
+                    out[j] = " "
+                i = close + 1
+            else:
+                i += 1
         else:
             i += 1
     return "".join(out)
@@ -161,31 +172,35 @@ def parse(text: str) -> list:
     return blocks
 
 
-def exempt_lines(text: str) -> set:
-    return {i for i, line in enumerate(text.splitlines(), 1) if EXEMPT.search(line)}
-
-
 def uncovered(text: str) -> list:
     """(line, type) for every click target in `text` with no pointer affordance.
 
-    Covered means a `cursorShape` on the element itself, on a sibling of it, or
-    on its parent. The sibling case is not a loophole — it is the shape the
-    clock and the notification centre already use, a `HoverHandler` carrying the
-    cursor for the `TapHandler` next to it, both belonging to the same item.
+    Covered means a pointer `cursorShape` on the element itself, on its parent,
+    or on a `HoverHandler` beside it. That last case is not a loophole — it is
+    the shape the clock and the notification centre already use, a handler that
+    carries the cursor for the `TapHandler` next to it, both belonging to the
+    same item. Only a `HoverHandler` counts as the sibling: a second
+    `MouseArea` next door is a different target with a different job, and
+    letting one cover the other is how a bare click target gets added beside a
+    cursored one and passes.
     """
-    skip = exempt_lines(text)
+    exemptions = [m.start() for m in EXEMPT.finditer(text)]
     found = []
     for block in parse(text):
         if block.type not in CLICKERS or not block.has(HANDLED):
             continue
-        end_line = text.count("\n", 0, min(block.end, len(text))) + 1
-        if any(block.line <= line <= end_line for line in skip):
+        # The marker has to sit in the block's *own* body. One inside a child
+        # was written about the child.
+        if any(block.start <= at <= block.end
+               and not any(kid.start <= at <= kid.end for kid in block.children)
+               for at in exemptions):
             continue
         family = [block]
         if block.parent:
             family.append(block.parent)
-            family.extend(block.parent.children)
-        if not any(kin.has("cursorShape") for kin in family):
+            family.extend(kid for kid in block.parent.children
+                          if kid.type == "HoverHandler")
+        if not any(kin.has(POINTER) for kin in family):
             found.append((block.line, block.type))
     return found
 
@@ -200,7 +215,8 @@ def base_follows_interactive(text: str) -> bool:
     for block in parse(text):
         if block.type == "MouseArea" and block.has(r"enabled\s*:.*\binteractive\b"):
             cursor = re.search(r"cursorShape\s*:([^\n]*)", block.own)
-            if cursor and "interactive" in cursor.group(1):
+            if cursor and "interactive" in cursor.group(1) \
+                    and "PointingHandCursor" in cursor.group(1):
                 return True
     return False
 
@@ -228,6 +244,22 @@ def main() -> int:
           uncovered("MouseArea {\n  onWheel: step()\n}\n") == [(1, "MouseArea")])
     check("its own cursor covers it",
           uncovered("MouseArea {\n  cursorShape: Qt.PointingHandCursor\n  onClicked: go()\n}\n") == [])
+    check("an arrow on a click target is not coverage",
+          uncovered("MouseArea {\n  cursorShape: Qt.ArrowCursor\n  onClicked: go()\n}\n")
+          == [(1, "MouseArea")])
+    check("a lookalike property name is not a cursor",
+          uncovered("MouseArea {\n  property int cursorShapeNote: 1\n  onClicked: go()\n}\n")
+          == [(1, "MouseArea")])
+    check("a sibling MouseArea does not cover another",
+          uncovered("Row {\n  MouseArea { cursorShape: Qt.PointingHandCursor\n    onClicked: a() }\n"
+                    "  MouseArea { onClicked: b() }\n}\n") == [(4, "MouseArea")])
+    check("a regex literal holding a quote does not blank the file",
+          uncovered("Item {\n  function f(s) { return s.replace(/'/g, \"\") }\n"
+                    "  MouseArea { onClicked: go() }\n}\n") == [(3, "MouseArea")])
+    check("an exemption inside a child does not cover the parent",
+          uncovered("MouseArea {\n  onClicked: go()\n"
+                    "  Item {\n    // pointer-exempt: about this one\n  }\n}\n")
+          == [(1, "MouseArea")])
     check("a sibling HoverHandler covers a TapHandler",
           uncovered("Rectangle {\n  HoverHandler { cursorShape: Qt.PointingHandCursor }\n"
                     "  TapHandler { onTapped: go() }\n}\n") == [])
@@ -254,11 +286,17 @@ def main() -> int:
           uncovered("MouseArea {\n  cursorShape: Qt.PointingHandCursor\n"
                     "  onClicked: { if (a) { go() } }\n}\n") == [])
     check("the base rule reads the flag",
-          base_follows_interactive("MouseArea {\n  enabled: indicator.interactive\n"
-                                   "  cursorShape: indicator.interactive ? A : B\n}\n"))
+          base_follows_interactive(
+              "MouseArea {\n  enabled: indicator.interactive\n"
+              "  cursorShape: indicator.interactive ? Qt.PointingHandCursor "
+              ": Qt.ArrowCursor\n}\n"))
     check("the base rule rejects another flag",
           not base_follows_interactive("MouseArea {\n  enabled: indicator.interactive\n"
                                        "  cursorShape: indicator.opensPanel ? A : B\n}\n"))
+    check("the base rule rejects an arrow on both branches",
+          not base_follows_interactive(
+              "MouseArea {\n  enabled: indicator.interactive\n"
+              "  cursorShape: indicator.interactive ? Qt.ArrowCursor : Qt.ArrowCursor\n}\n"))
     check("the base rule rejects no cursor at all",
           not base_follows_interactive("MouseArea {\n  enabled: indicator.interactive\n}\n"))
 

@@ -35,7 +35,11 @@
 #      and the facade answers — working or refusing
 #   8g. the sliders route, without touching the caller's own sound card
 #   8h. the five drill-in detail views (#45) open, close, replace each other,
-#      release the radio they held, and refuse a row that does not exist
+#      release the radio they held, and refuse a row that does not exist. Since
+#      #189 the bluetooth one also answers the question a refcount alone cannot:
+#      a hold taken while *somebody else* is scanning is re-asserted when that
+#      scan stops, and a press that reaches no device goes through the logger
+#      rather than throwing to the QML console
 #   9. the compositor took the fog's blur layerrule
 #  10. reducedEffects still opens and closes the drawer — the ladder collapses
 #      the motion, it does not remove the surface
@@ -886,12 +890,77 @@ expect_quiet_since "$mark" 'network: scanning$' \
 mark=$(log_lines)
 drill bluetooth
 expect_since "$mark" \
-    'bluetooth: (scanning for devices|no adapter — cannot scan|radio off — scan deferred)' \
+    'bluetooth: (scanning for devices|already discovering|no adapter — cannot scan|radio off — scan deferred)' \
     'opening the Bluetooth panel asks the adapter to discover'
 mark=$(log_lines)
 cc_back
 expect_since "$mark" 'control-centre: bluetooth panel closed' \
     'and closing it releases the discovery'
+
+# The hold that was never really the shell's (#189).
+#
+# Discovery on a real machine is not only ever this shell's: blueman, a
+# `bluetoothctl scan on` in a terminal, anything else on the bus can start and
+# stop it, and something on the laptop this was written on does so on a ~60 s
+# cycle (measured in #137, and again while filing #189). The bug was that the one
+# place `discovering` is written early-returned when the flag already matched, so
+# a panel opened over somebody else's scan took a hold that wrote nothing, said
+# nothing, and was never re-applied when that scan stopped — the "not always
+# scanning" half of the ticket, and invisible in the log either way.
+#
+# Driven by starting a scan from a *client that is not the shell* and then letting
+# that client exit: BlueZ releases a discovery when its owner disconnects, which
+# is the drop the shell has to notice.
+bt_discovering() {
+    bluetoothctl show 2>/dev/null | sed -n 's/.*Discovering: \(yes\|no\).*/\1/p' | head -1
+}
+
+if [[ "$HOST_BT" == yes ]]; then
+    bluetoothctl --timeout 12 scan on > "$NESTED_WORK/extscan.log" 2>&1 &
+    EXT_SCAN=$!
+    for _ in $(seq 1 20); do
+        [[ "$(bt_discovering)" == yes ]] && break
+        sleep 0.5
+    done
+
+    if [[ "$(bt_discovering)" == yes ]]; then
+        mark=$(log_lines)
+        drill bluetooth
+        # Either line is the pass. What is being ruled out is silence: before
+        # #189 a panel opening over an external scan wrote nothing at all, so
+        # "the hold did nothing" and "the panel never asked" read the same.
+        expect_since "$mark" 'bluetooth: (already discovering|scanning for devices)' \
+            'a panel opened over somebody else own scan says so'
+
+        # The drop. Our client exits on its timeout; on a machine whose own
+        # scanner is also running, the wait is for that one to finish a cycle
+        # too. A machine where the flag never drops cannot be asked this
+        # question, and says so rather than failing.
+        mark=$(log_lines)
+        wait "$EXT_SCAN" 2>/dev/null
+        dropped=0
+        for _ in $(seq 1 180); do
+            [[ "$(bt_discovering)" == no ]] && { dropped=1; break; }
+            sleep 0.5
+        done
+        if (( dropped )); then
+            expect_since "$mark" 'bluetooth: scanning for devices' \
+                'and the shell re-asserts the hold when the flag drops under it'
+        else
+            nested_note 'the adapter never stopped discovering — no drop to re-assert over'
+        fi
+
+        mark=$(log_lines)
+        cc_back
+        expect_since "$mark" 'bluetooth: scan stopped' \
+            'and closing the panel still gives the radio back'
+    else
+        kill "$EXT_SCAN" 2>/dev/null
+        nested_note 'the adapter would not start discovering — external-scan check skipped'
+    fi
+else
+    nested_note 'no powered bluetooth adapter — external-scan check skipped'
+fi
 
 # Depth of exactly one: a second panel replaces the first rather than stacking
 # under it, and pressing the door you are already behind takes you back out.
@@ -944,6 +1013,13 @@ mark=$(log_lines)
 nested_ipc call controlcenter device 00:00:00:00:00:00 > /dev/null 2>&1
 expect_since "$mark" 'bluetooth: device 00:00:00:00:00:00 unchanged — no such device' \
     'pressing a bluetooth row that does not exist reaches the bluez facade'
+# #189: and it reaches it *through the logger*. The third of the ticket's three
+# identical-looking dead buttons was a press on a handle BlueZ had replaced, which
+# threw to the QML console — a place nothing that reads this shell's log will ever
+# look. An address with nothing behind it is the reachable half of that case; the
+# other half needs a device object to be destroyed mid-press, which needs hardware.
+expect_quiet_since "$mark" 'TypeError|Unable to assign|is not a function' \
+    'and nothing was thrown to the QML console on the way'
 
 mark=$(log_lines)
 nested_ipc call controlcenter output 999999 > /dev/null 2>&1

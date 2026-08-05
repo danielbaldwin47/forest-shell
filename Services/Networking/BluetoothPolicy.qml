@@ -85,15 +85,54 @@ QtObject {
     /// discovery view is for. The one thing that does not get its own row is
     /// the LE shadow of a device already listed over classic — see
     /// `foldTransports`, which is #153 and not a tidiness preference.
-    function deviceRows(devices: var): var {
+    /// `generations` is `handleGenerations`' answer, or nothing at all — the bar
+    /// builds rows without one, because which object a row points at is only the
+    /// panel's problem (#189).
+    function deviceRows(devices: var, generations: var): var {
         const out = [];
+        const seen = generations ?? ({});
         for (const device of devices ?? []) {
             const address = String(device?.address ?? "").trim();
             if (address === "")
                 continue;       // BlueZ has not filled the object in yet
-            out.push(policy.deviceRow(device, address));
+            out.push(policy.deviceRow(device, address,
+                                      Number(seen[address]?.generation ?? 0)));
         }
         return policy.foldTransports(out).sort(policy.compareDevices);
+    }
+
+    /// How many times the handle behind each address has been replaced (#189).
+    ///
+    /// A BlueZ device object that goes away and comes back — the adapter
+    /// cycling, the device leaving and re-entering range — arrives carrying the
+    /// same address, the same name and the same flags. Every field the signature
+    /// was made of is identical, so the republish gate held the list still and
+    /// the rows went on pointing at a destroyed object; the press after that
+    /// threw to the QML console rather than connecting anything, which from the
+    /// outside is the same dead button as a refused connect.
+    ///
+    /// Identity is not something one reading can show, so it is counted instead:
+    /// this takes the last count and hands back the next one, and the number
+    /// goes into the signature. An address BlueZ has forgotten leaves the map
+    /// rather than being kept at its last count — a device re-appearing after
+    /// that is a new row anyway, and a map that only grows is a map that grows
+    /// for as long as the session lasts.
+    function handleGenerations(rows: var, previous: var): var {
+        const before = previous ?? ({});
+        const next = ({});
+        for (const row of rows ?? []) {
+            const address = String(row?.address ?? "").trim();
+            if (address === "")
+                continue;
+            const was = before[address];
+            const moved = was !== undefined && was.live !== (row.live ?? null);
+            next[address] = {
+                live: row.live ?? null,
+                generation: was === undefined ? 0
+                          : (moved ? was.generation + 1 : was.generation)
+            };
+        }
+        return next;
     }
 
     /// The name a `LE-…` advertisement is shadowing, or "" for anything that is
@@ -137,6 +176,34 @@ QtObject {
         return out;
     }
 
+    /// Whether a press has landed on the LE transport of a device that is also
+    /// on the list over classic (#189).
+    ///
+    /// `foldTransports` folds the LE row away while it is only a scan result, and
+    /// deliberately keeps it once it is bonded or connected — it is then the only
+    /// row carrying the verb for what is actually happening. Which leaves the
+    /// case this answers: the row is still there, and a press on it asks for a
+    /// connection on a transport that has no A2DP to give. #153 spent a session
+    /// on a bond that carried no audio for exactly this reason.
+    ///
+    /// Reported rather than prevented, and this is the argument: the row is real,
+    /// BlueZ will connect it, and an LE device does carry other profiles. What
+    /// was wrong was that it was attempted in silence, so a press that produced
+    /// no sound produced no explanation either.
+    function leShadow(row: var, rows: var): bool {
+        const base = policy.classicName(row?.name);
+        if (base === "")
+            return false;
+        for (const other of rows ?? [])
+            if (String(other?.name ?? "").trim().toLowerCase() === base.toLowerCase())
+                return true;
+        return false;
+    }
+
+    function leWarning(name: string): string {
+        return name + " is the LE transport — audio needs its classic row";
+    }
+
     /// A row that is only a scan result: nothing connected, nothing bonded,
     /// nothing in flight. Asked as a question rather than compared against
     /// `deviceBand`'s last band, so that adding a band stays a change to the
@@ -147,10 +214,13 @@ QtObject {
             && facts.pairing !== true;
     }
 
-    function deviceRow(device: var, address: string): var {
+    function deviceRow(device: var, address: string, generation: int): var {
         const name = String(device?.name ?? "").trim();
         return {
             address: address,
+            // Not a fact about the device — a count of how many objects BlueZ
+            // has used to represent it. It exists to be in the signature.
+            generation: Number(generation ?? 0),
             // The address is the fallback name and not a placeholder: it is
             // what the user will match against the label on the back of the
             // thing they are holding.
@@ -161,6 +231,7 @@ QtObject {
             trusted: device?.trusted === true,
             battery: Number(device?.battery ?? 0),
             batteryAvailable: device?.batteryAvailable === true,
+            connecting: device?.connecting === true,
             kind: String(device?.kind ?? ""),
             // The upstream `BluetoothDevice`, untouched here: it is what the
             // facade calls pair()/connect()/disconnect() on.
@@ -188,11 +259,19 @@ QtObject {
     /// What the facade compares before it republishes the list (#75).
     /// Battery is deliberately absent — it moves on its own, and a rebuilt
     /// delegate is a row that loses its hover and restarts its animation.
+    ///
+    /// The generation is here for the opposite reason (#189): it is the one part
+    /// of a row that is not a fact about the device, and without it a handle
+    /// BlueZ replaced hides behind an unchanged address, name and set of flags.
+    /// `connecting` is deliberately *not* here — an attempt in flight is a word
+    /// on a row read live off the handle, and republishing the list for it would
+    /// rebuild every delegate on every press.
     function deviceSignature(rows: var): string {
         return (rows ?? []).map(row => row.address + " " + row.name
                                 + (row.connected ? "c" : "-")
                                 + (row.paired ? "p" : "-")
-                                + (row.pairing ? "…" : "-")).join("");
+                                + (row.pairing ? "…" : "-")
+                                + "#" + Number(row.generation ?? 0)).join("");
     }
 
     /// What one press asks for. Pairing and connecting are one gesture on
@@ -210,6 +289,14 @@ QtObject {
 
     /// The words under the name. Battery only when BlueZ actually reports one —
     /// a headset that does not publish its level must not read as flat.
+    ///
+    /// `connecting` and `failed` are #189's halves of the acknowledgement: until
+    /// them this line read "Paired" before a press and "Paired" after the attempt
+    /// had silently died, which is a row indistinguishable from a dead button.
+    /// The order is what keeps a stale marker on either side from outranking the
+    /// truth: a device that has arrived reads "Connected" whatever was in flight
+    /// a moment ago, and a second press over a failure that is still on screen
+    /// reads as trying rather than as the last failure.
     function deviceDetail(row: var): string {
         const facts = row ?? ({});
         if (facts.pairing === true)
@@ -218,6 +305,10 @@ QtObject {
             return facts.batteryAvailable === true
                  ? "Connected · " + policy.batteryLabel(facts.battery)
                  : "Connected";
+        if (facts.connecting === true)
+            return "Connecting…";
+        if (facts.failed === true)
+            return "Connect failed";
         return facts.paired === true ? "Paired" : "Not paired";
     }
 
@@ -255,6 +346,29 @@ QtObject {
 
     function discovery(on: bool): string {
         return on ? "scanning for devices" : "scan stopped";
+    }
+
+    /// The scan the shell wanted was already running when it asked (#189).
+    ///
+    /// Its own line because the alternative is the silence the ticket found: a
+    /// panel opened over somebody else's scan wrote nothing at all, so "the hold
+    /// was taken and did nothing" and "the panel never asked" read identically in
+    /// the log.
+    /// The panel's activity line (#189): whether a scan is *running*, asked as a
+    /// question about the radio and not about the request.
+    ///
+    /// A panel holding a scan the adapter is not running is the case that had no
+    /// words at all — the line was empty, which is what a panel that never asked
+    /// looks like. Nothing is said when nobody is holding one, because a panel
+    /// that is closed is not making a claim about the radio.
+    function activity(wanted: bool, discovering: bool): string {
+        if (!wanted)
+            return "";
+        return discovering ? "scanning…" : "not scanning";
+    }
+
+    function discoveryShared(): string {
+        return "already discovering — somebody else started it";
     }
 
     function asked(action: string, name: string): string {
@@ -343,6 +457,34 @@ QtObject {
     /// the Timer for the reason LogindBridge's confirm timeout is: it is a
     /// threshold, and thresholds are decisions (CLAUDE.md, seam 1).
     readonly property int pairTimeoutMs: 60000
+
+    /// How long a *connect* is given (#189), and how long its failure stays on
+    /// the row afterwards.
+    ///
+    /// Shorter than a pairing, because the two are waiting for different things:
+    /// a pairing waits on a human reading a code off a screen or holding a
+    /// button, and a connect waits on a radio that either answers or does not.
+    /// BlueZ's own `Connect` on an out-of-range device gives up in about ten
+    /// seconds; this is that with room, and it exists at all because the
+    /// alternative — what the ticket found — is a row that reads "Connecting…"
+    /// until the shell restarts.
+    ///
+    /// The failure is shown for long enough to read and then the row goes back
+    /// to resting: a permanent "Connect failed" is a row that lies about the
+    /// next press as badly as the silent one did.
+    readonly property int connectTimeoutMs: 15000
+    readonly property int failedShownMs: 4000
+
+    /// What the log says about a connect that has ended — either way (#189).
+    ///
+    /// One function for both endings rather than two, so that a failure cannot
+    /// be the one someone forgot to write: the reason is the only argument that
+    /// decides which line this is, and "" is the only spelling of success.
+    function connectOutcome(name: string, reason: string): string {
+        const why = String(reason ?? "").trim();
+        return why === "" ? "connected " + name
+                          : name + " not connected — " + why;
+    }
 
     /// What to write to `bluetoothctl` to pair one device, in order.
     ///

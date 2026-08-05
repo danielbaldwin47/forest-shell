@@ -127,4 +127,63 @@ TestCase {
         compare(policy.number("not a number"), 0);
         compare(policy.number(null), 0);
     }
+
+    // --- freshness (#186) ----------------------------------------------------
+    //
+    // A sysfs attribute change is a poll() wakeup rather than an inotify event,
+    // so the file view's `watchChanges` never fires for the panel and a
+    // brightness the shell did not set stays invisible to it. The facade
+    // therefore re-reads on demand, and when a read is due is decided here.
+
+    function test_a_value_that_was_never_read_is_due() {
+        // 0 is the stamp before the first read, and the value behind it is the
+        // facade's pre-read 0% — the number #186 was reported as seeing.
+        verify(policy.readDue(10000, 0));
+    }
+
+    function test_a_value_read_a_moment_ago_is_not_read_again() {
+        // Several surfaces appearing at once — the drawer and the bar module —
+        // ask within the same frame, and that is one read, not three.
+        verify(!policy.readDue(10000, 10000 - policy.staleMs + 1));
+        verify(policy.readDue(10000, 10000 - policy.staleMs));
+        verify(policy.readDue(10000, 10000 - policy.staleMs - 1));
+    }
+
+    function test_a_clock_that_moved_backwards_reads_rather_than_waits() {
+        // Suspend and resume moves the clock, and a stamp in the future would
+        // otherwise park the value as fresh forever — on the one transition
+        // most likely to have changed the panel behind the shell's back.
+        verify(policy.readDue(500, 900));
+        verify(policy.readDue(10000, NaN));
+        verify(policy.readDue(10000, undefined));
+    }
+
+    function test_polling_runs_only_while_something_shows_brightness() {
+        // #186's constraint, and the one that rules out a bare timer: nothing
+        // new ticks while no surface is displaying a level. The count is a
+        // count and not a flag because the drawer and the bar module can each
+        // hold one at the same time.
+        verify(!policy.pollRunning(0, true));
+        verify(policy.pollRunning(1, true));
+        verify(policy.pollRunning(2, true));
+        // A machine with no backlight has nothing to read.
+        verify(!policy.pollRunning(1, false));
+        // A release that ran twice must not arm the timer with a negative count.
+        verify(!policy.pollRunning(-1, true));
+    }
+
+    function test_the_poll_interval_outlasts_the_freshness_window() {
+        // Otherwise every tick would find its own last read still fresh and the
+        // timer would run without ever reading anything.
+        verify(policy.pollMs >= policy.staleMs);
+        verify(policy.staleMs > 0);
+    }
+
+    function test_the_watch_line_names_the_count_and_the_interval() {
+        // #81: a subscription that logs nothing is a wakeup nobody can account
+        // for later.
+        const line = policy.watching(2, 2000);
+        verify(line.indexOf("2") >= 0);
+        verify(line.indexOf("2000") >= 0);
+    }
 }

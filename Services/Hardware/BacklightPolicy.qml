@@ -119,4 +119,57 @@ QtObject {
         const value = parseInt((text || "").trim(), 10);
         return isNaN(value) ? 0 : value;
     }
+
+    // --- freshness (#186) ----------------------------------------------------
+    //
+    // The file view asks to watch the panel's value and cannot be told, because
+    // a sysfs attribute change arrives as a `sysfs_notify` poll() wakeup and not
+    // as an inotify event. So a brightness the shell did not set — a terminal
+    // `brightnessctl`, a compositor keybind, firmware — was invisible to it
+    // until the shell next wrote brightness itself, and every surface then
+    // showed a level twelve minutes old while the next key press stepped from
+    // it.
+    //
+    // The cure is to re-read on demand rather than to keep reading: what is due
+    // and when anything ticks at all is decided here, and the facade next door
+    // only owns the read.
+
+    /// How long a read stays trusted. Short, because the point is that anything
+    /// may have moved the panel; long enough that a drawer and a bar module
+    /// appearing in the same frame are one read rather than two.
+    readonly property int staleMs: 250
+
+    /// How often to re-read while a surface is displaying a level. Only ever
+    /// armed while one is — see `pollRunning`.
+    readonly property int pollMs: 2000
+
+    /// Whether a value stamped at `lastReadAt` needs reading again.
+    ///
+    /// A stamp of 0 is "never read", and its value is the facade's pre-read 0%.
+    /// A stamp in the future is a clock that moved — suspend and resume, which
+    /// is exactly the transition most likely to have changed the panel behind
+    /// the shell's back — and is read rather than trusted.
+    function readDue(nowMs: real, lastReadAt: real): bool {
+        if (!isFinite(nowMs) || !isFinite(lastReadAt) || lastReadAt <= 0)
+            return true;
+        if (nowMs < lastReadAt)
+            return true;
+        return nowMs - lastReadAt >= policy.staleMs;
+    }
+
+    /// Whether the re-read timer should be running.
+    ///
+    /// #186's constraint, and the reason this is a count rather than a flag:
+    /// nothing new may tick while no surface is showing brightness, and the
+    /// drawer and the bar module can each be showing one at the same time. A
+    /// count below zero is a release that ran twice and arms nothing.
+    function pollRunning(watchers: int, available: bool): bool {
+        return available === true && watchers > 0;
+    }
+
+    /// #81: a subscription that logs nothing is a wakeup nobody can account for
+    /// later.
+    function watching(watchers: int, intervalMs: int): string {
+        return "re-reading every " + intervalMs + "ms for " + watchers + " watcher(s)";
+    }
 }

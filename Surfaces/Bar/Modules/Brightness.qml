@@ -30,4 +30,12 @@ BarIndicator {
     // spinning the wheel ramps rather than queueing a subprocess per notch.
     interactive: true
     onStepped: direction => Backlight.step(direction)
+
+    // A level on the bar is a level that has to be true (#186): sysfs does not
+    // announce a change the shell did not make, so the facade re-reads while
+    // something is showing one. The same subscription shape as the system
+    // monitor module next door, and the reason nothing re-reads on a bar
+    // without this module in it — which is every bar by default.
+    Component.onCompleted: Backlight.watch()
+    Component.onDestruction: Backlight.release()
 }

@@ -674,9 +674,19 @@ FocusScope {
     // two of the five hold a radio scanning while they are open, and a scanner
     // nobody released is a wakeup every few seconds that nothing on screen
     // would show (#22 §5).
-    Component.onDestruction: ControlCenterActions.back("drawer")
+    Component.onDestruction: {
+        ControlCenterActions.back("drawer");
+        Backlight.release();
+    }
 
     Component.onCompleted: {
+        // The brightness slider is the surface #186 was reported against: sysfs
+        // never announces a change the shell did not make, so a panel moved by
+        // a terminal `brightnessctl` or a compositor keybind was still being
+        // drawn at whatever the shell last wrote. The facade re-reads while
+        // this drawer is up, and once on the way in — the level on screen the
+        // moment the drawer appears is the one that mattered.
+        Backlight.watch();
         // A backstop, not the usual path: `facts` evaluating its binding
         // during creation normally fires `onFactsChanged` and fills the model
         // before this runs. `refreshSliderIds` reassigns nothing when the set

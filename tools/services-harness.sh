@@ -516,6 +516,42 @@ print(round(raw / mx * 100))
         nested_fail "a step up left the panel at $stepped% (was $was_percent%)"
     fi
 
+    # 6b — a change the shell did not make (#186). sysfs does not announce one:
+    # the value is a poll() wakeup rather than an inotify event, so the shell's
+    # cached percent used to sit at whatever it last wrote — for twelve minutes
+    # in the report — and the next key press stepped from that instead of from
+    # the panel. The claim here is the one that bit: after an external
+    # `brightnessctl`, a step lands one notch below the *panel*.
+    #
+    # This is the same bargain check 6 already makes — it moves the machine's
+    # own panel and puts it back, and `--no-backlight` skips both.
+    external=$(( was_percent < 50 ? 70 : 30 ))
+    brightnessctl -q -d "$device" set "${external}%" 2>/dev/null
+    sleep 0.3
+    ext_percent=$(python3 -c "
+import sys
+raw, mx = int(sys.argv[1]), int(sys.argv[2])
+print(round(raw / mx * 100))
+" "$(cat "/sys/class/backlight/$device/actual_brightness")" "$(cat "/sys/class/backlight/$device/max_brightness")")
+    # The same grid the policy steps on: one notch down snaps to a multiple of
+    # 5 rather than landing 5 below an arbitrary level.
+    expected=$(python3 -c "
+import math, sys
+p = int(sys.argv[1])
+print(max(1, (math.ceil(p / 5 - 1e-9) - 1) * 5))
+" "$ext_percent")
+
+    ipc nudgeBrightness -1 > /dev/null
+    sleep 0.6
+    after=$(snapshot_field "$(ipc snapshot)" backlight.percent)
+    if (( after >= expected - 1 && after <= expected + 1 )); then
+        nested_pass "a step after an external change starts from the panel"\
+" (external $ext_percent% → $after%)"
+    else
+        nested_fail "a step after an external change landed at $after%,"\
+" expected about $expected% from a panel at $ext_percent%"
+    fi
+
     ipc brightness "$was_percent" > /dev/null
     sleep 0.6
     # Back to the raw value rather than the percent, because a percent is a

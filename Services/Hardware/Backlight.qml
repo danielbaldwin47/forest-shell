@@ -7,6 +7,7 @@ pragma Singleton
 //     Backlight.percent       // 0-100, live, read straight from /sys
 //     Backlight.setPercent(40)
 //     Backlight.step(1)       // one notch up
+//     Backlight.watch() / Backlight.release()   // while a level is on screen
 //
 // Named `Backlight` rather than `Brightness` for one flat reason: the bar
 // module is `Surfaces/Bar/Modules/Brightness.qml`, and two QML types with the
@@ -22,6 +23,16 @@ pragma Singleton
 // or udev-blessed, which is the entire reason `brightnessctl` is here — so it
 // is only ever asked to *set*, and once at startup to say which device is the
 // panel.
+//
+// **Reading it is free but not automatic.** A sysfs attribute change is
+// delivered by `sysfs_notify`, a poll() wakeup rather than an inotify event, so
+// the FileView's `watchChanges` never fires for the panel — which meant every
+// brightness the shell did not set was invisible to it until the shell next
+// wrote one (#186: a panel at 94%, a shell still showing 61% twelve minutes
+// later, and a key press that stepped from the 61%). So the value is re-read on
+// demand: `watch()`/`release()` while a surface is showing a level, and a read
+// before a step that is not already ramping. Nothing ticks while no surface is
+// showing brightness.
 //
 // Two things this file does that #78 paid for:
 //
@@ -81,11 +92,34 @@ Singleton {
         root.applyQueued();
     }
 
+    /// The direction of a step waiting for a fresh read, or 0 for none.
+    property int pendingStep: 0
+
     function step(direction: int) {
-        // Stepped off the *queued* value while one is in flight, so holding the
-        // key ramps instead of fighting the sysfs value it has outrun.
-        const from = root.queued >= 0 ? root.queued : root.percent;
-        root.setPercent(root.policy.stepped(from, direction));
+        if (root.queued >= 0) {
+            // Stepped off the *queued* value while one is in flight, so holding
+            // the key ramps instead of fighting the sysfs value it has outrun.
+            root.setPercent(root.policy.stepped(root.queued, direction));
+            return;
+        }
+        // Idle, so the cached value is only as good as the last read and #186
+        // is the case where it is not good at all — anything may have moved the
+        // panel since. Ask, and step when the answer arrives: `reload()` is
+        // asynchronous even with `blockLoading` set (measured — `text()`
+        // immediately after it still returns the previous contents, and the new
+        // one arrives with `loaded`), so stepping now would step from exactly
+        // the stale value the read was for.
+        root.pendingStep = direction;
+        if (!root.refresh())
+            root.takePendingStep();
+    }
+
+    function takePendingStep(): void {
+        if (root.pendingStep === 0)
+            return;
+        const direction = root.pendingStep;
+        root.pendingStep = 0;
+        root.setPercent(root.policy.stepped(root.percent, direction));
     }
 
     function applyQueued() {
@@ -114,6 +148,7 @@ Singleton {
                 // inotify does not fire for a sysfs attribute — `watchChanges`
                 // below catches an external change on the drivers that do
                 // notify, and this catches every change the shell makes.
+                root.lastReadAt = Date.now();
                 sysfs.reload();
             } else {
                 Logger.warn("backlight", root.policy.complaint(root.device, apply.target,
@@ -121,6 +156,63 @@ Singleton {
             }
             root.applyQueued();
         }
+    }
+
+    // --- keeping it true (#186) ----------------------------------------------
+    //
+    // `watchChanges` below cannot deliver an external change, so the value is
+    // re-read on demand instead. Two demands: a surface that displays a level
+    // holds a subscription while it is on screen, and a step asks before it
+    // computes its next notch.
+    //
+    //     Backlight.watch() / Backlight.release()   // while a level is on screen
+    //
+    // The subscription is the same shape as SystemStats and Weather —
+    // `Component.onCompleted` / `Component.onDestruction` on the surface — and
+    // it is a count rather than a flag because the drawer's slider and the bar's
+    // module can both be showing a level at once.
+
+    /// When the panel was last read, as a millisecond clock, or 0 for never.
+    property real lastReadAt: 0
+
+    /// How many surfaces are currently displaying a level.
+    property int watchers: 0
+
+    /// Re-read the panel if the last read is old enough to be worth doubting.
+    /// Answers whether a read was actually started — the caller that needs the
+    /// value *now* has to know whether to wait for `loaded` or use what it has.
+    function refresh(): bool {
+        if (!root.available || !root.policy.readDue(Date.now(), root.lastReadAt))
+            return false;
+        root.lastReadAt = Date.now();
+        sysfs.reload();
+        return true;
+    }
+
+    function watch(): void {
+        root.watchers += 1;
+        if (root.watchers === 1)
+            Logger.log("backlight", root.policy.watching(root.watchers, root.policy.pollMs));
+        // The level on screen the moment the surface appears is the one #186
+        // was reported against: a drawer opened after an external change showed
+        // whatever the shell last happened to write.
+        root.refresh();
+    }
+
+    function release(): void {
+        root.watchers = Math.max(0, root.watchers - 1);
+        if (root.watchers === 0)
+            Logger.log("backlight", "nothing showing brightness — stopped re-reading");
+    }
+
+    Timer {
+        // Armed only while something is displaying a level, which is the whole
+        // of #186's "nothing new runs at rest": with no brightness on screen
+        // this never ticks, and the shell's idle budget is unchanged.
+        running: root.policy.pollRunning(root.watchers, root.available)
+        interval: root.policy.pollMs
+        repeat: true
+        onTriggered: root.refresh()
     }
 
     // --- finding the panel ---------------------------------------------------
@@ -160,9 +252,16 @@ Singleton {
         // catches drivers that also touch the file. Every change the shell
         // makes is picked up by the explicit reload above regardless — this is
         // for the brightness keys a compositor keybind handled before the shell
-        // owned them.
+        // owned them. #186 is what the gap costs, and `refresh()` above is the
+        // answer: the value is re-read on demand rather than waited for.
         watchChanges: true
         printErrors: false
+
+        // A step that asked for a fresh read is finished here, on the read
+        // rather than on the call — see `step()`. `loadFailed` too, because a
+        // step swallowed by an unreadable file is a key that did nothing.
+        onLoaded: root.takePendingStep()
+        onLoadFailed: root.takePendingStep()
     }
 
     onPercentChanged: if (root.available)

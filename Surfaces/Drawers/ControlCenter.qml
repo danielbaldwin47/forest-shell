@@ -228,6 +228,18 @@ FocusScope {
 
     onFactsChanged: root.refreshSliderIds()
 
+    // The latch's *other* input, and it is not optional. `sliders()` reads
+    // `policy.sliderOrder`, which is #55's setting — bound to
+    // `Config.values.controlCenter.sliders`, so the Control Center tab can
+    // reorder the sliders or take one out. Before the latch, that arrived on
+    // its own because the model was bound straight to `sliders()`; now nothing
+    // recomputes unless something asks, and a reorder that waited for the next
+    // service tick to appear would be a settings edit that looks ignored.
+    Connections {
+        target: root.policy
+        function onSliderOrderChanged(): void { root.refreshSliderIds(); }
+    }
+
     // --- what a press does ---------------------------------------------------
     //
     // All of it is next door in ControlCenterActions.qml, and none of it is

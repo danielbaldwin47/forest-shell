@@ -187,8 +187,58 @@ FocusScope {
 
     readonly property var tiles: root.policy.tiles(root.facts)
     readonly property var tileRows: root.policy.rows(root.tiles)
-    readonly property var sliderRows: root.policy.sliders(root.facts)
     readonly property string batteryLine: root.policy.batteryLine(root.facts.battery)
+
+    // --- the slider model, latched (#192) ------------------------------------
+    //
+    // Everything else here is bound straight off `facts`, and for the grid that
+    // is fine. For the sliders it was the bug: `facts` is a new object on every
+    // service tick, so `policy.sliders(facts)` was a new array of new rows on
+    // every tick, and a JS array with a new identity is a model *reset* — every
+    // delegate destroyed and re-created. A re-created ControlSlider starts with
+    // a zero-width fill, and its `Behavior` does not run during creation, so
+    // the first layout pass afterwards animates the fill from empty to the
+    // level. The level therefore "refilled" on every volume key, every
+    // brightness step, and — while recording — once a second off the elapsed
+    // clock, plus any drag in progress lost its `dragging` flag mid-drag.
+    //
+    // So the model carries identities only, and is reassigned only when the set
+    // of sliders this machine offers actually changes — hardware arriving or
+    // going away, or the user reordering them. A level change is then a
+    // property update on a live delegate, and the fill tweens from where it
+    // was, which is what the `Behavior` was written for.
+    /// `null` until the first latch, and a list — possibly an empty one —
+    /// after it. The distinction is not decoration: a machine with no sound
+    /// card, no microphone and no backlight latches `[]`, and starting this at
+    /// `[]` would make that indistinguishable from "not latched yet" and log
+    /// nothing at all on the one machine whose empty slider column most wants
+    /// explaining.
+    property var sliderIds: null
+
+    function refreshSliderIds(): void {
+        const next = root.policy.sliderIds(root.facts);
+        if (root.sliderIds !== null && root.policy.sameIds(root.sliderIds, next))
+            return;
+        root.sliderIds = next;
+        // The line seam 2 asserts on: drive the volume and this must not
+        // repeat. One line per set change is the whole claim of the latch.
+        Logger.log("control-centre", "slider set: "
+                   + (next.length > 0 ? next.join(", ") : "(none)"));
+    }
+
+    onFactsChanged: root.refreshSliderIds()
+
+    // The latch's *other* input, and it is not optional. `sliders()` reads
+    // `policy.sliderOrder`, which is #55's setting — bound to
+    // `Config.values.controlCenter.sliders`, so the Control Center tab can
+    // reorder the sliders or take one out. Before the latch, that arrived on
+    // its own because the model was bound straight to `sliders()`; now nothing
+    // recomputes unless something asks, and a reorder that waited for the next
+    // service tick to appear would be a settings edit that looks ignored.
+    Connections {
+        target: root.policy
+        function onSliderOrderChanged(): void { root.refreshSliderIds(); }
+    }
 
     // --- what a press does ---------------------------------------------------
     //
@@ -266,22 +316,39 @@ FocusScope {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space1
-                visible: root.sliderRows.length > 0
+                visible: (root.sliderIds ?? []).length > 0
 
                 Repeater {
-                    model: root.sliderRows
+                    model: root.sliderIds
 
                     ControlSlider {
-                        required property var modelData
+                        // The id, not the row: see `sliderIds` above. The row
+                        // is a binding of this delegate's own, so a level
+                        // change reaches it without the model moving.
+                        //
+                        // `root.facts` is read here, in the binding, and not
+                        // inside a function this calls — #50 measured that a
+                        // binding does not reliably pick up a dependency read
+                        // one call deep, and a slider that captured nothing
+                        // would sit frozen at the level it was built with,
+                        // which is this bug wearing the opposite face.
+                        required property string modelData
+                        readonly property var row:
+                            root.policy.sliderRow(modelData, root.facts)
 
                         Layout.fillWidth: true
-                        model: modelData
+                        // A slider whose hardware went away is a delegate on
+                        // its way out — the latch drops it in the same turn.
+                        // Hidden for that turn rather than drawn as a
+                        // placeholder, because a placeholder reads 0%.
+                        visible: row.present
+                        model: row
                         policy: root.policy
 
-                        onMoved: percent => ControlCenterActions.slide(modelData.id, percent)
-                        onMuteToggled: ControlCenterActions.mute(modelData.id)
+                        onMoved: percent => ControlCenterActions.slide(modelData, percent)
+                        onMuteToggled: ControlCenterActions.mute(modelData)
                         onDrillRequested: ControlCenterActions.drill(
-                            root.drillPolicy.panelForSlider(modelData.id))
+                            root.drillPolicy.panelForSlider(modelData))
                     }
                 }
             }
@@ -605,6 +672,15 @@ FocusScope {
     // would show (#22 §5).
     Component.onDestruction: ControlCenterActions.back("drawer")
 
-    Component.onCompleted: Logger.log("control-centre",
-        root.tiles.length + " tile(s), " + root.sliderRows.length + " slider(s)")
+    Component.onCompleted: {
+        // A backstop, not the usual path: `facts` evaluating its binding
+        // during creation normally fires `onFactsChanged` and fills the model
+        // before this runs. `refreshSliderIds` reassigns nothing when the set
+        // has not moved, so calling it twice costs a comparison and guarantees
+        // the panel never completes with an empty slider column.
+        root.refreshSliderIds();
+        Logger.log("control-centre",
+            root.tiles.length + " tile(s), "
+            + (root.sliderIds ?? []).length + " slider(s)");
+    }
 }

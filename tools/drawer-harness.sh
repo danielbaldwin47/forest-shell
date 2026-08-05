@@ -432,6 +432,66 @@ expect_since "$mark" 'drawers: controlcenter opened on ' \
 expect_since "$mark" 'control-centre: [0-9]+ tile\(s\), [0-9]+ slider\(s\)' \
     'the control centre assembled its grid from the live services'
 
+# #192's line. The slider `Repeater` is latched to the *identities* of the
+# sliders rather than to their levels, and this is the latch reporting what it
+# settled on. It is asserted here so 8f can assert its silence — a line that
+# never appears proves nothing about a line that must not repeat.
+expect_since "$mark" 'control-centre: slider set: ' \
+    'the slider model latched to the sliders this machine has'
+expect_since "$mark" 'control-centre: slider [a-z]+ built' \
+    'and the sliders behind it were built'
+
+# #192, and it has to be here rather than with the toggle sweep in 8f: 8f runs
+# with the panel *shut*, and DrawerSlot.qml loads the centre from a
+# `sourceComponent`, so there is no ControlSlider in existence there and any
+# silence asserted over it would be free. Here the panel is open and the three
+# sliders have just announced themselves, which is what makes the two silences
+# below mean something.
+#
+# The bug: `facts` is rebuilt on every service change, and the slider model was
+# bound straight to it, so every change destroyed and re-created all three
+# ControlSlider delegates — and a re-created slider animates its fill up from
+# empty, because a `Behavior` does not run during creation. The level therefore
+# "refilled" on every volume key and every brightness step.
+#
+# Do Not Disturb and Theme are the two controls that change a service without
+# touching the caller's hardware — 8f's problem, and the reason it restores
+# radios — so they are the ones driven here. Each is pressed twice, which puts
+# it back and doubles the number of changes. Theme earns its place twice over:
+# it writes a config key, and Core/Config.qml replaces `values` wholesale on
+# every write, so the panel's `sliderOrder` binding gets a new array identity
+# as well. That reaches the latch by its own path — a `Connections` on the
+# policy rather than `onFactsChanged` — and it is the path where "same list,
+# new array" has to be absorbed by comparing contents rather than references.
+slider_mark=$(log_lines)
+for control in dnd mode dnd mode; do
+    nested_ipc call controlcenter press "$control" > /dev/null 2>&1
+    sleep 0.3
+done
+
+# Asserted before the silences, and the whole reason the silences count: a
+# sweep that drove nothing is silent for free.
+#
+# Both halves of the pair, not `mode (on|off)` once. That line is a dispatch
+# receipt — ControlCenterActions announces before it routes, and it words the
+# announcement from live state — so a press that dispatched and was then
+# refused logs `mode on` twice and matches the loose pattern perfectly. Only
+# seeing `on` *and* `off` says the state actually flipped, which is the thing
+# the silences below have to be silent about.
+expect_since "$slider_mark" 'control-centre: mode on' \
+    'the sweep really did change a service under the open panel'
+expect_since "$slider_mark" 'control-centre: mode off' \
+    'and changed it back, so the state genuinely moved both ways'
+
+# The latch reporting on itself. Useful, but not sufficient on its own — a
+# rebuild that came from somewhere else would leave this quiet.
+expect_quiet_since "$slider_mark" 'control-centre: slider set: ' \
+    'a service change does not move the slider model'
+# The one that is actually about the bug: a ControlSlider announcing its own
+# birth. Silent only if the delegates genuinely survived the change.
+expect_quiet_since "$slider_mark" 'control-centre: slider [a-z]+ built' \
+    'and does not rebuild a slider, so no fill replays from empty'
+
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then
     nested_pass 'the control centre agrees it is open'
@@ -726,6 +786,15 @@ check_press() {
     expect_since "$mark" "$pattern" "$what"
 }
 
+# #192, asserted across the whole sweep below rather than at one press. Every
+# tile pressed from here on changes a service, and each of those changes rebuilt
+# `facts` — which used to rebuild the slider model with it and destroy all three
+# ControlSlider delegates, so a re-created slider animated its fill up from
+# empty on any change anywhere in the panel. The sliders are the one thing in
+# here that cannot be driven at this seam (see 8g: they move the caller's own
+# sound card), so the proof is taken from the other side: two dozen service
+# changes, and nothing may be rebuilt for any of them.
+#
 # The three with no hardware to be missing: state and a config key, so both
 # halves are exact.
 check_press dnd 'control-centre: dnd on' 'pressing Do Not Disturb asks for it on'

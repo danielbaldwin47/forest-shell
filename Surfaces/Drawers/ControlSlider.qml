@@ -26,7 +26,9 @@ Item {
     id: slider
 
     /// The row ControlCenterPolicy handed over: `{ id, percent, icon, label,
-    /// muted, mutable }`.
+    /// muted, mutable, present }`. `present` is false on the placeholder the
+    /// policy returns for a slider whose hardware has gone; the control centre
+    /// hides that row rather than drawing it, so nothing here has to read it.
     required property var model
     required property ControlCenterPolicy policy
 
@@ -55,6 +57,17 @@ Item {
                                                  : slider.model.percent
 
     implicitHeight: 36
+
+    // #192's evidence, and it is deliberately about *this object* rather than
+    // about the model behind it. The bug was that a service change rebuilt the
+    // slider model and so destroyed and re-created every one of these, and a
+    // re-created slider animates its fill up from empty because a `Behavior`
+    // does not run during creation. A line the panel logs about its own model
+    // could stay quiet while these were still being churned by something else;
+    // a line each of these logs as it is born cannot. tools/drawer-harness.sh
+    // 8f drives two dozen service changes and asserts this stays silent.
+    Component.onCompleted: Logger.log("control-centre",
+        "slider " + slider.model.id + " built")
 
     RowLayout {
         anchors.fill: parent

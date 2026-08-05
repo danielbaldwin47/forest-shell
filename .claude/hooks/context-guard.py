@@ -25,12 +25,21 @@ if data.get("tool_name") != "Bash":
 
 cmd = data.get("tool_input", {}).get("command", "") or ""
 
-NOISY = r"(tests/run\.sh|[\w./-]*harness\.sh|nested-session\.sh|qmltestrunner|frame-budget\.sh|idle-budget\.sh)"
+NOISY = r"(tests/run\.sh|[\w./-]*harness\.sh|nested-session\.sh|qmltestrunner|frame-budget\.sh|idle-budget\.sh|\bpytest\b|\bmypy\b|\bruff\b)"
 if re.search(NOISY + r"[^|]*\|\s*(tail|head|less|more|cat)\b", cmd):
     sys.stderr.write(
         "Blocked (context discipline): noisy runs never pipe to tail/head — a tail caps one run, runs repeat.\n"
         'Use: log=$(mktemp); <cmd> >"$log" 2>&1; grep -E \'FAIL|Totals\' "$log"\n'
         "On failure, grep the log for the failing case by name; never cat the log.\n"
+    )
+    sys.exit(2)
+
+# unbounded gh comment pulls: `gh issue view N --comments | tail -80` drags 5-7KB
+# per call and repeats (measured 2026-08-05); the tail caps nothing that matters.
+if re.search(r"\bgh (issue|pr) view\b[^|]*--comments[^|]*\|\s*(tail|head)\b", cmd):
+    sys.stderr.write(
+        "Blocked (context discipline): an unbounded comment pull piped to tail repeats its full cost every call.\n"
+        "Use --json comments with a jq filter for the fields you need, or write to $(mktemp) and grep.\n"
     )
     sys.exit(2)
 

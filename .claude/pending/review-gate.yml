@@ -3,7 +3,15 @@ name: review-gate
 # The lander's triple gate requires the PR body's `Review:` line to read
 # `clean` before merge. This check makes that gate mechanical: PR #128 was
 # merged by hand over `Review: findings held`, which the skill text alone
-# could not prevent. To make it a hard block, require this check on main:
+# could not prevent — and by 2026-08-05, 10 of 14 post-fix PRs carried that
+# same contentless token. A held finding must be written out and resolved,
+# not tokenized past the gate.
+#
+# INSTALL (one-time, needs `workflow` token scope — agents' OAuth token lacks it):
+#   gh auth refresh -s workflow        # once, interactive
+#   git mv .claude/pending/review-gate.yml .github/workflows/review-gate.yml
+#   git commit -m 'ci: install review gate' && git push
+# then make it a hard block on main:
 #   gh api --method PUT repos/danielbaldwin47/forest-shell/branches/main/protection \
 #     -f 'required_status_checks[strict]=false' \
 #     -f 'required_status_checks[checks][][context]=review-line' \
@@ -24,12 +32,15 @@ jobs:
         run: |
           line=$(printf '%s' "$BODY" | tr -d '\r' | grep -E '^Review:' | tail -1 || true)
           case "$line" in
-            "Review: clean")
+            "Review: clean"|"Review: clean "*)
               echo "gate: $line" ;;
             "")
-              echo "::error::PR body has no 'Review:' line — run /code-review, then add 'Review: clean' or 'Review: findings held'."
+              echo "::error::PR body has no 'Review:' line — run /code-review (two-axis), then append 'Review: clean' or 'Review:' plus the findings themselves."
+              exit 1 ;;
+            "Review: findings held"|"Review: findings held.")
+              echo "::error::'findings held' is a contentless token — write the findings into the body, resolve them, then set 'Review: clean'."
               exit 1 ;;
             *)
-              echo "::error::Review line reads '$line', not 'Review: clean' — resolve the held findings before merging."
+              echo "::error::Review line reads '$line', not 'Review: clean' — resolve what it names before merging."
               exit 1 ;;
           esac

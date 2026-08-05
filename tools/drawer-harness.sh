@@ -35,7 +35,11 @@
 #      and the facade answers — working or refusing
 #   8g. the sliders route, without touching the caller's own sound card
 #   8h. the five drill-in detail views (#45) open, close, replace each other,
-#      release the radio they held, and refuse a row that does not exist
+#      release the radio they held, and refuse a row that does not exist. Since
+#      #189 the bluetooth one also answers the question a refcount alone cannot:
+#      a hold taken while *somebody else* is scanning is re-asserted when that
+#      scan stops, and a press that reaches no device goes through the logger
+#      rather than throwing to the QML console
 #   9. the compositor took the fog's blur layerrule
 #  10. reducedEffects still opens and closes the drawer — the ladder collapses
 #      the motion, it does not remove the surface
@@ -436,6 +440,85 @@ expect_since "$mark" 'drawers: controlcenter opened on ' \
 expect_since "$mark" 'control-centre: [0-9]+ tile\(s\), [0-9]+ slider\(s\)' \
     'the control centre assembled its grid from the live services'
 
+# #192's line. The slider `Repeater` is latched to the *identities* of the
+# sliders rather than to their levels, and this is the latch reporting what it
+# settled on. It is asserted here so 8f can assert its silence — a line that
+# never appears proves nothing about a line that must not repeat.
+expect_since "$mark" 'control-centre: slider set: ' \
+    'the slider model latched to the sliders this machine has'
+expect_since "$mark" 'control-centre: slider [a-z]+ built' \
+    'and the sliders behind it were built'
+
+# #186's subscription, on the machine that has one. sysfs never announces a
+# brightness the shell did not set — the value is a poll() wakeup rather than an
+# inotify event — so the panel's level was whatever the shell last wrote, and
+# the facade now re-reads while a surface is showing one. Both edges are
+# asserted, because a subscription that starts and never stops is a wakeup
+# nobody would see: the stop is checked after the toggle that shuts the panel,
+# further down.
+#
+# No hardware is moved here and none needs to be: the claim is the
+# subscription, and the log lines are it. The *reading* half is
+# tools/services-harness.sh check 6b, which does move the panel and puts it
+# back.
+if grep -qa 'backlight: panel ' "$NESTED_SHELL_LOG"; then
+    expect_since "$mark" 'backlight: re-reading every [0-9]+ms for 1 watcher\(s\)' \
+        'the open control centre subscribed to the panel'
+else
+    nested_note 'no backlight on this machine — the brightness subscription is skipped'
+fi
+
+# #192, and it has to be here rather than with the toggle sweep in 8f: 8f runs
+# with the panel *shut*, and DrawerSlot.qml loads the centre from a
+# `sourceComponent`, so there is no ControlSlider in existence there and any
+# silence asserted over it would be free. Here the panel is open and the three
+# sliders have just announced themselves, which is what makes the two silences
+# below mean something.
+#
+# The bug: `facts` is rebuilt on every service change, and the slider model was
+# bound straight to it, so every change destroyed and re-created all three
+# ControlSlider delegates — and a re-created slider animates its fill up from
+# empty, because a `Behavior` does not run during creation. The level therefore
+# "refilled" on every volume key and every brightness step.
+#
+# Do Not Disturb and Theme are the two controls that change a service without
+# touching the caller's hardware — 8f's problem, and the reason it restores
+# radios — so they are the ones driven here. Each is pressed twice, which puts
+# it back and doubles the number of changes. Theme earns its place twice over:
+# it writes a config key, and Core/Config.qml replaces `values` wholesale on
+# every write, so the panel's `sliderOrder` binding gets a new array identity
+# as well. That reaches the latch by its own path — a `Connections` on the
+# policy rather than `onFactsChanged` — and it is the path where "same list,
+# new array" has to be absorbed by comparing contents rather than references.
+slider_mark=$(log_lines)
+for control in dnd mode dnd mode; do
+    nested_ipc call controlcenter press "$control" > /dev/null 2>&1
+    sleep 0.3
+done
+
+# Asserted before the silences, and the whole reason the silences count: a
+# sweep that drove nothing is silent for free.
+#
+# Both halves of the pair, not `mode (on|off)` once. That line is a dispatch
+# receipt — ControlCenterActions announces before it routes, and it words the
+# announcement from live state — so a press that dispatched and was then
+# refused logs `mode on` twice and matches the loose pattern perfectly. Only
+# seeing `on` *and* `off` says the state actually flipped, which is the thing
+# the silences below have to be silent about.
+expect_since "$slider_mark" 'control-centre: mode on' \
+    'the sweep really did change a service under the open panel'
+expect_since "$slider_mark" 'control-centre: mode off' \
+    'and changed it back, so the state genuinely moved both ways'
+
+# The latch reporting on itself. Useful, but not sufficient on its own — a
+# rebuild that came from somewhere else would leave this quiet.
+expect_quiet_since "$slider_mark" 'control-centre: slider set: ' \
+    'a service change does not move the slider model'
+# The one that is actually about the bug: a ControlSlider announcing its own
+# birth. Silent only if the delegates genuinely survived the change.
+expect_quiet_since "$slider_mark" 'control-centre: slider [a-z]+ built' \
+    'and does not rebuild a slider, so no fill replays from empty'
+
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then
     nested_pass 'the control centre agrees it is open'
@@ -623,6 +706,14 @@ mark=$(log_lines)
 nested_ipc call controlcenter toggle > /dev/null
 expect_since "$mark" 'drawers: controlcenter closed \(toggle\)' 'and it toggles shut'
 
+# #186's other edge, and the one that matters for the idle budget: the panel
+# that subscribed to the backlight above has to let go of it, or the shell
+# re-reads /sys every couple of seconds for a level nothing is showing.
+if grep -qa 'backlight: panel ' "$NESTED_SHELL_LOG"; then
+    expect_since "$mark" 'backlight: nothing showing brightness — stopped re-reading' \
+        'and the panel let go of the backlight on the way out'
+fi
+
 if nested_ipc show | sed -n '/^target dashboard$/,/^target /p' \
         | grep -qa 'function show('; then
     nested_fail 'the dashboard target advertises show(), which the CLI cannot call'
@@ -730,6 +821,15 @@ check_press() {
     expect_since "$mark" "$pattern" "$what"
 }
 
+# #192, asserted across the whole sweep below rather than at one press. Every
+# tile pressed from here on changes a service, and each of those changes rebuilt
+# `facts` — which used to rebuild the slider model with it and destroy all three
+# ControlSlider delegates, so a re-created slider animated its fill up from
+# empty on any change anywhere in the panel. The sliders are the one thing in
+# here that cannot be driven at this seam (see 8g: they move the caller's own
+# sound card), so the proof is taken from the other side: two dozen service
+# changes, and nothing may be rebuilt for any of them.
+#
 # The three with no hardware to be missing: state and a config key, so both
 # halves are exact.
 check_press dnd 'control-centre: dnd on' 'pressing Do Not Disturb asks for it on'
@@ -890,12 +990,77 @@ expect_quiet_since "$mark" 'network: scanning$' \
 mark=$(log_lines)
 drill bluetooth
 expect_since "$mark" \
-    'bluetooth: (scanning for devices|no adapter — cannot scan|radio off — scan deferred)' \
+    'bluetooth: (scanning for devices|already discovering|no adapter — cannot scan|radio off — scan deferred)' \
     'opening the Bluetooth panel asks the adapter to discover'
 mark=$(log_lines)
 cc_back
 expect_since "$mark" 'control-centre: bluetooth panel closed' \
     'and closing it releases the discovery'
+
+# The hold that was never really the shell's (#189).
+#
+# Discovery on a real machine is not only ever this shell's: blueman, a
+# `bluetoothctl scan on` in a terminal, anything else on the bus can start and
+# stop it, and something on the laptop this was written on does so on a ~60 s
+# cycle (measured in #137, and again while filing #189). The bug was that the one
+# place `discovering` is written early-returned when the flag already matched, so
+# a panel opened over somebody else's scan took a hold that wrote nothing, said
+# nothing, and was never re-applied when that scan stopped — the "not always
+# scanning" half of the ticket, and invisible in the log either way.
+#
+# Driven by starting a scan from a *client that is not the shell* and then letting
+# that client exit: BlueZ releases a discovery when its owner disconnects, which
+# is the drop the shell has to notice.
+bt_discovering() {
+    bluetoothctl show 2>/dev/null | sed -n 's/.*Discovering: \(yes\|no\).*/\1/p' | head -1
+}
+
+if [[ "$HOST_BT" == yes ]]; then
+    bluetoothctl --timeout 12 scan on > "$NESTED_WORK/extscan.log" 2>&1 &
+    EXT_SCAN=$!
+    for _ in $(seq 1 20); do
+        [[ "$(bt_discovering)" == yes ]] && break
+        sleep 0.5
+    done
+
+    if [[ "$(bt_discovering)" == yes ]]; then
+        mark=$(log_lines)
+        drill bluetooth
+        # Either line is the pass. What is being ruled out is silence: before
+        # #189 a panel opening over an external scan wrote nothing at all, so
+        # "the hold did nothing" and "the panel never asked" read the same.
+        expect_since "$mark" 'bluetooth: (already discovering|scanning for devices)' \
+            'a panel opened over somebody else own scan says so'
+
+        # The drop. Our client exits on its timeout; on a machine whose own
+        # scanner is also running, the wait is for that one to finish a cycle
+        # too. A machine where the flag never drops cannot be asked this
+        # question, and says so rather than failing.
+        mark=$(log_lines)
+        wait "$EXT_SCAN" 2>/dev/null
+        dropped=0
+        for _ in $(seq 1 180); do
+            [[ "$(bt_discovering)" == no ]] && { dropped=1; break; }
+            sleep 0.5
+        done
+        if (( dropped )); then
+            expect_since "$mark" 'bluetooth: scanning for devices' \
+                'and the shell re-asserts the hold when the flag drops under it'
+        else
+            nested_note 'the adapter never stopped discovering — no drop to re-assert over'
+        fi
+
+        mark=$(log_lines)
+        cc_back
+        expect_since "$mark" 'bluetooth: scan stopped' \
+            'and closing the panel still gives the radio back'
+    else
+        kill "$EXT_SCAN" 2>/dev/null
+        nested_note 'the adapter would not start discovering — external-scan check skipped'
+    fi
+else
+    nested_note 'no powered bluetooth adapter — external-scan check skipped'
+fi
 
 # Depth of exactly one: a second panel replaces the first rather than stacking
 # under it, and pressing the door you are already behind takes you back out.
@@ -948,6 +1113,13 @@ mark=$(log_lines)
 nested_ipc call controlcenter device 00:00:00:00:00:00 > /dev/null 2>&1
 expect_since "$mark" 'bluetooth: device 00:00:00:00:00:00 unchanged — no such device' \
     'pressing a bluetooth row that does not exist reaches the bluez facade'
+# #189: and it reaches it *through the logger*. The third of the ticket's three
+# identical-looking dead buttons was a press on a handle BlueZ had replaced, which
+# threw to the QML console — a place nothing that reads this shell's log will ever
+# look. An address with nothing behind it is the reachable half of that case; the
+# other half needs a device object to be destroyed mid-press, which needs hardware.
+expect_quiet_since "$mark" 'TypeError|Unable to assign|is not a function' \
+    'and nothing was thrown to the QML console on the way'
 
 mark=$(log_lines)
 nested_ipc call controlcenter output 999999 > /dev/null 2>&1

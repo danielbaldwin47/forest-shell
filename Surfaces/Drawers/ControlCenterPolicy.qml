@@ -283,7 +283,7 @@ QtObject {
     // --- the sliders ---------------------------------------------------------
 
     /// The sliders this machine can offer: `{ id, percent, icon, label, muted,
-    /// mutable }`. A tower on a DisplayPort monitor has no
+    /// mutable, present }`. A tower on a DisplayPort monitor has no
     /// `/sys/class/backlight` and a machine with no microphone has no source —
     /// in both cases a slider that moves nothing is worse than an absent one.
     function sliders(facts: var): var {
@@ -296,6 +296,54 @@ QtObject {
         return out;
     }
 
+    /// Just the ids of `sliders()`, in the same order.
+    ///
+    /// This, not `sliders()`, is what the surface hands its `Repeater` (#192).
+    /// A row object carries a *level*, so it is a new object on every service
+    /// tick, and a JS array of new objects is a new array — which a
+    /// `QQmlDelegateModel` reads as a model reset and answers by destroying and
+    /// re-creating every delegate. The id list changes only when hardware
+    /// appears or goes away, so latching the model to it keeps the delegates
+    /// alive and leaves each one to bind its own row.
+    function sliderIds(facts: var): var {
+        return policy.sliders(facts).map(row => row.id);
+    }
+
+    /// The row one latched delegate draws: its slider, or a placeholder if the
+    /// machine no longer has it.
+    ///
+    /// The placeholder exists because the latch is one step behind by
+    /// construction — hardware goes away, and for the turn before `sliderIds`
+    /// is reassigned there is a delegate with no slider under it. It is
+    /// `present: false` and the surface hides it rather than drawing it,
+    /// because a row at 0% would run the fill animation *down to empty*, which
+    /// is #192 backwards.
+    function sliderRow(id: string, facts: var): var {
+        const row = policy.slider(id, facts ?? ({}));
+        if (row !== null)
+            return row;
+        const gone = policy.track(id, 0, "", "", false, false);
+        gone.present = false;
+        return gone;
+    }
+
+    /// Whether two id lists name the same things in the same order.
+    ///
+    /// The latch above needs this because it cannot compare references: every
+    /// call to `sliderIds()` returns a fresh array whatever is in it, so
+    /// "did the set change" has to be asked of the contents.
+    function sameIds(a: var, b: var): bool {
+        const left = a ?? [];
+        const right = b ?? [];
+        if (left.length !== right.length)
+            return false;
+        for (let i = 0; i < left.length; i++) {
+            if (left[i] !== right[i])
+                return false;
+        }
+        return true;
+    }
+
     function slider(id: string, facts: var): var {
         switch (id) {
         case "volume":     return policy.volumeSlider(facts.volume ?? ({}));
@@ -305,10 +353,14 @@ QtObject {
         return null;
     }
 
+    /// `present` is "this machine still has this slider", and it is false on
+    /// exactly one row: the placeholder `sliderRow()` hands a delegate whose
+    /// hardware has gone. Every row `sliders()` returns has it true.
     function track(id: string, percent: var, icon: string, label: string,
                    muted: bool, mutable: bool): var {
         return { id: id, percent: policy.clampPercent(percent), icon: icon,
-                 label: label, muted: muted === true, mutable: mutable === true };
+                 label: label, muted: muted === true, mutable: mutable === true,
+                 present: true };
     }
 
     function volumeSlider(volume: var): var {

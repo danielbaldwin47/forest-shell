@@ -232,6 +232,34 @@ Scope {
             // BarVisibilityPolicy.qml, which tests/ can reach.
             readonly property bool revealed: visibility.revealed(visibilityContext)
 
+            /// Where this bar takes input, in screen coordinates, published for
+            /// the drawers to cut out of their fog (#199).
+            ///
+            /// It is the *mask's* rect and not the window's: while an
+            /// auto-hidden bar is away the window keeps its full height and
+            /// masks itself down to `revealStrip`, so the rect follows the
+            /// reveal rather than the surface. `reservesSpace` rides along
+            /// because a bar that reserves needs no cutout at all — #187's
+            /// geometry already put the fog below it — and the drawer should
+            /// not have to work that out a second time.
+            readonly property var strip: BarStrips.policy.stripRect(
+                BarStrips.policy.context(
+                    window.atTop, window.revealed,
+                    visibility.reservesSpace(window.visibilityContext),
+                    settings.height, settings.floating,
+                    settings.floatMarginH, settings.floatMarginV,
+                    modelData.width, modelData.height))
+
+            // Against the cached name, never `modelData`, for the reason
+            // `Component.onDestruction` caches it: a hotplug can re-evaluate
+            // this binding while the `ShellScreen` behind it is being taken
+            // away. Empty until `Component.onCompleted`, which does the first
+            // publish itself.
+            onStripChanged: {
+                if (window.screenName !== "")
+                    BarStrips.publish(window.screenName, window.strip);
+            }
+
             screen: modelData
 
             anchors {
@@ -269,13 +297,18 @@ Scope {
             // *below* this window so the bar stays clickable over it.
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-            // ...and being *below* the fog is the whole of staying clickable.
-            // The fog stops at the strip this window reserves, so while a
-            // drawer is open this is the only surface over the bar. Nothing
+            // ...and being *below* the fog is the whole of staying clickable,
+            // for as long as this window reserves a strip for the fog to stop
+            // at. While it does, this is the only surface over the bar, nothing
             // else has to arrange delivery, and #187 is what happens when
             // something tries: the drawers' focus grab and their exclusive
             // keyboard focus each took the pointer off this window, and the
             // fix was to stop doing both (Surfaces/Drawers/Drawers.qml).
+            //
+            // An auto-hiding bar reserves nothing, so it has none of that and
+            // the fog covers it (#199). There the channel is `strip` below:
+            // this window publishes the rect it takes input in, and the drawer
+            // subtracts it from its own mask.
             //
             // The window logs both ends of its life, and the log is the whole of
             // what seam 2 can see of hotplug (#98): a window per output with
@@ -287,6 +320,10 @@ Scope {
 
             Component.onCompleted: {
                 window.screenName = window.modelData.name;
+                // `onStripChanged` covers every later move, but not the first
+                // value: the binding evaluates once on construction and a
+                // change handler does not fire for that.
+                BarStrips.publish(window.screenName, window.strip);
                 Logger.log("bar", "window up on " + window.screenName
                            + " (" + window.modelData.width + "×" + window.modelData.height
                            + " @" + window.modelData.devicePixelRatio + ")");
@@ -297,6 +334,10 @@ Scope {
                 // pointer was still there.
                 if (window.pointerHolding)
                     bar.pointerRevealed -= 1;
+                // Same reason the count is unwound: a rect left behind by a
+                // hotplugged-out screen is a hole punched over nothing on
+                // whatever screen takes the name next.
+                BarStrips.forget(window.screenName);
                 Logger.log("bar", "window gone from " + window.screenName);
             }
 

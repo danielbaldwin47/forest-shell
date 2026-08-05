@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # What a click on the bar does while a drawer is open, driven with a real
-# pointer inside a nested Hyprland (#187).
+# pointer inside a nested Hyprland (#187, #199).
 #
 #   tools/bar-click-harness.sh          # run the checks, print PASS/FAIL, exit 0/1
 #   tools/bar-click-harness.sh --keep   # leave the nested session up to poke at
@@ -33,11 +33,35 @@
 #   8. the launcher global — what super+space runs — still toggles
 #   9. with a second screen plugged in, a click on it dismisses too
 #
-# What it does not cover, and the code says so where it lives: an auto-hidden
-# bar. That bar reserves nothing, so the fog is laid out over its strip instead
-# of below it and every row of the table above fails — the drawer maps second
-# and is above. It fails that way on `main` too; this ticket did not introduce
-# it and does not fix it (see the header of Surfaces/Drawers/DrawerWindow.qml).
+# ## Twice, because there are two mechanisms (#199)
+#
+# The whole table runs once with `bar.autoHide` off and once with it on, and
+# they are not the same test. A pinned bar reserves an exclusive zone, so the
+# compositor lays the drawer's fog out *below* it and the bar is the only
+# surface over its own strip — that is #187's fix, and it is geometry alone. An
+# auto-hiding bar reserves nothing by definition, so there is nothing for the
+# fog to stop at: the fog covers the strip, both surfaces are `WlrLayer.Top`,
+# and the drawer maps second and therefore wins. Every row above failed again
+# in that configuration, on `main` and on #187's own branch.
+#
+# What covers it there is a hole cut in the drawer's input mask over the bar's
+# current rect (Core/BarStripsPolicy.qml). So the run also asserts the *hole*,
+# before it asserts anything a click did through it: a pinned bar must produce
+# no cutout at all — it does not need one and a hole would be punched through
+# fog that is somewhere else — and an auto-hidden one must produce a cutout the
+# size of its whole band while it is out, and none at all once it goes away.
+# #187's own lesson is why that check exists: a click check can pass for the
+# wrong reason, and the verb was never the broken part.
+#
+# The auto-hide pass pins the bar out with `ipc call bar reveal` rather than by
+# hovering the screen edge. It is the same state — an override of `shown` still
+# reserves no space while `autoHide` is on, which is the whole of what breaks
+# the geometry — and it is the *stable* one. Hovering is not: the bar's own mask
+# follows `content`, which slides in over ~240 ms from outside the window, so
+# the pointer that just triggered the reveal is left outside the input region
+# with no motion to re-enter on, and the 400 ms linger expires before it gets
+# one. That flap is the bar's own behaviour and predates #199; a harness that
+# drove the reveal by hover would be measuring it rather than the routing.
 #
 # ## How the targets are aimed
 #
@@ -55,6 +79,11 @@
 # Check 1 exists to make that aim falsifiable: if the left-edge coordinate is
 # wrong, the run fails on the first assertion rather than passing checks 2 and 3
 # for the wrong reason.
+#
+# The rect is read again for each pass. An auto-hidden bar keeps its window and
+# its geometry while it is away — only the mask shrinks to the one-pixel reveal
+# strip — so the numbers come out the same, and reading them again is what says
+# so rather than assumes it.
 #
 # The interactive non-door control is the keyboard layout, chosen for having no
 # side effects outside the session under test. Volume would be the ticket's own
@@ -89,8 +118,14 @@ click() {
 log_lines() { wc -l < "$NESTED_SHELL_LOG" 2>/dev/null || echo 0; }
 since() { tail -n "+$(($1 + 1))" "$NESTED_SHELL_LOG" 2>/dev/null; }
 
+## Which pass is running, printed into every check name. Two identical-looking
+## failures in one run are otherwise indistinguishable in the output.
+pass_label=""
+say() { printf '%s%s' "$pass_label" "$1"; }
+
 expect_since() {
-    local mark="$1" pattern="$2" what="$3"
+    local mark="$1" pattern="$2" what
+    what=$(say "$3")
     for _ in $(seq 1 50); do
         if since "$mark" | grep -qaE "$pattern"; then
             nested_pass "$what"
@@ -104,7 +139,8 @@ expect_since() {
 
 ## Nothing matching arrived, and waiting longer would not change that.
 expect_quiet_since() {
-    local mark="$1" pattern="$2" what="$3"
+    local mark="$1" pattern="$2" what
+    what=$(say "$3")
     sleep 0.5
     if since "$mark" | grep -qaE "$pattern"; then
         nested_fail "$what — /$pattern/ arrived and should not have"
@@ -114,7 +150,8 @@ expect_quiet_since() {
 }
 
 expect_open() {
-    local target="$1" want="$2" what="$3"
+    local target="$1" want="$2" what
+    what=$(say "$3")
     local got
     got=$(nested_ipc call "$target" isOpen)
     if [[ "$got" == "$want" ]]; then
@@ -123,6 +160,33 @@ expect_open() {
         nested_fail "$what — $target isOpen said '$got', wanted '$want'"
     fi
 }
+
+## The hole in the drawer's mask, right now (#199).
+##
+## The drawer logs the cutout when it *changes*, so the current state is the
+## last such line rather than any line since a mark — most of the time the right
+## hole is already cut and nothing new is said.
+##
+## The window has to be mapped for this to mean anything: an unmapped
+## `PanelWindow` has no size, and a cutout is refused whenever the window is not
+## the size of its screen. So every caller opens a drawer first.
+expect_cutout() {
+    local want="$1" what
+    what=$(say "$2")
+    local got=""
+    for _ in $(seq 1 40); do
+        got=$(grep -a "cutout on $bar_screen" "$NESTED_SHELL_LOG" 2>/dev/null | tail -1)
+        if [[ "$got" == *"$want"* ]]; then
+            nested_pass "$what"
+            return 0
+        fi
+        sleep 0.1
+    done
+    nested_fail "$what — wanted a cutout line containing '$want', last was '${got:-none at all}'"
+    return 1
+}
+
+# --- the session -------------------------------------------------------------
 
 # Two layouts, so the keyboard module is on the bar at all — it hides itself on
 # a one-layout machine, which is most of them (Surfaces/Bar/Modules/
@@ -136,10 +200,16 @@ nested_up || exit 1
 
 SCRATCH="$NESTED_WORK/xdg"
 mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-cat > "$SCRATCH/config/forest-shell/settings.json" <<'EOF'
+NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+
+## The scratch config, with `bar.autoHide` as the one thing that differs between
+## the two passes.
+write_settings() {
+    cat > "$SCRATCH/config/forest-shell/settings.json" <<EOF
 {
   "bar": {
     "floating": false,
+    "autoHide": $1,
     "modules": {
       "left": ["launcher"],
       "center": ["keyboard"],
@@ -148,32 +218,64 @@ cat > "$SCRATCH/config/forest-shell/settings.json" <<'EOF'
   }
 }
 EOF
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+}
 
-nested_shell shell.qml 'drawers armed' 25 || exit 1
-# The bar's own window logs when it maps; the modules land a frame or two later.
-nested_await "$NESTED_SHELL_LOG" 'bar: window up on' 15 > /dev/null
-sleep 2
+## Restarted rather than reloaded between passes. `bar.autoHide` changes what
+## the bar reserves, which changes how the compositor lays the drawer's window
+## out; a restart is the one way to be sure the run is looking at the new
+## arrangement and not at a surface that has not been reconfigured yet.
+start_shell() {
+    nested_shell shell.qml 'drawers armed' 25 || return 1
+    # The bar's own window logs when it maps; the modules land a frame or two
+    # later.
+    nested_await "$NESTED_SHELL_LOG" 'bar: window up on' 15 > /dev/null
+    sleep 2
+}
 
-# --- where the bar is --------------------------------------------------------
+## Where the bar is, and which screen it is on. The screen name is what the
+## cutout lines are keyed by, so it is read from the same place as the rect
+## rather than assumed from `NESTED_MONITORS` — the backend's own output is
+## dropped here (`NESTED_HEADLESS_ONLY`), so the first declared name is not the
+## one that exists.
+measure_bar() {
+    local info
+    info=$(nested_hyprctl layers | awk '
+        /^Monitor / { mon = $2; sub(/:$/, "", mon) }
+        /forest-shell:bar/ && !found {
+            if (match($0, /xywh: [0-9-]+ [0-9-]+ [0-9-]+ [0-9-]+/)) {
+                print mon, substr($0, RSTART + 6, RLENGTH - 6)
+                found = 1
+            }
+        }')
+    read -r bar_screen bar_x bar_y bar_w bar_h <<< "$info"
 
-bar_rect=$(nested_hyprctl layers \
-           | sed -n 's/.*xywh: \([0-9-]*\) \([0-9-]*\) \([0-9-]*\) \([0-9-]*\),.*forest-shell:bar.*/\1 \2 \3 \4/p' \
-           | head -1)
-read -r bar_x bar_y bar_w bar_h <<< "$bar_rect"
+    if [[ -z "${bar_h:-}" ]]; then
+        nested_fail "$(say 'the bar never mapped a layer surface — nothing to click')"
+        return 1
+    fi
+    nested_note "$(say "bar at ${bar_x},${bar_y} ${bar_w}×${bar_h} on $bar_screen")"
 
-if [[ -z "${bar_h:-}" ]]; then
-    nested_fail 'the bar never mapped a layer surface — nothing to click'
-    nested_down
-    exit 1
-fi
-nested_note "bar at ${bar_x},${bar_y} ${bar_w}×${bar_h}"
+    mid_y=$(( bar_y + bar_h / 2 ))
+    launcher_x=$(( bar_x + 20 ))
+    control_x=$(( bar_x + bar_w - 20 ))
+    keyboard_x=$(( bar_x + bar_w / 2 ))
+    dead_x=$(( bar_x + bar_w / 4 ))
+    # Well clear of the bar and of the one-pixel reveal strip, so parking here
+    # cannot hold an auto-hiding bar out.
+    away_y=$(( bar_y + bar_h + 300 ))
+}
 
-mid_y=$(( bar_y + bar_h / 2 ))
-launcher_x=$(( bar_x + 20 ))
-control_x=$(( bar_x + bar_w - 20 ))
-keyboard_x=$(( bar_x + bar_w / 2 ))
-dead_x=$(( bar_x + bar_w / 4 ))
+# --- the table ---------------------------------------------------------------
+
+## #187's nine checks, run once per pass.
+##
+## Deliberately not parameterised: it reads the target coordinates `measure_bar`
+## sets — `mid_y`, `launcher_x`, `control_x`, `keyboard_x`, `dead_x`, `away_y`,
+## `bar_screen` — and the pass it is running is `pass_label`, which every
+## assertion carries into its own name. They are globals because they were
+## globals when this was a straight-line script, and passing seven coordinates
+## through a positional interface would be less legible rather than more.
+run_table() {
 
 # --- 1. the aim is right, and the bar works with nothing open -----------------
 
@@ -236,9 +338,9 @@ sleep 1
 layout_after=$(nested_hyprctl devices | sed -n 's/^\s*active keymap:\s*\(.*\)$/\1/p' | head -1)
 
 if [[ -n "$layout_before" && "$layout_before" != "$layout_after" ]]; then
-    nested_pass "the keyboard module acted ($layout_before → $layout_after)"
+    nested_pass "$(say "the keyboard module acted ($layout_before → $layout_after)")"
 else
-    nested_fail "the keyboard module did nothing (keymap stayed '$layout_before')"
+    nested_fail "$(say "the keyboard module did nothing (keymap stayed '$layout_before')")"
 fi
 expect_quiet_since "$mark" 'drawers: controlcenter closed' \
     'and the control centre stayed open under it'
@@ -247,7 +349,7 @@ expect_open controlcenter true 'the control centre is still open'
 # --- 6. the desktop still dismisses ------------------------------------------
 
 mark=$(log_lines)
-click $(( bar_x + bar_w / 2 )) $(( bar_y + bar_h + 300 ))
+click "$keyboard_x" "$away_y"
 expect_since "$mark" 'drawers: controlcenter closed \(clicked away\)' \
     'a click on the desktop still dismisses, still as `clicked away`'
 
@@ -332,9 +434,97 @@ if nested_output_add "$SECOND, 1280x800@60, 1280x0, 1"; then
         'a click on the other screen dismisses the drawer'
 
     nested_output_remove "$SECOND" > /dev/null
+    sleep 1
 else
-    nested_fail "could not plug in $SECOND — the second-screen claim is untested"
+    nested_fail "$(say "could not plug in $SECOND — the second-screen claim is untested")"
 fi
+
+}
+
+# --- what the drawer cut out of its own fog (#199) ---------------------------
+
+## A pinned bar needs no hole, and must not be given one: the fog is laid out
+## below its reserved strip, so a hole cut at the bar's screen coordinates would
+## land in the middle of a window whose origin is 32 px further down.
+check_no_cutout() {
+    nested_ipc call controlcenter toggle > /dev/null
+    expect_open controlcenter true 'a drawer is open for the fog to be measured'
+    expect_cutout "no bar cutout on $bar_screen" \
+        'a reserving bar gets no hole cut for it — geometry already covers it'
+    nested_ipc call controlcenter toggle > /dev/null
+    sleep 0.5
+}
+
+## An auto-hidden bar gets one while it is out, and none at all once it goes
+## away. Not a smaller one: while the bar is away there is nothing behind the
+## fog to reach — its dismiss handler is parked outside the window with the rest
+## of `content` — so a hole over the reveal strip would be a row of the band
+## that neither acts nor dismisses. The whole band stays fog instead, which is
+## #199's second acceptance criterion in as many words.
+check_cutout_tracks_the_bar() {
+    nested_ipc call bar reveal > /dev/null
+    nested_ipc call controlcenter toggle > /dev/null
+    expect_open controlcenter true 'a drawer is open for the fog to be measured'
+    expect_cutout "cutout on $bar_screen: ${bar_w}×${bar_h}+" \
+        'an auto-hidden bar that is out gets a hole the size of its whole band'
+
+    # Away, and the pointer parked well clear so nothing holds it out.
+    nested_hyprctl dispatch movecursor "$keyboard_x" "$away_y" > /dev/null
+    nested_ipc call bar auto > /dev/null
+    expect_cutout "no bar cutout on $bar_screen" \
+        'and the hole closes entirely when the bar goes away'
+
+    # The cutout line says the *shell* has decided, not that the compositor has
+    # applied the new input region — those are two surfaces committing
+    # separately, and for a frame or two after the bar goes away the old
+    # full-band hole can still be live over a bar that has already shrunk to its
+    # reveal strip. A click in that window reaches neither and does nothing.
+    # Measured: clicking 0.3 s after the line fails, 1.2 s after it passes. It
+    # is the same argument `click` makes for its own settle — the check is what
+    # a click reaches, not how many frames the region took.
+    sleep 1
+
+    # #199's second acceptance criterion. The discriminator is *which* reason the
+    # drawer closes for: a click that reached the bar's dead space closes it as
+    # `bar`, and one that reached the fog closes it as `clicked away`. With the
+    # bar gone this band belongs to the fog, and saying so needs the reason.
+    mark=$(log_lines)
+    click "$dead_x" "$mid_y"
+    expect_since "$mark" 'drawers: controlcenter closed \(clicked away\)' \
+        'with the bar away, a click where it would be reaches the fog and dismisses'
+
+    nested_ipc call bar reveal > /dev/null
+    sleep 0.5
+}
+
+# --- both passes -------------------------------------------------------------
+
+for pass in pinned autohide; do
+    if [[ "$pass" == pinned ]]; then
+        pass_label=""
+        auto=false
+    else
+        pass_label="[auto-hide] "
+        auto=true
+        nested_kill_shell
+    fi
+
+    write_settings "$auto"
+    start_shell || { nested_down; exit 1; }
+    measure_bar || { nested_down; exit 1; }
+
+    if [[ "$pass" == pinned ]]; then
+        check_no_cutout
+    else
+        # Pinned out for the table, and pinned by the override rather than by
+        # the pointer — see the header on why hovering is not a stable way to
+        # hold an auto-hiding bar in place.
+        check_cutout_tracks_the_bar
+        nested_ipc call bar reveal > /dev/null
+    fi
+
+    run_table
+done
 
 nested_down
 exit $(( nested_fail_count > 0 ))

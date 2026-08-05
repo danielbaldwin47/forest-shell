@@ -7,6 +7,7 @@ pragma Singleton
 //     Backlight.percent       // 0-100, live, read straight from /sys
 //     Backlight.setPercent(40)
 //     Backlight.step(1)       // one notch up
+//     Backlight.watch() / Backlight.release()   // while a level is on screen
 //
 // Named `Backlight` rather than `Brightness` for one flat reason: the bar
 // module is `Surfaces/Bar/Modules/Brightness.qml`, and two QML types with the
@@ -22,6 +23,16 @@ pragma Singleton
 // or udev-blessed, which is the entire reason `brightnessctl` is here — so it
 // is only ever asked to *set*, and once at startup to say which device is the
 // panel.
+//
+// **Reading it is free but not automatic.** A sysfs attribute change is
+// delivered by `sysfs_notify`, a poll() wakeup rather than an inotify event, so
+// the FileView's `watchChanges` never fires for the panel — which meant every
+// brightness the shell did not set was invisible to it until the shell next
+// wrote one (#186: a panel at 94%, a shell still showing 61% twelve minutes
+// later, and a key press that stepped from the 61%). So the value is re-read on
+// demand: `watch()`/`release()` while a surface is showing a level, and a read
+// before a step that is not already ramping. Nothing ticks while no surface is
+// showing brightness, and the read itself is synchronous — see the FileView.
 //
 // Two things this file does that #78 paid for:
 //
@@ -82,10 +93,23 @@ Singleton {
     }
 
     function step(direction: int) {
-        // Stepped off the *queued* value while one is in flight, so holding the
-        // key ramps instead of fighting the sysfs value it has outrun.
-        const from = root.queued >= 0 ? root.queued : root.percent;
-        root.setPercent(root.policy.stepped(from, direction));
+        if (root.queued >= 0) {
+            // Stepped off the *queued* value while one is in flight, so holding
+            // the key ramps instead of fighting the sysfs value it has outrun.
+            root.setPercent(root.policy.stepped(root.queued, direction));
+            return;
+        }
+        // Idle, so the cached value is only as good as the last read — and #186
+        // is the case where it is not good at all, because anything may have
+        // moved the panel since. Ask first, and step from the answer rather
+        // than from `percent`: the read is synchronous but the *binding* on it
+        // is not (measured — after a blocking `reload()`, `text()` is the new
+        // contents while a property bound to it is still the old one), so a
+        // step off `percent` here would be a step off the value the read was
+        // for. Unconditional, not `refreshIfStale()`: a step is exactly the
+        // caller that must not be handed a remembered value.
+        root.readNow();
+        root.setPercent(root.policy.stepped(root.reading(), direction));
     }
 
     function applyQueued() {
@@ -114,6 +138,7 @@ Singleton {
                 // inotify does not fire for a sysfs attribute — `watchChanges`
                 // below catches an external change on the drivers that do
                 // notify, and this catches every change the shell makes.
+                root.lastReadAt = Date.now();
                 sysfs.reload();
             } else {
                 Logger.warn("backlight", root.policy.complaint(root.device, apply.target,
@@ -121,6 +146,89 @@ Singleton {
             }
             root.applyQueued();
         }
+    }
+
+    // --- keeping it true (#186) ----------------------------------------------
+    //
+    // `watchChanges` below cannot deliver an external change, so the value is
+    // re-read on demand instead. Three demands:
+    //
+    //     Backlight.watch() / Backlight.release()   // a surface that comes and goes
+    //     Backlight.refreshIfStale()                // a readout, as it appears
+    //     — and a step, which reads before it computes its next notch.
+    //
+    // The subscription is the same shape as SystemStats and Weather —
+    // `Component.onCompleted` / `Component.onDestruction` on the surface — and
+    // it is a count rather than a flag because two surfaces can be showing a
+    // level at once.
+    //
+    // What holds one is the part worth stating: a surface that *comes and
+    // goes*, which in practice is the control centre. A bar module is never not
+    // on screen, so a subscription there would be a timer running for the life
+    // of the session — measured at 5.57 context switches/s against a budget of
+    // 5, up from 1.9 (tools/idle-budget.sh, with the module in the bar). The
+    // permanent readout therefore reads as it appears and lives off the reads
+    // everything else causes.
+
+    /// When the panel was last read, as a millisecond clock, or 0 for never.
+    property real lastReadAt: 0
+
+    /// How many surfaces are currently displaying a level.
+    property int watchers: 0
+
+    /// The panel's level as the file says it is *now*, rather than as the
+    /// bindings have caught up with. Same arithmetic as `percent`, off the same
+    /// read; what differs is only that this one cannot be a frame behind.
+    function reading(): int {
+        return root.policy.percent(root.policy.number(sysfs.text()), root.max);
+    }
+
+    /// Read the panel, and remember when. Synchronous — `reading()` is the new
+    /// value the moment this returns.
+    function readNow(): void {
+        if (!root.available)
+            return;
+        root.lastReadAt = Date.now();
+        sysfs.reload();
+    }
+
+    /// Read the panel unless the last read is recent enough to still be worth
+    /// trusting. What a subscription does on arrival and on every tick, so that
+    /// several surfaces appearing in the same frame are one read; a step does
+    /// not use this, because a step is the one caller that must not be handed a
+    /// remembered value.
+    function refreshIfStale(): void {
+        if (root.policy.readDue(Date.now(), root.lastReadAt))
+            root.readNow();
+    }
+
+    function watch(): void {
+        root.watchers += 1;
+        if (root.watchers === 1)
+            Logger.log("backlight", root.policy.watching(root.watchers, root.policy.pollMs));
+        // The level on screen the moment the surface appears is the one #186
+        // was reported against: a drawer opened after an external change showed
+        // whatever the shell last happened to write.
+        root.refreshIfStale();
+    }
+
+    function release(): void {
+        root.watchers = Math.max(0, root.watchers - 1);
+        // Both edges are logged, and both are a policy line: "it stopped when
+        // the drawer closed" is the half of the subscription a harness can only
+        // see by reading for it (Services/README.md, and SystemStats next door).
+        if (root.watchers === 0)
+            Logger.log("backlight", root.policy.idle());
+    }
+
+    Timer {
+        // Armed only while something is displaying a level, which is the whole
+        // of #186's "nothing new runs at rest": with no brightness on screen
+        // this never ticks, and the shell's idle budget is unchanged.
+        running: root.policy.pollRunning(root.watchers, root.available)
+        interval: root.policy.pollMs
+        repeat: true
+        onTriggered: root.refreshIfStale()
     }
 
     // --- finding the panel ---------------------------------------------------
@@ -160,9 +268,20 @@ Singleton {
         // catches drivers that also touch the file. Every change the shell
         // makes is picked up by the explicit reload above regardless — this is
         // for the brightness keys a compositor keybind handled before the shell
-        // owned them.
+        // owned them. #186 is what the gap costs, and `refresh()` above is the
+        // answer: the value is re-read on demand rather than waited for.
         watchChanges: true
         printErrors: false
+
+        // Read on this thread rather than on a pool one, which is what makes
+        // `refresh()` answer rather than promise: measured, a `reload()` without
+        // this is asynchronous even with `blockLoading` set — `text()`
+        // immediately after it still returns the previous contents and the new
+        // one arrives with `loaded`, so a step would compute from exactly the
+        // stale value the read was for. Blocking is affordable because the file
+        // is one kernel attribute, four bytes of it, already in memory; the
+        // thread hop it avoids is the more expensive half.
+        blockAllReads: true
     }
 
     onPercentChanged: if (root.available)

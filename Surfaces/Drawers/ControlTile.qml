@@ -154,6 +154,26 @@ Rectangle {
     // bare glyph: the body's `TapHandler` would otherwise take the press and the
     // chevron would be decoration. 24px of target around a 12px glyph, because
     // the corner of a 113px tile is a place people miss.
+    //
+    // ## Why the door's handler names a gesture policy (#183)
+    //
+    // Its own handler is not on its own enough, and shipping without this line
+    // is what #183 reported: pressing the Wi-Fi chevron opened the network panel
+    // *and* turned Wi-Fi off. A `TapHandler` at the default
+    // `TapHandler.DragThreshold` takes only a **passive** grab, and a passive
+    // grab is not exclusive — the body's handler is an ancestor of this one, so
+    // the same press reached both and both emitted `tapped`.
+    //
+    // `ReleaseWithinBounds` makes the door take an exclusive grab on press, and
+    // the body's passive grab is cancelled with it, so the press means one thing
+    // again. Measured at seam 1 rather than reasoned about
+    // (tests/tst_controltile_door.qml): on the same nesting, the default policy
+    // fires both handlers and this one fires only the door.
+    //
+    // The other route to the same place is item-level input — a `MouseArea`
+    // instead of a handler, which is what Surfaces/Drawers/NotificationCenter.qml
+    // uses for its per-group clear button. Either works; this one is a property
+    // rather than a rewrite of the hover and the cursor shape alongside it.
     Item {
         id: door
 
@@ -172,6 +192,11 @@ Rectangle {
         }
 
         TapHandler {
+            // Exclusive on press, so the body's handler does not fire too — see
+            // the block above. Not `WithinBounds`: releasing off the chevron
+            // should cancel the press, which is the behaviour every other button
+            // in the shell already has.
+            gesturePolicy: TapHandler.ReleaseWithinBounds
             onTapped: tile.drillRequested()
         }
 

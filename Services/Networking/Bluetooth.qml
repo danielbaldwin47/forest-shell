@@ -133,6 +133,11 @@ Singleton {
                 // attempt and a second press would start a second one.
                 pairing: device.pairing === true || device.address === root.pairingAddress,
                 trusted: device.trusted === true,
+                // BlueZ's own answer to "is a connection being set up", read
+                // here for the first time (#189). Reading it inside this
+                // binding is also what makes the binding re-evaluate when it
+                // moves, which is what `watchConnect` below is waiting for.
+                connecting: device.state === Bz.BluetoothDeviceState.Connecting,
                 battery: device.battery,
                 batteryAvailable: device.batteryAvailable === true,
                 // BlueZ's own icon name for the device class — the policy maps
@@ -215,13 +220,26 @@ Singleton {
         // carries paired/connected/pairing and the two would agree; a field
         // dropped from it for a drawing reason would silence this.
         root.noteDeviceChanges();
-        const rows = root.policy.deviceRows(root.deviceCandidates);
+        // Above the gate too, and for the same reason: whether a connect in
+        // flight has ended is not a drawing decision, and a reading that does
+        // not change the list is still the reading that carries the answer —
+        // `Connecting` is deliberately not in the signature.
+        root.watchConnect();
+        root.handleGenerations = root.policy.handleGenerations(root.deviceCandidates,
+                                                              root.handleGenerations);
+        const rows = root.policy.deviceRows(root.deviceCandidates, root.handleGenerations);
         const signature = root.policy.deviceSignature(rows);
         if (signature === root.deviceSignature)
             return;
         root.deviceSignature = signature;
         root.deviceRows = rows;
     }
+
+    /// How many objects BlueZ has used for each address so far (#189) — the one
+    /// part of the signature that is not a fact about the device. Not a binding
+    /// and not notified, like `deviceHistory` next door: nothing reads it but the
+    /// handler above and `refreshDevices`.
+    property var handleGenerations: ({})
 
     /// Discovery, held for as long as a panel is looking — counted for the same
     /// reason the wifi scanner is, and off by default for the same one: a
@@ -258,10 +276,39 @@ Singleton {
         if (!root.present)
             return;
         const wanted = root.discoveryHolders > 0 && root.enabled;
-        if (root.adapter.discovering === wanted)
+        if (root.adapter.discovering === wanted) {
+            // Wanting a scan that is already running writes nothing — the
+            // property is upstream's mirror of the adapter's flag and setting it
+            // to what it already is calls no method. Said out loud rather than
+            // returned in silence (#189): this is the case where the panel opens
+            // and nothing at all appears in the log, and the hold it thinks it
+            // took is somebody else's scan. `onDiscoveringChanged` below is what
+            // makes the hold real again the moment that scan stops.
+            if (wanted)
+                Logger.log("bluetooth", root.policy.discoveryShared());
             return;
+        }
         root.adapter.discovering = wanted;
         Logger.log("bluetooth", root.policy.discovery(wanted));
+    }
+
+    /// The adapter's own flag moving, whoever moved it (#189).
+    ///
+    /// Discovery on this machine is not only ever the shell's: blueman, a
+    /// `bluetoothctl scan on` in a terminal, anything else on the bus can start
+    /// and stop it, and something here does so on a roughly 60 s cycle (measured
+    /// in #137). Before this, a hold taken while one of those was running was
+    /// never really the shell's, and was never re-applied when the other party
+    /// stopped — the panel sat open over an adapter that had gone quiet, which is
+    /// the "not always scanning" half of the ticket.
+    ///
+    /// Only ever re-*asserts*. A flag going up while nobody holds it is somebody
+    /// else's scan and is left alone — stopping it would be this shell reaching
+    /// into another program's business, and #22 §5's rule is that the shell does
+    /// not scan at rest, not that nothing may.
+    onDiscoveringChanged: {
+        if (root.discoveryHolders > 0 && root.enabled && !root.discovering)
+            root.applyDiscovery();
     }
 
     /// The row for an address, or null — the lookup the IPC door needs, since a
@@ -336,7 +383,7 @@ Singleton {
         // Both halves: `CancelPairing` is what stops a request already on the
         // bus, whoever made it, and ending the helper is what takes its agent
         // back off the bus so a later attempt can register a fresh one.
-        row.live.cancelPair();
+        root.attemptLive(row, () => row.live.cancelPair());
         if (root.pairingAddress === address)
             root.endPairing();
     }
@@ -435,12 +482,14 @@ Singleton {
                     root.policy.paired(name, { done: true, ok: false, reason: reason }));
     }
 
+    /// The second half of the one gesture, through the same door as a press
+    /// (#189) — it was its own copy of `connect()`-and-forget, which made the
+    /// half of the gesture nobody explicitly asked for the half with no ending.
     function connectAfterPair(address: string): void {
         const row = root.rowFor(address);
         if (row === null || row.live === null || row.connected)
             return;
-        Logger.log("bluetooth", root.policy.asked("connect", row.name));
-        row.live.connect();
+        root.connectDevice(address);
     }
 
     /// Take the in-flight flag back out of the last reading, so the pairing
@@ -483,6 +532,44 @@ Singleton {
         return name;
     }
 
+    // --- a connect that reaches an ending (#189) ------------------------------
+    //
+    // What this ticket found: `connectDevice` logged one hopeful line, called
+    // `connect()` and forgot about it. Three different things then look the same
+    // from the outside — BlueZ refusing asynchronously, the handle having been
+    // replaced under the row, and the press landing on an LE transport that
+    // cannot carry audio — and all three read as a dead button, because the row
+    // said "Paired" before the press and "Paired" afterwards and the log held
+    // only the optimistic line.
+    //
+    // Shaped after the pairing path above, which already had all of this: one
+    // attempt at a time, a timeout, an outcome parser, one teardown. What is
+    // different is where the outcome comes from — a pairing is read off
+    // `bluetoothctl`'s stdout, and a connect is read off the device's own
+    // `state`, which is upstream's answer and needs no helper.
+
+    /// The address being connected right now, "" when nothing is. One at a time
+    /// for the reason the pairing flag is: the row is the acknowledgement, and
+    /// two attempts sharing one flag is a row that lies about one of them.
+    property string connectingAddress: ""
+    property string connectingName: ""
+
+    /// Whether BlueZ has been seen to actually start on the attempt in flight.
+    ///
+    /// This is the difference between "not connected yet" and "not connected":
+    /// `connect()` returns before `state` moves, so a device still reading
+    /// `Disconnected` one signal later has not failed — it has not started. Only
+    /// once `Connecting` has been seen does dropping back to `Disconnected` mean
+    /// BlueZ said no; before that, the timeout is what ends it.
+    property bool connectStarted: false
+
+    /// The address whose last attempt failed, for as long as the row says so.
+    property string failedAddress: ""
+
+    /// `BluetoothDeviceState.Connecting`, for the panel to compare against
+    /// without importing the BlueZ module into a surface.
+    readonly property int connectingState: Bz.BluetoothDeviceState.Connecting
+
     function connectDevice(address: string): void {
         const row = root.rowFor(address);
         if (row === null || row.live === null) {
@@ -495,8 +582,145 @@ Singleton {
             Logger.warn("bluetooth", root.policy.deviceRefused(row.name, "not paired yet"));
             return;
         }
+        if (root.connectingAddress === address) {
+            // A second press on a row that already says "Connecting…". Refused
+            // rather than started again, and *logged*: pressing twice because
+            // nothing appeared to happen is exactly what the ticket describes
+            // someone doing, and the answer to it has to be a line that says
+            // the first press is still in flight.
+            Logger.warn("bluetooth",
+                        root.policy.deviceRefused(row.name, "already connecting"));
+            return;
+        }
+        if (root.connectingAddress !== "") {
+            Logger.warn("bluetooth",
+                        root.policy.deviceRefused(row.name, "already connecting to "
+                                                  + root.connectingName));
+            return;
+        }
+        if (root.policy.leShadow(row, root.deviceRows))
+            Logger.warn("bluetooth", root.policy.leWarning(row.name));
         Logger.log("bluetooth", root.policy.asked("connect", row.name));
-        row.live.connect();
+        root.connectingAddress = row.address;
+        root.connectingName = row.name;
+        root.connectStarted = false;
+        root.clearFailed();
+        connectTimeout.restart();
+        if (!root.attemptLive(row, () => row.live.connect()))
+            root.endConnect();
+    }
+
+    /// Call something on a device's live handle, and survive the handle having
+    /// been destroyed since the row was published (#189).
+    ///
+    /// The published row holds a reference to a BlueZ device object, and BlueZ
+    /// replaces those: an adapter cycling, a device leaving and re-entering
+    /// range. Before this, the call on a dead one threw to the QML console —
+    /// where nothing that reads this shell's log will ever look — and the row
+    /// went on pointing at it, so the *next* press threw as well. Both halves are
+    /// here: the log line, and the republish that makes the second press land on
+    /// the object BlueZ has now.
+    function attemptLive(row: var, action: var): bool {
+        try {
+            action();
+            return true;
+        } catch (error) {
+            Logger.warn("bluetooth",
+                        root.policy.deviceRefused(row.name, "its bluez handle is gone"));
+            root.refreshDevices();
+            return false;
+        }
+    }
+
+    /// A connect nobody ever answers — the headset in a bag, the speaker that is
+    /// off at the wall. Without this the row reads "Connecting…" until the shell
+    /// restarts, which is the same lie as "Paired" with a slower onset.
+    Timer {
+        id: connectTimeout
+
+        interval: root.policy.connectTimeoutMs
+        onTriggered: {
+            if (root.connectingAddress === "")
+                return;
+            root.failConnect("timed out");
+        }
+    }
+
+    /// How long the failure stays on the row before it goes back to resting.
+    Timer {
+        id: failedShown
+
+        interval: root.policy.failedShownMs
+        onTriggered: root.failedAddress = ""
+    }
+
+    /// Read the attempt's outcome off the device itself, on every reading of
+    /// BlueZ — which is every time any property of any device moves, including
+    /// the `state` this is watching.
+    function watchConnect(): void {
+        if (root.connectingAddress === "")
+            return;
+        const row = root.rowFor(root.connectingAddress);
+        if (row === null) {
+            // The device object went away mid-attempt: the adapter cycled, or
+            // BlueZ dropped a device it no longer sees. Not a timeout, and not
+            // silence either.
+            root.failConnect("bluez no longer knows the device");
+            return;
+        }
+        if (row.connected) {
+            const name = root.endConnect();
+            Logger.log("bluetooth", root.policy.connectOutcome(name, ""));
+            return;
+        }
+        if (row.connecting) {
+            root.connectStarted = true;
+            return;
+        }
+        if (root.connectStarted)
+            root.failConnect("refused by bluez");
+    }
+
+    /// End the attempt and say why. Every ending that is not success comes
+    /// through here, for the reason `endPairing` gives: four endings written out
+    /// four times is four chances to leave the row saying "Connecting…".
+    function failConnect(reason: string): void {
+        const address = root.connectingAddress;
+        const name = root.endConnect();
+        root.failedAddress = address;
+        failedShown.restart();
+        Logger.warn("bluetooth", root.policy.connectOutcome(name, reason));
+    }
+
+    function clearFailed(): void {
+        failedShown.stop();
+        root.failedAddress = "";
+    }
+
+    /// The one teardown, handing back the name so the caller can say what became
+    /// of it — the same shape as `endPairing`.
+    function endConnect(): string {
+        const name = root.connectingName;
+        connectTimeout.stop();
+        root.connectingAddress = "";
+        root.connectingName = "";
+        root.connectStarted = false;
+        return name;
+    }
+
+    /// Republish the list whatever the signature says (#189).
+    ///
+    /// For the case the gate cannot see: a handle replaced behind an address
+    /// whose name and flags did not move. `handleGenerations` makes that visible
+    /// to the signature on the *next* reading, and this is what forces the
+    /// reading rather than waiting for BlueZ to change something else — so the
+    /// second press lands on the live object instead of throwing again.
+    function refreshDevices(): void {
+        root.handleGenerations = root.policy.handleGenerations(root.deviceCandidates,
+                                                              root.handleGenerations);
+        root.deviceRows = root.policy.deviceRows(root.deviceCandidates,
+                                                 root.handleGenerations);
+        root.deviceSignature = root.policy.deviceSignature(root.deviceRows);
     }
 
     function disconnectDevice(address: string): void {
@@ -506,7 +730,7 @@ Singleton {
             return;
         }
         Logger.log("bluetooth", root.policy.asked("disconnect", row.name));
-        row.live.disconnect();
+        root.attemptLive(row, () => row.live.disconnect());
     }
 
     /// Forget a paired device — the one act here that destroys something, so it
@@ -523,7 +747,7 @@ Singleton {
             return;
         }
         Logger.log("bluetooth", root.policy.asked("forget", row.name));
-        row.live.forget();
+        root.attemptLive(row, () => row.live.forget());
     }
 
     /// One press, routed by what the row is now — the same table the panel uses,

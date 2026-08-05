@@ -348,6 +348,100 @@ TestCase {
         compare(policy.sliders(facts)[1].icon, "mic-off");
     }
 
+    // --- the slider model's identity (#192) -----------------------------------
+    //
+    // The surface latches its `Repeater` to `sliderIds` and reassigns only when
+    // `sameIds` says the set changed, because a new array identity destroys and
+    // re-creates every delegate and a re-created slider animates its fill up
+    // from empty. What seam 1 can check is the decision underneath that: which
+    // facts move the id list, and which — the ones that move on every volume
+    // key — must not.
+
+    function test_the_id_list_is_the_sliders_in_order() {
+        compare(policy.sliderIds(fullFacts()), ["volume", "mic", "brightness"]);
+    }
+
+    function test_absent_hardware_leaves_the_id_list() {
+        const facts = fullFacts();
+        facts.brightness.available = false;
+        compare(policy.sliderIds(facts), ["volume", "mic"]);
+    }
+
+    function test_a_level_or_mute_change_does_not_change_the_id_list() {
+        // The whole point. These are the changes that arrive on every volume
+        // key, every brightness step and every drag frame; if any of them moved
+        // the id list the latch would reassign and the fill would replay.
+        const before = policy.sliderIds(fullFacts());
+
+        const louder = fullFacts();
+        louder.volume.percent = 90;
+        louder.brightness.percent = 12;
+        verify(policy.sameIds(before, policy.sliderIds(louder)));
+
+        const muted = fullFacts();
+        muted.volume.muted = true;
+        muted.mic.muted = true;
+        verify(policy.sameIds(before, policy.sliderIds(muted)));
+    }
+
+    function test_hardware_arriving_or_going_does_change_the_id_list() {
+        const full = policy.sliderIds(fullFacts());
+
+        const noMic = fullFacts();
+        noMic.mic.available = false;
+        verify(!policy.sameIds(full, policy.sliderIds(noMic)));
+
+        // And back again: the latch has to reassign in both directions, or a
+        // microphone plugged in mid-session never gets a row.
+        verify(policy.sameIds(full, policy.sliderIds(fullFacts())));
+    }
+
+    function test_reordering_the_sliders_changes_the_id_list() {
+        // #55's configured order. Same three sliders, different sequence, so
+        // comparing lengths alone would miss it.
+        verify(!policy.sameIds(["volume", "mic", "brightness"],
+                               ["mic", "volume", "brightness"]));
+    }
+
+    function test_same_ids_survives_an_empty_or_missing_list() {
+        // Not the startup path — the surface holds `null` until its first
+        // latch and skips the comparison entirely for it, precisely so an
+        // empty machine still logs. This is the path *after* that: a machine
+        // that latched `[]` and is asked again, which has to compare equal or
+        // it would relatch and relog on every service tick.
+        verify(policy.sameIds([], []));
+        verify(policy.sameIds(null, []));
+        verify(policy.sameIds(undefined, null));
+        verify(!policy.sameIds([], ["volume"]));
+    }
+
+    function test_a_latched_delegate_gets_its_own_row() {
+        const row = policy.sliderRow("volume", fullFacts());
+        compare(row.id, "volume");
+        compare(row.percent, 45);
+        compare(row.present, true);
+    }
+
+    function test_a_slider_whose_hardware_went_says_it_is_not_there() {
+        // The one turn between hardware going away and the latch catching up.
+        // The row has to be *marked* rather than merely zeroed: the surface
+        // hides a row that says it is gone, and a 0% row it drew instead would
+        // animate the fill down to empty — this ticket backwards.
+        const facts = fullFacts();
+        facts.mic.available = false;
+        const row = policy.sliderRow("mic", facts);
+        compare(row.present, false);
+        compare(row.id, "mic");
+    }
+
+    function test_a_machine_with_no_sliders_at_all_has_an_empty_id_list() {
+        const facts = fullFacts();
+        facts.volume.available = false;
+        facts.mic.available = false;
+        facts.brightness.available = false;
+        compare(policy.sliderIds(facts), []);
+    }
+
     // --- moving a slider -----------------------------------------------------
 
     function test_a_slider_position_is_a_whole_percent_within_range() {

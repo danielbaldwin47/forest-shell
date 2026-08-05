@@ -162,8 +162,8 @@ TestCase {
     // is *drilled*, and it is why this is a second function rather than a fifth
     // row above: "the wifi glyph was clicked" has three different answers
     // depending on the inside of a drawer that `barClick` is deliberately blind
-    // to. That the click reaches the glyph at all is seam 2 again
-    // (tools/bar-click-harness.sh).
+    // to. That the click reaches the glyph at all is seam 2 again — this
+    // ticket's own harness, tools/bar-indicator-harness.sh.
 
     function test_an_indicator_opens_the_control_centre_already_drilled() {
         // Nothing open: one gesture instead of the two it takes today (open

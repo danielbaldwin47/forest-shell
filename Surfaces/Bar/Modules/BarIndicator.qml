@@ -76,7 +76,7 @@ Item {
     /// and is not this: it steps on the wheel and does nothing on a click, and
     /// a hand cursor over it would promise a door it does not have. The four
     /// indicators that open a control-centre panel set both.
-    property bool opensSomething: false
+    property bool opensPanel: false
 
     /// One notch of the wheel, up (1) or down (-1). The direction and not the
     /// delta: a high-resolution wheel sends many small deltas, and a value that
@@ -139,10 +139,10 @@ Item {
         // the handler that is already here rather than a `HoverHandler` beside
         // it: those three have no MouseArea to hang it off and this does.
         //
-        // Gated on `opensSomething` and not on `interactive`, so the wheel
+        // Gated on `opensPanel` and not on `interactive`, so the wheel
         // alone never grows a cursor — #184's rule that the readouts with no
         // panel gain no affordance is enforced here rather than trusted.
-        cursorShape: indicator.opensSomething ? Qt.PointingHandCursor : Qt.ArrowCursor
+        cursorShape: indicator.opensPanel ? Qt.PointingHandCursor : Qt.ArrowCursor
 
         onClicked: indicator.clicked()
         // `angleDelta.y` is in eighths of a degree and a notch is 120; only the

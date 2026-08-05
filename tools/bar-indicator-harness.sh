@@ -174,7 +174,6 @@ fi
 nested_note "bar at ${bar_x},${bar_y} ${bar_w}×${bar_h}"
 
 mid_y=$(( bar_y + bar_h / 2 ))
-launcher_x=$(( bar_x + 20 ))
 monitor_x=$(( bar_x + bar_w / 2 ))
 dead_x=$(( bar_x + bar_w / 4 ))
 
@@ -224,16 +223,11 @@ nested_pass "${#cluster[@]} status glyph(s) open a panel"
 # `audio` twice in a row is the volume and the mic, which share a panel by
 # design (DrillInPolicy.panelForSlider, and now panelForIndicator).
 expected_order=("audio" "audio" "bluetooth" "wifi")
-order_ok=1
-for i in "${!cluster[@]}"; do
-    case "${cluster[$i]}" in
-        wifi|bluetooth|audio) ;;
-        *) order_ok=0 ;;
-    esac
-done
 # The panels the cluster showed, in right-to-left order, have to be a
 # subsequence of the order above — same relative order, gaps allowed for the
-# glyphs this machine does not show.
+# glyphs this machine does not show. A panel that is not in that list at all
+# fails here too: the scan runs off the end without ever matching it.
+order_ok=1
 j=0
 for panel in "${cluster[@]}"; do
     while [[ $j -lt ${#expected_order[@]} && "${expected_order[$j]}" != "$panel" ]]; do
@@ -294,6 +288,36 @@ click "$target_x" "$mid_y"
 expect_since "$mark" 'drawers: controlcenter closed \(toggle\)' \
     'the same glyph again closes the control centre'
 expect_open controlcenter false 'and it really is closed'
+
+# --- 3b. and clicking it again straight away reopens it drilled --------------
+#
+# A person who double-clicks a glyph gets what a person who clicks it twice
+# slowly gets. That is all this asserts, and what it is *not* is worth writing
+# down: it is not the proof of the hazard `ControlCenterActions.show` exists
+# for. The drilled panel is cleared by ControlCenter.qml's
+# `Component.onDestruction`, on the far side of the drawer's 140ms exit, so a
+# reopen inside that window meets a control centre whose panel is still set —
+# and the toggling `drill` would then close the panel the click just asked for.
+#
+# Measured: this check passes against `drill` too. `nested_click` spawns a
+# client per click, and that latency is of the same order as the 140ms it would
+# have to land inside, so the harness cannot aim there — a real double-click,
+# with no process to start, can. The argument for `show` is therefore the code
+# path and not this check, which stays as the regression guard it can be.
+
+click "$target_x" "$mid_y"          # open it, drilled, and let that settle
+expect_drilled "$target_panel" 'open and drilled, ready to be closed in a hurry'
+
+nested_click "$target_x" "$mid_y"   # close it — the panel is still set under it
+sleep 0.1                           # inside the 140ms exit, not after it
+nested_click "$target_x" "$mid_y"   # and open it again from there
+sleep 0.9
+
+expect_open controlcenter true 'a glyph clicked twice quickly leaves it open'
+expect_drilled "$target_panel" 'and still drilled into its own panel'
+
+nested_ipc call controlcenter toggle > /dev/null
+sleep 0.4
 
 # --- 4. another glyph swaps the panel without reopening the drawer -----------
 #

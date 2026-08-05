@@ -106,11 +106,16 @@ QtObject {
     /// Its own switch rather than a call to `panelFor` and `panelForSlider`,
     /// even though the answers agree today: those two are asked by controls
     /// inside the control centre, where `vpn` and `wallpaper` are also answers,
-    /// and neither of those has a bar indicator. This table is also what the
-    /// pointer cursor is drawn from (Surfaces/Bar/Modules/BarIndicator.qml), so
-    /// a name answered here is a hand cursor promising a door — battery,
-    /// brightness and the system monitor have none, and building one is a
-    /// separate piece of work.
+    /// and neither of those has a bar indicator.
+    ///
+    /// The names here and the pointer cursor are two statements of one fact and
+    /// the bar sets its own (`BarIndicator.opensPanel`, next to the click),
+    /// because the bar deliberately does not import the drawers — see
+    /// Core/SurfaceBus.qml `barIndicator`. So the two have to be changed
+    /// together: an indicator listed here with no `opensPanel` is a door with
+    /// no handle, and the reverse is a hand cursor promising a door that is not
+    /// there. Battery, brightness and the system monitor are in neither —
+    /// building a panel for them is a separate piece of work.
     function panelForIndicator(indicatorId: var): string {
         switch (String(indicatorId ?? "")) {
         case "wifi":      return "wifi";

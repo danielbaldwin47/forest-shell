@@ -174,14 +174,13 @@ Singleton {
             if (action === "open")
                 SurfaceBus.toggle("controlcenter");
 
-            // `drill` is the tiles' own verb, which toggles — and it is safe to
-            // call here because the table has already ruled out the one case
-            // where that would shut the panel again. On "open" the drawer was
-            // closed or was another drawer, and a closed control centre has no
-            // panel: Surfaces/Drawers/ControlCenter.qml takes the drilled panel
-            // down with it on destruction, so the scanner a panel holds is
-            // never left running.
-            ControlCenterActions.drill(wanted);
+            // `show` and not the tiles' `drill`: a glyph names where to arrive,
+            // and `drill` toggles. The difference is only visible in a hurry —
+            // the drilled panel is cleared when the control centre is destroyed,
+            // which is after its exit animation, so a glyph clicked twice inside
+            // that window would toggle its own panel shut and reopen at the
+            // root. `show` cannot do that (ControlCenterActions.qml).
+            ControlCenterActions.show(wanted);
         }
     }
 

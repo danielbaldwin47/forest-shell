@@ -7,23 +7,49 @@ pragma Singleton
 //     qs ipc call session toggle       from a keybind, a script, the shell switcher
 //
 // The launcher (#39), the notification centre (#43), the control centre (#44)
-// and the dashboard (#49) all land in this window. What they share is a
-// window per screen, an input mask and *one* `HyprlandFocusGrab` — one grab
-// because two panels each holding one is the multi-panel focus fight #12 named,
-// where dismissing either can hand focus to the other instead of to the desktop.
+// and the dashboard (#49) all land in this window. What they share is a window
+// per screen, an input mask, and one open-drawer name — one name because two
+// panels each holding their own is the multi-panel focus fight #12 named, where
+// dismissing either can hand focus to the other instead of to the desktop.
 //
-// The decisions — which drawer a toggle leaves open, which screen it opens on,
-// what a hotplug does to that — are in DrawerPolicy.qml, on the QtQuick-only
-// side of the line where `tests/` can reach them. What is here is the part that
-// needs Quickshell: the grab, the IPC door, the bus registration and the screen
-// list.
+// **There is no focus grab any more (#187), and the reason is worth keeping.**
+//
+// What #187 reported was a click on the bar reaching neither the button under
+// it nor the fog: swallowed in between, so a drawer could not be swapped,
+// closed from its own button, or dismissed from the bar. The cause was not
+// here. It was one word in DrawerWindow.qml — the open window asked for
+// `keyboardFocus: Exclusive`, and in Hyprland an exclusive layer surface does
+// not merely hold the keyboard, it takes every *pointer* event as well
+// ("forced above all", `CInputManager::mouseMoveUnified`). The bar's surface
+// took a `Leave` the instant a drawer opened and never got another `Enter`.
+// The header there says the rest; `OnDemand` is the fix.
+//
+// This file's grab went with it, for a reason of its own. It existed so a click
+// on the bar would be *delivered* rather than eaten (#38, and #27's "the bar
+// renders above the fog and stays clickable"), and the bar's windows joined it
+// through a registry — Core/FocusGrabWindows.qml, now gone — to make that true.
+// But a Hyprland grab hands *keyboard* focus to whichever of its windows the
+// pointer is over, and the pointer is over the bar exactly when a bar button
+// opened the drawer: keeping it would have put the keyboard on the bar and left
+// Escape dead in the one case the fix exists for. tools/bar-click-harness.sh
+// check 7 is that case.
+//
+// What it was for, the fog already does. It covers every screen while a drawer
+// is open and stops only at the bar's reserved strip, so a click on the desktop
+// lands on it and closes the drawer; a click on the bar lands on the bar, where
+// `barHandle` below routes it. Nothing is left for a grab to catch.
+//
+// The decisions — which drawer a toggle leaves open, what a click on the bar
+// means, which screen it opens on, what a hotplug does to that — are in
+// DrawerPolicy.qml, on the QtQuick-only side of the line where `tests/` can
+// reach them. What is here is the part that needs Quickshell: the IPC door, the
+// bus registration and the screen list.
 //
 // The windows themselves are DrawerWindow.qml, mounted from shell.qml. This
 // file deliberately does not own them: they are one per screen inside a
 // `Variants`, created and destroyed by hotplug, and a singleton holding
 // references to those is the dangling-`ShellScreen` bug
-// Services/Compositor/Compositor.qml refuses to have. The open window announces
-// itself for the grab instead, and announces nothing else.
+// Services/Compositor/Compositor.qml refuses to have.
 //
 // `pragma Singleton` leads the file for the reason Core/Config.qml explains.
 import QtQuick
@@ -53,13 +79,6 @@ Singleton {
     /// The screen it is open on, by name. A name and not a `ShellScreen`, for
     /// the reason Compositor.qml holds the focused screen as one.
     property string screen: ""
-
-    /// The window currently drawing the open drawer, which is the window the
-    /// grab is held for. Set by DrawerWindow.qml as it opens — see the header
-    /// for why it arrives that way round — and dropped again on close, because
-    /// a per-screen window held past its usefulness is the dangling reference
-    /// the header says this file refuses to have.
-    property var grabWindow: null
 
     readonly property var screenNames: Quickshell.screens.map(output => output.name)
     property var seenScreens: []
@@ -100,7 +119,6 @@ Singleton {
         Logger.log("drawers", root.policy.closed(root.current, reason));
         root.current = "";
         root.screen = "";
-        root.grabWindow = null;
     }
 
     function toggle(name: string): void {
@@ -113,27 +131,25 @@ Singleton {
             open(next);
     }
 
-    // --- the one focus grab --------------------------------------------------
+    // --- a click on the bar ----------------------------------------------------
     //
-    // Clicking the desktop closes the drawer; clicking the bar does not, and
-    // that asymmetry is #27's "the bar renders above the fog and stays
-    // clickable" made real — the bar's windows join the grab through
-    // Core/FocusGrabWindows.qml, so a click on another bar icon reaches the
-    // button and starts the cross-drawer transition instead of being eaten on
-    // its way to dismissing this one.
-    HyprlandFocusGrab {
-        id: grab
-
-        windows: root.grabWindow
-                 ? [root.grabWindow].concat(FocusGrabWindows.windows)
-                 : []
-        active: root.current !== "" && root.grabWindow !== null
-
-        // Also fires when the shell drops the grab itself, one assignment after
-        // `close()` has already emptied the state. `close()` on an already
-        // closed drawer returns without logging, so this second, wrong reason
-        // never reaches the log.
-        onCleared: root.close("dismissed")
+    // Routed here from Core/SurfaceBus.qml, because the bar cannot answer it:
+    // it does not know which of five drawers is open, and #187 wants one home
+    // for the decision rather than a dismissal rule per module. The table is
+    // `DrawerPolicy.barClick`; this is the part that needs the state.
+    readonly property QtObject barHandle: QtObject {
+        function barClick(target: string): void {
+            const action = root.policy.barClick(root.current, target);
+            if (action === "dismiss")
+                root.close("bar");
+            else if (action === "toggle")
+                // Back out through the bus rather than straight to `toggle()`
+                // next door. It is the same verb either way, but the bus is
+                // where a bar button's log line and its absent-surface warning
+                // live (#37), and a door should not lose those for having come
+                // through the routing table.
+                SurfaceBus.toggle(target);
+        }
     }
 
     // --- hotplug -------------------------------------------------------------
@@ -382,6 +398,7 @@ Singleton {
         SurfaceBus.register("notificationcenter", root.notificationCenterHandle);
         SurfaceBus.register("controlcenter", root.controlCenterHandle);
         SurfaceBus.register("dashboard", root.dashboardHandle);
+        SurfaceBus.registerBar(root.barHandle);
         Logger.stage("drawers armed (ipc targets: session, launcher, "
                      + "notificationcenter, controlcenter, dashboard)");
         if (Startup.deferredRan)

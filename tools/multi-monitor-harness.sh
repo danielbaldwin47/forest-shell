@@ -260,8 +260,7 @@ else
 fi
 
 # ...and leaves. A window that outlives its screen is the leak half: it is not
-# visible anywhere, and it is still holding a layer surface and a focus-grab
-# registration.
+# visible anywhere, and it is still holding a layer surface.
 nested_output_remove "$HOTPLUG" \
     || { nested_fail "could not pull $HOTPLUG out — the checks below have nothing to assert on"; exit 1; }
 

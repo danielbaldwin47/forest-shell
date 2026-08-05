@@ -51,5 +51,5 @@ BarIndicator {
     tint: root.unread > 0 && !Notifications.dnd ? Theme.accentWarm : Theme.textSecondary
 
     interactive: true
-    onClicked: SurfaceBus.toggle("notificationcenter")
+    onClicked: SurfaceBus.barClick("notificationcenter")
 }

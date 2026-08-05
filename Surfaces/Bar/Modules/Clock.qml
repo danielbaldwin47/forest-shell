@@ -60,6 +60,6 @@ Text {
     }
 
     TapHandler {
-        onTapped: SurfaceBus.toggle("dashboard")
+        onTapped: SurfaceBus.barClick("dashboard")
     }
 }

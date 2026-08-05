@@ -5,7 +5,7 @@
 #   tools/drawer-harness.sh --keep   # leave the nested session up to poke at
 #
 # The drawer is a lifecycle, which is the class of thing `tests/` cannot see at
-# all: whether the window actually maps, whether the focus grab dismisses it,
+# all: whether the window actually maps, whether clicking away dismisses it,
 # whether the state resets, whether the IPC door is callable at all. The
 # decisions behind it — which drawer is open, which screen, what a hotplug does
 # — are unit-checked in tests/tst_drawerpolicy.qml; this is the half that needs
@@ -240,8 +240,12 @@ expect_since "$mark" 'drawers: session opened on ' 'ipc call session toggle open
 # `WlrLayer.Top` never has to be argued with. `hyprctl layers` reports the
 # geometry the compositor actually gave each surface, which is the evidence.
 #
-# Clickability has a second half — a focus grab eats clicks outside the windows
-# it names — and that is Core/FocusGrabWindows.qml, which this seam cannot see.
+# Clickability used to have a second half — a focus grab, and a registry of the
+# windows it must not eat clicks on. Both are gone (#187): the grab took pointer
+# focus off the bar the moment it activated and never gave it back, so the
+# geometry above is now the whole guarantee. What a click on the bar actually
+# does while a drawer is open is measured next door, in bar-click-harness.sh,
+# which drives a real pointer.
 
 layers=$(nested_hyprctl layers)
 bar_height=$(sed -n 's/.*xywh: [0-9-]* [0-9-]* [0-9-]* \([0-9]*\),.*forest-shell:bar.*/\1/p' <<< "$layers" | head -1)

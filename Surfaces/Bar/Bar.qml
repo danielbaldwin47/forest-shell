@@ -269,30 +269,29 @@ Scope {
             // *below* this window so the bar stays clickable over it.
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-            // ...and being *below* the fog is only half of staying clickable:
-            // while a drawer holds its focus grab, a click outside the grabbed
-            // windows is consumed dismissing it. #27 wants the opposite here —
-            // "clicking another bar icon triggers the cross-drawer transition
-            // directly" — so the bar's windows join the grab (#38, and the
-            // header of Core/FocusGrabWindows.qml). Announced rather than
-            // reached for, because these are created and destroyed by hotplug.
+            // ...and being *below* the fog is the whole of staying clickable.
+            // The fog stops at the strip this window reserves, so while a
+            // drawer is open this is the only surface over the bar. Nothing
+            // else has to arrange delivery, and #187 is what happens when
+            // something tries: the drawers' focus grab and their exclusive
+            // keyboard focus each took the pointer off this window, and the
+            // fix was to stop doing both (Surfaces/Drawers/Drawers.qml).
             //
-            // Both halves also log, and the log is the whole of what seam 2 can
-            // see of hotplug (#98): a window per output with that output's
-            // geometry, and — the leak half — a window that goes away when its
-            // output does. The name is cached because `modelData` is gone by
-            // the time the destruction of a hotplugged-out screen is announced.
+            // The window logs both ends of its life, and the log is the whole of
+            // what seam 2 can see of hotplug (#98): a window per output with
+            // that output's geometry, and — the leak half — a window that goes
+            // away when its output does. The name is cached because `modelData`
+            // is gone by the time the destruction of a hotplugged-out screen is
+            // announced.
             property string screenName: ""
 
             Component.onCompleted: {
                 window.screenName = window.modelData.name;
-                FocusGrabWindows.keep(window);
                 Logger.log("bar", "window up on " + window.screenName
                            + " (" + window.modelData.width + "×" + window.modelData.height
                            + " @" + window.modelData.devicePixelRatio + ")");
             }
             Component.onDestruction: {
-                FocusGrabWindows.release(window);
                 // Hotplug can take a window away mid-hover; a count that only
                 // ever went up would leave every later toggle believing the
                 // pointer was still there.
@@ -422,6 +421,33 @@ Scope {
                         easing.type: Easing.Bezier
                         easing.bezierCurve: Theme.fogEase
                     }
+                }
+
+                // A click on the bar that no control wanted (#187).
+                //
+                // The fog stops at the bar's reserved strip, so while a drawer
+                // is open the bar is the only surface over that strip and a
+                // click on its dead space — the gaps, and the indicators that
+                // are readouts rather than buttons — reaches nothing at all.
+                // The user's reading of that gesture is "put this away", and
+                // before this ticket it did nothing.
+                //
+                // *Under* the content and not over it, which is what makes the
+                // rest of the table fall out rather than needing writing: a
+                // drawer's own button, the mute toggle, the media transport all
+                // take the press first and this never sees it — so an
+                // interactive control runs its action and the drawer stays, and
+                // a door toggles or swaps through the bus as it always did. What
+                // is left over is exactly dead space.
+                //
+                // What that means for the open drawer is not decided here. The
+                // bar asks the bus and the drawer controller answers from one
+                // table (Surfaces/Drawers/DrawerPolicy.qml `barClick`), because
+                // a shell where each module grew its own dismissal is the thing
+                // #187 asks for one home for.
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: SurfaceBus.barClick("")
                 }
 
                 DebouncedLoader {

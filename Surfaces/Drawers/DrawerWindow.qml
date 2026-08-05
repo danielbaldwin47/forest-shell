@@ -18,14 +18,27 @@
 // stronger guarantee than stacking order within a layer: two `WlrLayer.Top`
 // surfaces are ordered by the compositor, and the drawer maps second.
 //
-// Geometry is not the whole of it — a click has to reach the bar as well as
-// miss the fog, and while a `HyprlandFocusGrab` is up a click outside the
-// grabbed windows is consumed dismissing it. The bar's windows are in the grab
-// for exactly that reason (Core/FocusGrabWindows.qml).
+// Geometry is now the whole of it, and for a while it was not enough on its own
+// — see `keyboardFocus` below, which is where #187 actually lived. There was a
+// `HyprlandFocusGrab` here as well, with the bar's windows in it so that a click
+// on a bar icon would be delivered rather than eaten; it is gone too, for the
+// reason the header of Drawers.qml gives. What is left is this: the fog stops
+// where the bar's reserved strip starts, so a click on the bar reaches the bar
+// and a click anywhere else reaches this window's own mask.
 //
 // The one case the geometry does not cover is an auto-hidden bar, which
 // reserves nothing to be laid out around; there the fog does cover the strip
 // and the bar is a revealed window over it.
+//
+// ## Why every screen gets one
+//
+// The fog is drawn on the drawer's own screen and nowhere else, but the window
+// is *mapped* on all of them while a drawer is open, with an input mask and
+// nothing to look at. That is the grab's last job inherited: clicking a second
+// monitor used to dismiss, because the grab consumed clicks everywhere it did
+// not name, and a drawer you cannot see is one you have already left. An empty
+// full-screen mask says the same thing without the grab's cost — and it costs
+// nothing at rest, because it is mapped only while something is open (#22 §5).
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
@@ -54,11 +67,16 @@ Variants {
         screen: modelData
         anchors { top: true; bottom: true; left: true; right: true }
 
-        // Mapped only while there is fog to draw, which is the ticket's ask and
-        // also #22 §5: an idle shell has no drawer surface anywhere. The exit
-        // animation needs the window for as long as it runs, so this outlives
-        // `drawer` by one fade.
-        visible: window.drawer !== "" || window.live.length > 0 || scrim.visible
+        /// Whether *any* screen has a drawer open. What the input mask follows,
+        /// so a click on a screen this drawer is not on still puts it away —
+        /// see the header.
+        readonly property bool anyOpen: Drawers.current !== ""
+
+        // Mapped only while there is something open or something leaving, which
+        // is the ticket's ask and also #22 §5: an idle shell has no drawer
+        // surface anywhere. The exit animation needs the window for as long as
+        // it runs, so this outlives `drawer` by one fade.
+        visible: window.anyOpen || window.live.length > 0 || scrim.visible
 
         // Reserves nothing — a drawer does not push the desktop around — but
         // respects what does. See the header: this is what puts the fog below
@@ -70,33 +88,48 @@ Variants {
         WlrLayershell.namespace: Drawers.layerNamespace
         // A drawer is typed into — Escape closes it, the session menu answers
         // the arrow keys, and the launcher (#39) lands a text field in this
-        // window — so it takes the keyboard outright while it is open, the way
-        // the launcher prototype did.
+        // window — so it takes the keyboard while it is open.
+        //
+        // **`OnDemand` and not `Exclusive`, and that is #187's fix.** An
+        // exclusive layer surface does not merely hold the keyboard: Hyprland
+        // routes every *pointer* event to one too. `CInputManager::
+        // mouseMoveUnified` hit-tests among the exclusive surfaces alone and,
+        // finding the cursor over none of them, falls back to the first one —
+        // "forced above all", and it is not a bug. So while a drawer was
+        // exclusive, a click on the bar was delivered to the drawer's surface
+        // at a coordinate translated by the bar's reserved strip, landing
+        // outside the fog's own content: it reached neither the bar button
+        // under the cursor nor the dismiss catcher, which is exactly what #187
+        // reported. Measured at seam 2 with a virtual pointer — the bar's
+        // surface took a `Leave` the instant a drawer opened and never got
+        // another `Enter`.
+        //
+        // What `OnDemand` costs is nothing this window used it for. Hyprland
+        // focuses a keyboard-interactive layer surface as it maps either way,
+        // so Escape and the launcher's text field are unchanged; what it gives
+        // up is the right to keep the keyboard when the user deliberately
+        // clicks something else, which is not a right a drawer should have.
         //
         // Only while it is *open*: `visible` outlives that by one fade, and a
         // window that is leaving has no business holding the keyboard away from
         // whatever the user is about to type into.
-        WlrLayershell.keyboardFocus: window.drawer !== "" ? WlrKeyboardFocus.Exclusive
+        WlrLayershell.keyboardFocus: window.drawer !== "" ? WlrKeyboardFocus.OnDemand
                                                           : WlrKeyboardFocus.None
 
         // The fog is drawn, not the window.
         color: "transparent"
 
-        // Input over the whole screen while a drawer is open, and none at all
-        // while one is leaving: a fog that is fading out has already stopped
-        // being a thing to click on.
+        // Input over the whole screen while a drawer is open *anywhere*, and
+        // none at all while one is leaving: a fog that is fading out has
+        // already stopped being a thing to click on.
         mask: Region {
-            width: window.drawer !== "" ? window.width : 0
-            height: window.drawer !== "" ? window.height : 0
+            width: window.anyOpen ? window.width : 0
+            height: window.anyOpen ? window.height : 0
         }
 
         onDrawerChanged: {
             if (window.drawer === "")
                 return;
-
-            // The window announces itself for the shared grab as it opens; see
-            // the header of Drawers.qml for why it arrives that way round.
-            Drawers.grabWindow = window;
 
             if (window.live.indexOf(window.drawer) < 0)
                 window.live = window.live.concat([window.drawer]);
@@ -109,12 +142,13 @@ Variants {
             shown: window.drawer !== ""
         }
 
-        // Clicking the fog closes the drawer. The focus grab covers clicking
-        // anything that is *not* this window; this covers the part of the
-        // screen that is.
+        // Clicking the fog closes the drawer — on this screen, where there is
+        // fog to click, and on every other screen, where the window is mapped
+        // and empty for exactly this. The only thing it does not cover is the
+        // bar's own strip, which the bar routes itself (#187).
         MouseArea {
             anchors.fill: parent
-            enabled: window.drawer !== ""
+            enabled: window.anyOpen
             onClicked: Drawers.close("clicked away")
         }
 

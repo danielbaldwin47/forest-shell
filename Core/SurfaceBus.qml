@@ -90,4 +90,65 @@ Singleton {
         Logger.log("surfaces", name + " toggled from the bar");
         handler.toggle();
     }
+
+    // --- a click on the bar that no control wanted -----------------------------
+    //
+    // #187: while a drawer is open, the bar is the only surface over its own
+    // strip, so a click on the gaps between modules reaches nothing. It should
+    // put the drawer away — and the bar cannot decide that itself, because it
+    // does not know which of five drawers is open and must not learn. That is
+    // the same problem `toggle` above solves, one step further along: not "open
+    // the surface called X" but "here is what happened on the bar, do whatever
+    // it means to you".
+
+    /// Who answers that. Registered once, by the surface that covers the
+    /// desktop; `null` until it does, and a click before then is a no-op rather
+    /// than a warning — an early click on a bar whose drawers have not armed
+    /// yet means nothing and has nothing to put away.
+    ///
+    /// A slot of its own rather than a sixth name in `handlers`, because it is
+    /// not a name being asked for: every drawer is one tenant of one controller,
+    /// and it is that controller — not a drawer — that knows whether anything is
+    /// open at all.
+    property var barHandler: null
+
+    function registerBar(handler: var): void {
+        root.barHandler = handler;
+        Logger.log("surfaces", "bar clicks routed to the drawers");
+    }
+
+    /// `target` is what the click landed on: `""` for dead space or a readout,
+    /// a drawer's name for one of its doors. The answer is the controller's —
+    /// see Surfaces/Drawers/DrawerPolicy.qml `barClick` for the table.
+    ///
+    /// **Every** click on the bar comes here, doors included, which is what
+    /// makes that table the one home the ticket asked for rather than a
+    /// description of behaviour decided in four other places. A door's answer
+    /// is `toggle`, and the controller sends it straight back through `toggle`
+    /// above — so the bus's own name check, its absent-surface warning and its
+    /// log line are all still on the path a bar button takes.
+    function barClick(target: string): void {
+        if (root.barHandler === null) {
+            // A door pressed before the drawers arm still has something to say,
+            // and it is `toggle`'s to say: #37 wants a button for a surface
+            // that has not landed to log the miss rather than fail silently.
+            if (target !== "")
+                root.toggle(target);
+            // Dead space, though, is a click with nothing to put away — and the
+            // bar is clickable from its first frame, so this is the ordinary
+            // state for a moment on every start. Nothing to report.
+            return;
+        }
+
+        // A registered handler that cannot answer is the other thing entirely —
+        // a wiring mistake, and one that would otherwise present as dead space
+        // that stopped dismissing. `toggle` warns about its own version of this
+        // for the same reason.
+        if (typeof root.barHandler.barClick !== "function") {
+            Logger.warn("surfaces", "the bar's click handler has no barClick()");
+            return;
+        }
+
+        root.barHandler.barClick(target);
+    }
 }

@@ -2,14 +2,15 @@
 // that (#38).
 //
 // The drawers — launcher (#39), control centre (#44), dashboard (#49), session
-// (here) — share one window per screen and one focus grab (#12 §3). That
-// topology only holds if "which drawer is open" is a single value rather than a
+// (here) — share one window per screen and one open-drawer name (#12 §3; #187
+// is why there is no focus grab under that any more). That topology only holds
+// if "which drawer is open" is a single value rather than a
 // flag per surface, so it is one here: a name, or the empty string for none.
 // Two drawers open at once is then not a bug that can happen, and the swap
 // between them is a transition rather than a race between two windows.
 //
 // Everything on this side of the line is a decision. The window, the fog and
-// the focus grab are `Drawers.qml` and `DrawerWindow.qml` next door, which
+// the input routing are `Drawers.qml` and `DrawerWindow.qml` next door, which
 // import Quickshell and so cannot be reached from `tests/`; this file imports
 // nothing but QtQuick, which is why the state machine, the screen choice and
 // the hotplug reset are here instead of inside a `PanelWindow`.
@@ -53,6 +54,44 @@ QtObject {
         if (!policy.known(requested))
             return current;
         return current === requested ? "" : requested;
+    }
+
+    /// What a click on the *bar* does to the open drawer (#187).
+    ///
+    /// The whole table, in one place, because the alternative is four bar
+    /// modules each growing their own idea of dismissal. Every click on the bar
+    /// arrives here — the doors call `SurfaceBus.barClick(name)` and dead space
+    /// calls it with `""` — so this is the routing rather than a description of
+    /// it:
+    ///
+    ///     the open drawer's own door      →  "toggle"   — it closes
+    ///     a different drawer's door       →  "toggle"   — swap, in one gesture
+    ///     dead space, or a readout        →  "dismiss"  — put it away
+    ///     an interactive control          →  "none"     — it acts, drawer stays
+    ///
+    /// `target` is what the click landed on: a drawer's name for a door, `""`
+    /// for anything that claimed nothing, and any other name for a control that
+    /// is not a door. The last row is the one worth saying out loud — mute, the
+    /// media transport, the keyboard layout and the recorder are things you
+    /// reach for *while* a panel is open, and a shell that closed the panel
+    /// under you for using one would be worse than one that swallowed the click.
+    ///
+    /// Toggling is `next()` above and not a separate answer here: a door's
+    /// close and a door's swap are the same verb from the same table, which is
+    /// what makes the swap a transition rather than a close and then an open.
+    ///
+    /// A door is a door whether or not anything is open — that is the first
+    /// clause, and it is the one the table above does not say out loud because
+    /// it is the everyday case: with nothing open, pressing the launcher button
+    /// opens the launcher. The rows above are what changes once something *is*
+    /// open. With nothing open there is nothing to dismiss either, so dead space
+    /// is "none" and the control — if there is one — does what it always did.
+    function barClick(current: string, target: string): string {
+        if (policy.known(target))
+            return "toggle";
+        if (current === "")
+            return "none";
+        return target === "" ? "dismiss" : "none";
     }
 
     // --- which screen --------------------------------------------------------

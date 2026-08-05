@@ -24,5 +24,5 @@ BarIndicator {
     icon: "sliders-horizontal"
 
     interactive: true
-    onClicked: SurfaceBus.toggle("controlcenter")
+    onClicked: SurfaceBus.barClick("controlcenter")
 }

@@ -151,4 +151,36 @@ Singleton {
 
         root.barHandler.barClick(target);
     }
+
+    /// A click on a bar indicator that has a control-centre panel behind it
+    /// (#184) — the wifi and bluetooth glyphs, the volume and the mic.
+    ///
+    /// `id` is the indicator's own name and not a panel's: which panel each one
+    /// opens is Surfaces/Drawers/DrillInPolicy.qml's table, and the bar does not
+    /// import the drawers to read it. The same handler as `barClick` answers,
+    /// for the same reason — the bar knows what was clicked and the controller
+    /// knows what is open, and only the second of those can decide.
+    ///
+    /// A second verb rather than a `barClick` with a panel name in it, because
+    /// #187's table takes exactly what a bar click means to the *drawers*; this
+    /// one needs what is drilled inside one, which is a thing the bar has no
+    /// business holding either.
+    function barIndicator(id: string): void {
+        if (root.barHandler === null) {
+            // An indicator pressed before the drawers arm has nowhere to open
+            // into — and unlike a door, there is no `toggle` fallback that
+            // would still mean something, because "drilled into wifi" is not a
+            // request any surface can answer on its own. The bar is clickable
+            // from its first frame, so this is an ordinary moment on every
+            // start and not something to report.
+            return;
+        }
+
+        if (typeof root.barHandler.barIndicator !== "function") {
+            Logger.warn("surfaces", "the bar's click handler has no barIndicator()");
+            return;
+        }
+
+        root.barHandler.barIndicator(id);
+    }
 }

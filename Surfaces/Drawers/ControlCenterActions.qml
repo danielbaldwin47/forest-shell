@@ -175,6 +175,35 @@ Singleton {
         root.setPanel(next, "toggle");
     }
 
+    /// Open `name`, whatever is open now — and unlike `drill`, never close it.
+    ///
+    /// The bar's status glyphs (#184) name a *destination* rather than pressing
+    /// a door: "show me wifi" is what the click means, and whether the answer is
+    /// an open, a swap or nothing to do is Surfaces/Drawers/DrawerPolicy.qml's
+    /// `barIndicatorClick` one level out, not this object's toggle.
+    ///
+    /// Which matters for one narrow reason: the panel is cleared by
+    /// ControlCenter.qml's `Component.onDestruction`, and that destruction is on
+    /// the far side of the drawer's 140ms exit. A glyph clicked twice quickly —
+    /// close, then reopen inside that window — would reach `drill` with the
+    /// panel it wants still set, and `drill` would toggle it *shut*, reopening
+    /// the control centre at its root.
+    ///
+    /// That window is small enough that tools/bar-indicator-harness.sh cannot
+    /// aim inside it (measured: its check passes against `drill` too — spawning
+    /// a click client costs about as long as the window lasts), which is an
+    /// argument for closing the hole by construction rather than for deciding
+    /// it is not there. A pointer has no process to start.
+    function show(name: string): void {
+        if (!root.drillPolicy.known(name)) {
+            Logger.warn("control-centre",
+                        root.drillPolicy.refused(name, "no such panel"));
+            return;
+        }
+        root.forward = true;
+        root.setPanel(name, "bar");
+    }
+
     /// Leave whatever is open. `reason` travels into the log because a panel the
     /// user backed out of and one the closing drawer took down look identical
     /// afterwards, and the harness has to tell them apart.

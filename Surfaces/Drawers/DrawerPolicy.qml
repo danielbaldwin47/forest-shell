@@ -94,6 +94,38 @@ QtObject {
         return target === "" ? "dismiss" : "none";
     }
 
+    /// What a click on a bar *indicator* does (#184): the table above with one
+    /// more column, the panel that is drilled.
+    ///
+    /// An indicator with a panel behind it is a door — the same door the
+    /// control centre button is, opening into the same drawer — except that
+    /// the room beyond it has five doors of its own and this one names which.
+    /// That is why it is a second function and not a fifth row above: "the wifi
+    /// glyph was clicked" has three answers depending on what is drilled, and
+    /// `barClick` is deliberately blind to the inside of a drawer.
+    ///
+    ///     nothing open, or another drawer   →  "open"   — open it, drilled in
+    ///     control centre on that panel      →  "close"  — the door closes
+    ///     control centre on another panel   →  "drill"  — swap, no reopen
+    ///     an indicator with no panel        →  "none"   — a readout
+    ///
+    /// Row 2 is `next()`'s rule and `DrillInPolicy.next()`'s, one level in: the
+    /// control that opened a thing closes it. Row 3 is what makes the swap a
+    /// transition rather than a close and an open — the drawer never leaves the
+    /// screen, so it is #27's 140ms in-place step and not two 320ms slides.
+    ///
+    /// `wanted` is a panel name and not the indicator's own name; the mapping
+    /// is `DrillInPolicy.panelForIndicator`, and a readout resolves to `""`
+    /// here. That is "none" rather than "dismiss" on purpose: a readout is not
+    /// dead space, it is a thing the user did not mean to press.
+    function barIndicatorClick(current: string, panel: string, wanted: string): string {
+        if (wanted === "")
+            return "none";
+        if (current !== "controlcenter")
+            return "open";
+        return panel === wanted ? "close" : "drill";
+    }
+
     // --- which screen --------------------------------------------------------
 
     /// The screen a drawer opens on: the focused one, by name.

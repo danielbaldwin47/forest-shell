@@ -156,6 +156,66 @@ TestCase {
         compare(policy.barClick("session", "notepad"), "none");
     }
 
+    // --- a click on a bar indicator ------------------------------------------
+    //
+    // #184's table, which is #187's one column wider. The extra column is what
+    // is *drilled*, and it is why this is a second function rather than a fifth
+    // row above: "the wifi glyph was clicked" has three different answers
+    // depending on the inside of a drawer that `barClick` is deliberately blind
+    // to. That the click reaches the glyph at all is seam 2 again — this
+    // ticket's own harness, tools/bar-indicator-harness.sh.
+
+    function test_an_indicator_opens_the_control_centre_already_drilled() {
+        // Nothing open: one gesture instead of the two it takes today (open
+        // the control centre, then expand the tile).
+        compare(policy.barIndicatorClick("", "", "wifi"), "open");
+        compare(policy.barIndicatorClick("", "", "bluetooth"), "open");
+    }
+
+    function test_an_indicator_swaps_from_another_drawer_in_one_gesture() {
+        // The launcher is open and the wifi glyph is clicked. Row 2 of #187's
+        // table said a door swaps rather than closing and reopening; a glyph
+        // with a panel behind it is a door, so it swaps too — and arrives
+        // drilled, which is the whole point of it being this glyph and not the
+        // control centre button.
+        compare(policy.barIndicatorClick("launcher", "", "wifi"), "open");
+        compare(policy.barIndicatorClick("dashboard", "", "audio"), "open");
+    }
+
+    function test_the_same_indicator_twice_closes_the_control_centre() {
+        // The rule `next()` applies to drawers and `DrillInPolicy.next()`
+        // applies to panels, applied here: the control that opened a thing
+        // closes it, so no click is ever a no-op the user has to find another
+        // way out of.
+        compare(policy.barIndicatorClick("controlcenter", "wifi", "wifi"), "close");
+        compare(policy.barIndicatorClick("controlcenter", "audio", "audio"), "close");
+    }
+
+    function test_a_different_indicator_swaps_the_panel_without_reopening() {
+        // The control centre stays up and only its contents change — #27's
+        // in-place step, at 140ms, rather than a 320ms drawer close followed by
+        // a 320ms open. "drill" and not "open" is the whole difference.
+        compare(policy.barIndicatorClick("controlcenter", "bluetooth", "wifi"), "drill");
+        compare(policy.barIndicatorClick("controlcenter", "audio", "wifi"), "drill");
+    }
+
+    function test_an_indicator_clicked_at_the_control_centres_root_drills_in() {
+        // Open but not drilled: `""` is the root and not a panel name, so it
+        // can never equal what was asked for, and this lands on "drill"
+        // without a special case.
+        compare(policy.barIndicatorClick("controlcenter", "", "wifi"), "drill");
+    }
+
+    function test_an_indicator_with_no_panel_does_nothing_at_all() {
+        // What the battery, brightness and system-monitor readouts resolve to
+        // — `DrillInPolicy.panelForIndicator` answers `""` for all three. Not
+        // "dismiss": they are not dead space, they are readouts the user did
+        // not mean to press, and nothing about them should move a drawer.
+        compare(policy.barIndicatorClick("", "", ""), "none");
+        compare(policy.barIndicatorClick("controlcenter", "wifi", ""), "none");
+        compare(policy.barIndicatorClick("launcher", "", ""), "none");
+    }
+
     // --- which screen --------------------------------------------------------
 
     function test_a_drawer_opens_on_the_focused_screen() {

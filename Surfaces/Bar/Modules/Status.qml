@@ -55,6 +55,10 @@ Row {
         visible: Networking.available
         icon: Networking.icon
         anchors.verticalCenter: parent.verticalCenter
+
+        interactive: true
+        opensPanel: true
+        onClicked: SurfaceBus.barIndicator("wifi")
     }
 
     // Only on a machine with an adapter: a permanently crossed-out glyph on a
@@ -63,12 +67,23 @@ Row {
         visible: Bluetooth.present
         icon: Bluetooth.icon
         anchors.verticalCenter: parent.verticalCenter
+
+        interactive: true
+        opensPanel: true
+        onClicked: SurfaceBus.barIndicator("bluetooth")
     }
 
     // The one thing in the cluster the bar can change. Wheel to set, click to
-    // mute — the two gestures every bar has had since the first one, and the
-    // only callers the audio facade's setters have until the control centre
-    // lands (#44).
+    // open the sound panel.
+    //
+    // The click was mute until #184, and losing it is a deliberate trade rather
+    // than an oversight: the request is that a glyph opens what it is about,
+    // and four glyphs where three open a panel and one mutes is the pointer
+    // lying about one of them. Mute is still the media key, and still the
+    // volume row's own button in the control centre — which is the *root* of
+    // the panel this opens and not inside it, so it is one press further than
+    // it was, in exchange for the output picker and the per-application mixer
+    // being a gesture closer instead of two.
     BarIndicator {
         id: volume
 
@@ -79,7 +94,8 @@ Row {
         anchors.verticalCenter: parent.verticalCenter
 
         interactive: true
-        onClicked: Audio.toggleMute()
+        opensPanel: true
+        onClicked: SurfaceBus.barIndicator("volume")
         onStepped: direction => Audio.stepVolume(direction)
     }
 
@@ -98,7 +114,20 @@ Row {
         tint: Theme.accentWarm
         anchors.verticalCenter: parent.verticalCenter
 
+        // The same panel as the volume glyph: one panel about the machine's
+        // sound, which is the rule `panelForSlider` already applies inside the
+        // control centre. Its click was `toggleSourceMute` and goes for the
+        // reason given above the volume — but this one costs more than that
+        // one, and the cost is worth stating rather than discovering. This
+        // glyph is on screen *only* when the mic is muted, so its click was an
+        // alarm's one-press fix; the sound panel holds outputs and streams and
+        // no microphone at all, so unmuting from here is now the panel, then
+        // back, then the mic row. #184 chose it anyway, for the consistency the
+        // pointer promises across the cluster — if that trade reads wrong on a
+        // real session, the fallback is this one indicator keeping
+        // `Audio.toggleSourceMute()` and its `opensPanel: false`.
         interactive: true
-        onClicked: Audio.toggleSourceMute()
+        opensPanel: true
+        onClicked: SurfaceBus.barIndicator("mic")
     }
 }

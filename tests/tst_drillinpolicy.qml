@@ -75,6 +75,39 @@ TestCase {
         compare(policy.panelForSlider("nonesuch"), "");
     }
 
+    // --- and from the bar (#184) ---------------------------------------------
+
+    function test_the_four_bar_indicators_with_a_panel_behind_them() {
+        // The bar's status cluster reads the same four things three of these
+        // panels are about, so a click on a glyph is the request the matching
+        // tile's chevron already makes: "which network is this" is asked while
+        // looking at the wifi glyph, not after opening the control centre.
+        compare(policy.panelForIndicator("wifi"), "wifi");
+        compare(policy.panelForIndicator("bluetooth"), "bluetooth");
+        compare(policy.panelForIndicator("volume"), "audio");
+        compare(policy.panelForIndicator("mic"), "audio");
+    }
+
+    function test_the_readouts_with_no_panel_stay_readouts() {
+        // The three the bar shows and nothing opens. This is the table the
+        // pointer cursor is drawn from, so an answer here for one of these
+        // would be a hand cursor promising a door that does not exist —
+        // building the battery panel is its own piece of work, not this one.
+        const readouts = ["battery", "brightness", "systemmonitor", ""];
+        for (let i = 0; i < readouts.length; i++)
+            compare(policy.panelForIndicator(readouts[i]), "");
+    }
+
+    function test_the_indicator_table_is_not_the_tile_table() {
+        // Deliberately its own switch rather than a call to `panelFor`: that
+        // one also answers for `vpn` and `wallpaper`, and neither has a bar
+        // indicator to click. A door named by a table nothing draws is a door
+        // that goes unnoticed when it breaks.
+        compare(policy.panelFor("vpn"), "vpn");
+        compare(policy.panelForIndicator("vpn"), "");
+        compare(policy.panelForIndicator("wallpaper"), "");
+    }
+
     // --- moving between them -------------------------------------------------
 
     function test_opening_a_panel_from_the_root() {

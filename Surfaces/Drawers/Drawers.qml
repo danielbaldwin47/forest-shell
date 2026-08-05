@@ -150,6 +150,38 @@ Singleton {
                 // through the routing table.
                 SurfaceBus.toggle(target);
         }
+
+        /// A bar indicator with a panel behind it (#184). `id` is the
+        /// indicator's own name; the panel it opens is `DrillInPolicy`'s table
+        /// and the routing is `DrawerPolicy.barIndicatorClick` — this is again
+        /// only the part that needs the state, which here is two pieces: which
+        /// drawer is open and what is drilled inside it.
+        function barIndicator(id: string): void {
+            const wanted = ControlCenterActions.drillPolicy.panelForIndicator(id);
+            const action = root.policy.barIndicatorClick(root.current,
+                                                         ControlCenterActions.panel,
+                                                         wanted);
+            if (action === "none")
+                return;
+
+            // Both of the actions that move the drawer go back out through the
+            // bus, for the reason `barClick` above gives: that is where a bar
+            // press's log line and its absent-surface warning live (#37).
+            if (action === "close") {
+                SurfaceBus.toggle("controlcenter");
+                return;
+            }
+            if (action === "open")
+                SurfaceBus.toggle("controlcenter");
+
+            // `show` and not the tiles' `drill`: a glyph names where to arrive,
+            // and `drill` toggles. The difference is only visible in a hurry —
+            // the drilled panel is cleared when the control centre is destroyed,
+            // which is after its exit animation, so a glyph clicked twice inside
+            // that window would toggle its own panel shut and reopen at the
+            // root. `show` cannot do that (ControlCenterActions.qml).
+            ControlCenterActions.show(wanted);
+        }
     }
 
     // --- hotplug -------------------------------------------------------------

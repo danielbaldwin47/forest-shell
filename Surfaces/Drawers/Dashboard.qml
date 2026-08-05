@@ -145,8 +145,8 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
-        // Before the body, so a card and its controls are hit-tested first and
-        // this only catches what misses them (#193).
+        // First child: the card's own controls are hit-tested before it. See
+        // Surfaces/Drawers/PressCatcher.qml (#193).
         PressCatcher {}
 
         // The stack is allowed to be longer than the screen — five cards on a

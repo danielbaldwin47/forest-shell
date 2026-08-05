@@ -108,8 +108,8 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
-        // Before the layout, so a notification and its buttons are hit-tested
-        // first and this only catches what misses them (#193).
+        // First child: the card's own controls are hit-tested before it. See
+        // Surfaces/Drawers/PressCatcher.qml (#193).
         PressCatcher {}
 
         // Sized *from* the panel rather than anchored to it, which is not a

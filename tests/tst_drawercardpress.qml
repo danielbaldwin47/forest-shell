@@ -78,6 +78,7 @@ TestCase {
     property int fogCloses: 0
     property int cardPresses: 0
     property int buttonTaps: 0
+    property real sliderValue: -1
 
     // --- the replica ---------------------------------------------------------
     //
@@ -137,6 +138,23 @@ TestCase {
                         onTapped: root.buttonTaps++
                     }
                 }
+
+                // A slider track. Surfaces/Drawers/ControlSlider.qml is the one
+                // control that is item-level input rather than a handler, and it
+                // is the one the ticket asks about by name: a drag that starts
+                // here and wanders off the track before release must still move
+                // the value and must not dismiss.
+                MouseArea {
+                    id: track
+
+                    x: 10
+                    y: parent.height - 26
+                    width: 60
+                    height: 16
+
+                    onPressed: mouse => root.sliderValue = mouse.x
+                    onPositionChanged: mouse => root.sliderValue = mouse.x
+                }
             }
         }
     }
@@ -145,6 +163,7 @@ TestCase {
         root.fogCloses = 0;
         root.cardPresses = 0;
         root.buttonTaps = 0;
+        root.sliderValue = -1;
         root.guarded = true;
     }
 
@@ -163,22 +182,56 @@ TestCase {
         mouseClick(root, 6, 6);
     }
 
+    // Absolute points, so a drag can be spelled out press-move-release. The card
+    // is centred, so it spans 80..240 by 70..170; the track sits at its
+    // bottom-left and the tile in its middle.
+    readonly property point atTrack: Qt.point(120, 152)
+    readonly property point atCardBackground: Qt.point(220, 100)
+    readonly property point atFog: Qt.point(6, 6)
+
+    // --- 2b. the ticket's two drag criteria ----------------------------------
+    //
+    // "Because the press decides, a press that starts on the card and releases
+    // over the fog does not dismiss, and a drag that starts on a slider track
+    // and wanders off it before release does not dismiss either." Both fall out
+    // of the mouse grab rather than needing their own logic — whichever item
+    // accepts the press keeps the move and the release — but they are the two
+    // criteria a future refactor to a release-decided or geometry-decided
+    // dismiss would silently break, so they are pinned rather than reasoned.
+
+    function test_a_drag_off_the_slider_track_moves_it_and_does_not_dismiss() {
+        mousePress(root, root.atTrack.x, root.atTrack.y);
+        mouseMove(root, root.atCardBackground.x, root.atCardBackground.y);
+        mouseRelease(root, root.atCardBackground.x, root.atCardBackground.y);
+
+        // Positive guard: the drag really did drive the track. Without it the
+        // dismiss assertion would also pass if the press had missed everything.
+        verify(root.sliderValue >= 0, "the press missed the track — the replica's geometry is wrong");
+        compare(root.fogCloses, 0, "a drag off a slider track dismissed the drawer (#193)");
+    }
+
+    function test_a_press_on_the_card_released_over_the_fog_does_not_dismiss() {
+        mousePress(root, root.atCardBackground.x, root.atCardBackground.y);
+        mouseMove(root, root.atFog.x, root.atFog.y);
+        mouseRelease(root, root.atFog.x, root.atFog.y);
+
+        compare(root.cardPresses, 1, "the press missed the card — the replica's geometry is wrong");
+        compare(root.fogCloses, 0,
+                "a press that began on the card dismissed on release over the fog (#193): "
+                + "the press is supposed to decide");
+    }
+
     // --- 1. the bug ----------------------------------------------------------
 
     function test_an_unguarded_card_falls_through_to_the_fog() {
         root.guarded = false;
         clickCardPadding();
         compare(root.fogCloses, 1, "#193 was not a fall-through after all — re-read the fix");
-        compare(root.cardPresses, 0, "the disabled catcher accepted a press");
+        compare(root.cardPresses, 0, "the disabled card catcher accepted a press");
     }
 
-    /// The other half of the mechanism, and the half that is easy to get wrong.
-    /// #183 showed a TapHandler takes only a passive grab, so one handler does
-    /// not exclude another; the tempting next step is that the press therefore
-    /// carries on down to the fog catcher too, making *every* press a dismiss.
-    /// It does not — a passive grab says nothing about item-level delivery,
-    /// which stops at the handler's item. Measured here rather than assumed,
-    /// because the first draft of this fix assumed it and was wrong.
+    /// The other half of the mechanism — see point 1 of the header for why the
+    /// obvious inference from #183 is wrong and this is measured, not reasoned.
     function test_an_unguarded_button_does_not_fall_through_to_the_fog() {
         root.guarded = false;
         clickButton();
@@ -202,7 +255,7 @@ TestCase {
 
     function test_a_guarded_card_still_taps_its_buttons() {
         clickButton();
-        compare(root.buttonTaps, 1, "the catcher swallowed the tile's own press");
+        compare(root.buttonTaps, 1, "the card catcher swallowed the tile's own press");
         // Zero, not one: the press stops at the tile's handler and never reaches
         // the catcher underneath — the same rule as the unguarded case above.
         // The catcher is a backstop for presses that miss, so a press that hits
@@ -214,7 +267,7 @@ TestCase {
     function test_the_fog_still_dismisses() {
         clickFog();
         compare(root.fogCloses, 1, "the fix took the fog's own dismiss with it");
-        compare(root.cardPresses, 0, "the catcher reached outside the card");
+        compare(root.cardPresses, 0, "the card catcher reached outside the card");
     }
 
     // --- 3. the shipped files ------------------------------------------------
@@ -251,20 +304,67 @@ TestCase {
         return root.tenants;
     }
 
+    /// The type names of a card's *direct* child objects, in declaration order.
+    ///
+    /// Bounded properly rather than by "PressCatcher appears somewhere after the
+    /// card's id", which was this check's first draft and was worth almost
+    /// nothing: it stayed green with the catcher inside a grandchild, after the
+    /// card's closing brace, or — in Launcher.qml, where the field and results
+    /// are siblings of the card — inside any of them. Both properties the fix
+    /// rests on are about *this* list: that PressCatcher is in it (a child of the
+    /// card, not of the screen-sized root, where it would swallow the fog's own
+    /// dismiss) and that it is first (below the card's controls, not over them).
+    ///
+    /// Walks braces from the card's body, counting only depth-1 opens whose
+    /// preceding token is capitalised — which is how a QML object declaration
+    /// differs from a grouped property (`anchors {`) or an attached one
+    /// (`Behavior on height {`). Comments are stripped first so a brace in prose
+    /// cannot skew the depth.
+    function cardChildTypes(source, cardMarker) {
+        const clean = source.replace(/\/\/[^\n]*/g, "");
+        const idAt = clean.indexOf(cardMarker);
+        if (idAt < 0)
+            return null;
+
+        // The card's own opening brace is the last one before its `id:` line.
+        const open = clean.lastIndexOf("{", idAt);
+        if (open < 0)
+            return null;
+
+        const types = [];
+        let depth = 0;
+        for (let i = open; i < clean.length; i++) {
+            const c = clean[i];
+            if (c === "{") {
+                if (depth === 1) {
+                    const name = /([A-Za-z_]\w*)\s*$/.exec(clean.slice(0, i));
+                    if (name !== null && /^[A-Z]/.test(name[1]))
+                        types.push(name[1]);
+                }
+                depth++;
+            } else if (c === "}") {
+                depth--;
+                if (depth === 0)
+                    return types;
+            }
+        }
+        return null;   // unbalanced — the file is not what this check assumes
+    }
+
     function test_every_drawer_ships_the_catcher(row) {
         const source = repo.read("../Surfaces/Drawers/" + row.file);
         verify(source !== null, "no drawer at Surfaces/Drawers/" + row.file);
+        verify(/\bPressCatcher\s*\{\s*\}/.test(source),
+               row.file + " no longer instantiates PressCatcher — a press on its card dismisses it (#193)");
 
-        const catcher = source.search(/\bPressCatcher\s*\{\s*\}/);
-        verify(catcher >= 0, row.file + " no longer instantiates PressCatcher — a press on its card dismisses it (#193)");
-
-        // Bounded to *inside the card* rather than "somewhere in the file": the
-        // catcher is only the fix while it is a child of the card, and a loose
-        // search would stay green if it drifted out to the screen-sized root,
-        // where it would swallow the fog's dismiss instead.
-        const cardAt = source.indexOf(row.card);
-        verify(cardAt >= 0, row.file + " no longer declares its card as `" + row.card + "` — re-read this check");
-        verify(catcher > cardAt,
-               row.file + " declares PressCatcher before its card, so it is not inside it");
+        const children = cardChildTypes(source, row.card);
+        verify(children !== null,
+               row.file + " no longer declares its card as `" + row.card + "` with a balanced body — re-read this check");
+        verify(children.indexOf("PressCatcher") >= 0,
+               row.file + " declares PressCatcher outside its card, where it does not guard it (#193). "
+               + "The card's children are: " + children.join(", "));
+        compare(children[0], "PressCatcher",
+                row.file + " declares PressCatcher after `" + children[0] + "`, so it sits over that control "
+                + "instead of under it and will swallow its presses (#193)");
     }
 }

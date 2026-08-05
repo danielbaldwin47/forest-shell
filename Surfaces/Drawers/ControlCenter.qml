@@ -292,6 +292,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // First child: the card's own controls are hit-tested before it. See
+        // Surfaces/Drawers/PressCatcher.qml (#193).
+        PressCatcher {}
+
         // Both views live in here, and only during a transition are both drawn.
         // Clipped, so the one on its way out disappears at the card's padding
         // rather than over the edge of it.

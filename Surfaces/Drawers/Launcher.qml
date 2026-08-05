@@ -283,6 +283,21 @@ FocusScope {
             border.width: Theme.hairline
             border.color: Theme.borderSubtle
 
+            // First child: the card's own controls are hit-tested before it. See
+            // Surfaces/Drawers/PressCatcher.qml (#193).
+            //
+            // Being first buys less here than in the other four, and it is worth
+            // saying why rather than implying otherwise: the field, the results
+            // and the legend are not *in* this card. They are siblings of it,
+            // declared after it and drawn over it, so they already sit above
+            // this catcher whatever it does. What being first still settles is
+            // the card's own decoration — the top-lit gradient below.
+            //
+            // The clearing around the card is not the card, and must go on
+            // dismissing: that is this drawer's whole shape (#193 names it).
+            // It does, because the catcher stops at the card's bounds.
+            PressCatcher {}
+
             // Top-lit: a 4–6% lightness delta down the surface (brief §3.2).
             Rectangle {
                 anchors.fill: parent

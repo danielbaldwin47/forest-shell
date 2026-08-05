@@ -91,6 +91,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // First child: the card's own controls are hit-tested before it. See
+        // Surfaces/Drawers/PressCatcher.qml (#193).
+        PressCatcher {}
+
         ColumnLayout {
             id: rows
 

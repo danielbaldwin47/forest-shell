@@ -145,6 +145,10 @@ FocusScope {
         border.width: Theme.hairline
         border.color: Theme.borderSubtle
 
+        // First child: the card's own controls are hit-tested before it. See
+        // Surfaces/Drawers/PressCatcher.qml (#193).
+        PressCatcher {}
+
         // The stack is allowed to be longer than the screen — five cards on a
         // laptop will be — and what must not happen is the panel growing past
         // the display it hangs on. So the body scrolls inside the height it is

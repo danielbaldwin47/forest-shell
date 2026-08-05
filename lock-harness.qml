@@ -103,8 +103,16 @@ ShellRoot {
         /// have, so the offer can only be posed — but everything after it is
         /// real: the touch count, the arbitration, and the withdrawal below all
         /// run on the offer being open.
+        /// `fingerprintLive` is posed too since #188: an offer that is on
+        /// screen and an offer that may charge the user a touch stopped being
+        /// the same fact when a suspend was found to leave one without the
+        /// other.
         function fingeroffer(): bool {
-            lock.auth.pose({ fingerprintActive: true, fingerprintTouches: 0 });
+            lock.auth.pose({
+                fingerprintActive: true,
+                fingerprintLive: true,
+                fingerprintTouches: 0
+            });
             return true;
         }
 
@@ -142,7 +150,12 @@ ShellRoot {
                 lockedOut: lock.auth.lockedOut,
                 conversing: lock.auth.conversing,
                 fingerprintMessage: lock.auth.fingerprintMessage,
-                fingerprintActive: lock.auth.fingerprintActive
+                fingerprintActive: lock.auth.fingerprintActive,
+                // #188: the claim a suspend/resume run makes is about the
+                // count. An offer rebuilt with touches already on it and a good
+                // rebuild look identical without these two.
+                fingerprintTouches: lock.auth.fingerprintTouches,
+                fingerprintLive: lock.auth.fingerprintLive
             });
         }
     }

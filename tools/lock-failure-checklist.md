@@ -361,6 +361,89 @@ than a shell-side count layered over it. That was #169's choice to make
 deliberately, since the other reading meant re-arming past an authentication
 module's refusal.
 
+### 3f — the same reader, after a suspend (#188)
+
+Everything above locks the session deliberately. This step is the other way in,
+and it is the one the bug was reported against: **close the lid, wait for the
+machine to go down, open it again.** The shell locks *inside* logind's delay
+inhibitor, so on this path the lock — and every PAM conversation it opens — is
+raised seconds before the machine suspends underneath it.
+
+Run it in this order, because the first two answers decide what the third one
+means.
+
+1. **Settle the hardware question first, with the shell out of the picture.**
+   Switch to a TTY (`Ctrl+Alt+F3`), suspend from there (`systemctl suspend`),
+   wake the machine, and — still on the TTY — run:
+
+       fprintd-list "$USER"
+
+   Then a verify: `fprintd-verify`, and touch the reader.
+
+   > This is the gating question, and it is not about the shell at all. This
+   > machine runs `open-fprintd` + `python-validity` rather than upstream
+   > fprintd, and that driver loses its TLS session to the sensor across a
+   > suspend. What re-establishes it is
+   > `python3-validity-suspend-hotfix.service`, which is **enabled** and
+   > `WantedBy=suspend.target` — it runs `systemctl --no-block restart
+   > python3-validity.service open-fprintd.service` on the way back up. Note
+   > `--no-block`: the restart is still in flight while logind is handing out
+   > resume notifications, which is the race the shell's probe settle window
+   > exists for. `open-fprintd-suspend.service` and
+   > `open-fprintd-resume.service` are both disabled, and that is expected —
+   > the hotfix unit is the one doing this job.
+   >
+   > If `fprintd-list` cannot see the device on the TTY, **stop**: the reader
+   > does not come back on this hardware, nothing the shell does will light it,
+   > and step 3 below is testing the fallback rather than the fix. Record the
+   > `fprintd-list` output and the journal for the two units.
+
+2. **How long it takes.** Run `fprintd-list "$USER"` immediately on wake and
+   again a few seconds later. If the first fails and the second succeeds, the
+   number between them is what `LockPolicy.fingerprintProbeRetryMs` ×
+   `fingerprintProbeRetries` (750 ms × 4 = 3 s) has to cover. A gap wider than
+   that is a finding, and it is a one-line change.
+
+3. **Now the lock screen.** Back on the session: close the lid, wait for it to
+   suspend, open it. The lock comes up. Watch the reader's illuminator, and
+   read the fingerprint line without touching anything.
+
+   **What must not happen** is the reported bug: "Failed to match fingerprint",
+   then "Out of fingerprint tries — use your password", over a sensor whose
+   light never came on. No touch of yours is in that transcript.
+
+   **What should happen**, if step 1 said the reader comes back: the sensor
+   lights, the line reads "Place your finger on the fingerprint reader", and a
+   correct finger unlocks. If step 1 said it does not: the line reads
+   "Fingerprint unavailable — use your password", once, with **no failure line
+   in front of it**, and the password field takes a password.
+
+4. **The password, on its own.** Suspend and wake again, and this time type the
+   password without touching the reader. It is stranded across the same suspend
+   as the fingerprint conversation and is the more serious half of the bug — a
+   lock screen that will not take a password after a resume has no other way
+   out.
+
+5. **The log is the record.** Four lines carry it, and they are the seam-2 run's
+   assertions on real hardware:
+
+       lock: sleep announced — standing conversations down
+       lock: fingerprint offer torn down (sleep announced) — touches discarded
+       lock: resume observed — re-arming the lock conversations
+       lock: rebuilding pam conversations (resume)
+
+   Then one of these, which is the answer to step 1 read off the shell's own
+   probe:
+
+       lock: fingerprint enrolled — parallel context started
+       lock: fingerprint probe could not run (attempt N) — retrying in 750ms
+       lock: fingerprint probe settled: failed after 4 attempt(s)
+
+   And if any touch was charged for something that happened while the machine
+   was down, this line says so and is the bug reopening:
+
+       lock: fingerprint offer withdrawn after N touch(es)
+
 ---
 
 ## Recording the result

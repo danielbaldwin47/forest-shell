@@ -69,6 +69,14 @@ Scope {
     readonly property alias fingerprintActive: priv.fingerprintActive
     readonly property alias fingerprintMessage: priv.fingerprintMessage
 
+    /// How many touches the running offer has been charged, and whether it is
+    /// in a state where a touch *can* be charged (#188). Exposed because the
+    /// claim a suspend/resume run has to make is about the count — an offer
+    /// rebuilt with three touches already on it is the bug, and a harness that
+    /// can only see `fingerprintActive` cannot tell that from a good rebuild.
+    readonly property alias fingerprintTouches: priv.fingerprintTouches
+    readonly property alias fingerprintLive: priv.fingerprintLive
+
     /// A completed attempt that was not a success — the surface's cue to shake
     /// the field and pulse the fog.
     signal failed()
@@ -98,12 +106,142 @@ Scope {
         // Logged either side of the call, because #81 could not tell from the
         // logs whether the conversation had failed to start or had never been
         // asked to: three silent steps produced one silent lock.
+        priv.afterResume = false;
+        priv.fingerprintEverEnrolled = false;
         Logger.log("lock", "opening pam conversation (config "
                    + Config.values.system.lock.pamConfig + ")");
         password.start();
         conversationWatchdog.restart();
-        if (Config.values.system.lock.fingerprint)
-            fingerprintProbe.running = true;
+        root.probeFingerprint();
+    }
+
+    /// Put the conversations back, without ending the lock (#188).
+    ///
+    /// Distinct from `rearm()` below, which is the keystroke re-arm for a
+    /// conversation that ended without asking anything: that one reopens the
+    /// password context in the state it was left in, where this one throws the
+    /// state away. A suspend is not a conversation that went quiet.
+    ///
+    /// `begin()` cannot do this either. Its guard is there so that a lock surface
+    /// re-created mid-lock does not open a second conversation on top of the
+    /// first, and that guard is right — but it made the state after a suspend
+    /// unreachable, because the session stays locked across the whole thing and
+    /// `end()` only runs on unlock. So the machine came back to whatever the
+    /// stranded conversations had become, and no code path could say otherwise.
+    ///
+    /// Everything a fresh `begin()` would clear is cleared here too, minus the
+    /// buffer decision: the typed characters are dropped, because a password
+    /// half-typed before a lid closed is not something the user is still in the
+    /// middle of.
+    function rebuildConversations(reason: string): void {
+        if (!priv.begun)
+            return;
+        Logger.log("lock", "rebuilding pam conversations (" + reason + ")");
+
+        // The password half (#188 acceptance 8). Stranded exactly as the
+        // fingerprint one is, and the more serious version of the bug: a lock
+        // screen that will not take a password after a resume has no other way
+        // out.
+        conversationWatchdog.stop();
+        password.abort();
+        priv.conversing = false;
+        priv.pendingSubmit = false;
+        priv.responseRequired = false;
+        priv.responseVisible = false;
+        priv.busy = false;
+        priv.answered = false;
+        priv.rearmOnInput = false;
+        root.clear();
+        password.start();
+        conversationWatchdog.restart();
+
+        root.tearDownFingerprint("rebuilding");
+        root.probeFingerprint();
+    }
+
+    /// Take the fingerprint conversation down and make sure nothing it says
+    /// afterwards can cost anything (#188).
+    ///
+    /// `fingerprintLive` going false is the load-bearing line. A PAM context
+    /// that is aborted while its module is mid-verify still gets to emit — and
+    /// after a suspend what it emits is "Failed to match fingerprint", in the
+    /// same words a wrong finger produces. Nothing said from here until the
+    /// next successful probe is chargeable.
+    function tearDownFingerprint(reason: string): void {
+        fingerprintProbeRetry.stop();
+        priv.fingerprintLive = false;
+        if (!priv.fingerprintActive && !priv.fingerprintTouches)
+            return;
+        fingerprint.abort();
+        priv.fingerprintActive = false;
+        priv.fingerprintTouches = 0;
+        root.clearFingerprintMessage();
+        Logger.log("lock", "fingerprint offer torn down (" + reason
+                   + ") — touches discarded");
+    }
+
+    /// Ask the machine whether there is a finger to read, from the top.
+    function probeFingerprint(): void {
+        if (!Config.values.system.lock.fingerprint)
+            return;
+        priv.probeAttempt = 0;
+        fingerprintProbe.running = true;
+    }
+
+    /// Act on a finished probe — once both halves of it have finished.
+    ///
+    /// The exit status and the last of stdout arrive on two different signals
+    /// with no ordering between them, and the whole point of #188's change is
+    /// that the exit status is now part of the answer. So neither signal
+    /// decides anything on its own; the second one to arrive calls this.
+    function settleProbe(): void {
+        if (!priv.probeExited || !priv.probeStreamDone)
+            return;
+        if (!priv.begun || priv.sleeping)
+            return;
+
+        const outcome = policy.fingerprintProbeOutcome(priv.probeExitCode,
+                                                       fingerprintProbeOut.text);
+        priv.probeAttempt += 1;
+
+        if (outcome === "enrolled") {
+            priv.fingerprintEverEnrolled = true;
+            priv.fingerprintActive = true;
+            priv.fingerprintLive = true;
+            priv.fingerprintTouches = 0;
+            root.clearFingerprintMessage();
+            fingerprint.start();
+            Logger.log("lock", "fingerprint enrolled — parallel context started");
+            return;
+        }
+
+        if (policy.fingerprintProbeShouldRetry(outcome, priv.probeAttempt)) {
+            // The settle window (#188). This machine restarts open-fprintd and
+            // python-validity on every resume, with `--no-block`, so the bus
+            // name the probe wants can still be unowned when logind says we are
+            // back. Asking again a moment later is the difference between an
+            // offer and a phantom refusal.
+            Logger.log("lock", "fingerprint probe could not run (attempt "
+                       + priv.probeAttempt + ") — retrying in "
+                       + policy.fingerprintProbeRetryMs + "ms");
+            fingerprintProbeRetry.restart();
+            return;
+        }
+
+        // Out of asks, or a machine that answered and has nothing enrolled.
+        // Either way there is no offer; the only question left is whether the
+        // screen should hear about it.
+        Logger.log("lock", "fingerprint probe settled: " + outcome
+                   + " after " + priv.probeAttempt + " attempt(s)");
+        if (policy.fingerprintProbeSpeaks(outcome, priv.fingerprintEverEnrolled,
+                                          priv.afterResume)) {
+            // Said once, promptly, and with no fake failure in front of it —
+            // which is the whole of what the shell can fix if the reader really
+            // does not come back (#188 acceptance 1).
+            priv.fingerprintActive = true;
+            priv.fingerprintLive = false;
+            root.withdrawFingerprint(false);
+        }
     }
 
     /// Close them again, on unlock or when the shell is going away. PAM
@@ -116,7 +254,10 @@ Scope {
         conversationWatchdog.stop();
         password.abort();
         fingerprint.abort();
+        fingerprintProbeRetry.stop();
         priv.fingerprintActive = false;
+        // Nothing an aborted context says on its way out may be charged (#188).
+        priv.fingerprintLive = false;
         root.clearFingerprintMessage();
         // The latch dies with the lock it was raised on (#164). Both success
         // paths — password and fingerprint — come through here, and a lockout
@@ -295,8 +436,16 @@ Scope {
         // result and never sees the messages: the module's re-prompts happen
         // inside the conversation, so the messages are the only place the
         // touches are visible (#169).
-        if (policy.fingerprintTouchMissed(text))
+        // Two things can stop this counting (#188). The prose, where the reader
+        // admits it is missing; and `fingerprintLive`, for the case where it
+        // does not — a conversation stranded across a suspend says "Failed to
+        // match fingerprint" in the wrong finger's exact words while the
+        // sensor's light never comes on, so the transcript cannot be read and
+        // the lifecycle has to answer instead.
+        if (policy.fingerprintTouchCharged(text, priv.fingerprintLive))
             priv.fingerprintTouches += 1;
+        else if (priv.fingerprintActive && policy.fingerprintTouchMissed(text))
+            Logger.log("lock", "fingerprint failure not charged — offer is not live");
         const sinceMs = Date.now() - priv.fingerprintMessageAt;
         if (policy.fingerprintMessageWins(priv.fingerprintMessageIsError,
                                           sinceMs, isError)) {
@@ -397,6 +546,11 @@ Scope {
         // log that no conversation ever spent (#169).
         if (fields.fingerprintTouches !== undefined)
             priv.fingerprintTouches = fields.fingerprintTouches;
+        // Posed alongside `fingerprintActive`, because after #188 those are two
+        // different facts: an offer can be on screen and not chargeable, which
+        // is exactly the state a suspend leaves behind.
+        if (fields.fingerprintLive !== undefined)
+            priv.fingerprintLive = fields.fingerprintLive;
         // Through the same door a real message uses, so a posed one is not a
         // message with no stamp beside it (#168): `fingerprintMessageAt` is
         // what the *next* message asks about, and two writers of one state
@@ -530,13 +684,19 @@ Scope {
             // — the shell used to try, behind a branch that excluded
             // PAM_MAXTRIES and was therefore never taken.
             const maxTries = result === PamResult.MaxTries;
+            // Named the way the password path above names its results, because
+            // #188 was the fingerprint path having no name for the error one at
+            // all: `PamResult.Error` fell through to the count, so a reader that
+            // was never asked closed with "Out of fingerprint tries".
+            const kind = maxTries ? "maxTries"
+                       : result === PamResult.Error ? "error" : "failed";
             // Logged either side of the withdrawal, as `begin()` is: what PAM
             // said and what the surface did about it are two facts, and a
             // result with no withdrawal beside it is the pair #81 needed.
-            Logger.log("lock", "fingerprint pam result " + result
-                       + (maxTries ? " (max tries)" : ""));
+            Logger.log("lock", "fingerprint pam result " + result + " (" + kind + ")");
+            priv.fingerprintLive = false;
             root.withdrawFingerprint(
-                policy.fingerprintBudgetSpent(maxTries, priv.fingerprintTouches));
+                policy.fingerprintClosedSpent(kind, priv.fingerprintTouches));
             // The budget is a number in someone else's config file, so notice
             // out loud when the module stops spending the one we document.
             if (maxTries && priv.fingerprintTouches !== policy.fingerprintTouchBudget)
@@ -549,6 +709,7 @@ Scope {
             // The likely one by far is StartFailed: fprintd is installed but
             // its pam config is not where we looked. Not worth shouting about —
             // the password field is right there, and now says so.
+            priv.fingerprintLive = false;
             root.withdrawFingerprint(false);
             Logger.log("lock", "fingerprint unavailable (pam error " + error + ")");
         }
@@ -563,16 +724,73 @@ Scope {
 
         command: ["fprintd-list", Quickshell.env("USER") ?? ""]
 
+        onRunningChanged: {
+            if (!fingerprintProbe.running)
+                return;
+            priv.probeExited = false;
+            priv.probeStreamDone = false;
+            priv.probeExitCode = 0;
+        }
+
+        // The exit status is half the answer now (#188): "ran and found
+        // nothing" and "could not reach the bus" both leave stdout empty, and
+        // only one of them means this machine has no reader.
+        onExited: (exitCode, exitStatus) => {
+            priv.probeExitCode = exitCode;
+            priv.probeExited = true;
+            root.settleProbe();
+        }
+
         stdout: StdioCollector {
+            id: fingerprintProbeOut
             onStreamFinished: {
-                if (!priv.begun || !policy.fingerprintEnrolled(this.text))
-                    return;
-                priv.fingerprintActive = true;
-                priv.fingerprintTouches = 0;
-                root.clearFingerprintMessage();
-                fingerprint.start();
-                Logger.log("lock", "fingerprint enrolled — parallel context started");
+                priv.probeStreamDone = true;
+                root.settleProbe();
             }
+        }
+    }
+
+    // The other half of the settle window (#188). Separate from the probe so
+    // that a teardown can stop it: a retry that fires after a sleep has been
+    // announced would open an offer into a suspend, which is the bug.
+    Timer {
+        id: fingerprintProbeRetry
+        interval: policy.fingerprintProbeRetryMs
+        onTriggered: {
+            if (!priv.begun || priv.sleeping)
+                return;
+            fingerprintProbe.running = true;
+        }
+    }
+
+    // #188: the two ends of a suspend, heard from the bridge that already
+    // announces them. Referencing LogindBridge here is also what brings the
+    // singleton up in a harness that would otherwise never touch it, which is
+    // how seam 2 gets to drive `logind sleep` and `logind resume` against a
+    // lock surface.
+    Connections {
+        target: LogindBridge
+
+        // Inside logind's delay lock, before the lock surface exists. Whatever
+        // is standing here is what gets carried into the suspend, so nothing
+        // fingerprint-shaped is left standing.
+        function onSleeping(): void {
+            priv.sleeping = true;
+            Logger.log("lock", "sleep announced — standing conversations down");
+            fingerprintProbeRetry.stop();
+            root.tearDownFingerprint("sleep announced");
+        }
+
+        // The machine is back, and the session was locked the whole time — so
+        // `begin()` was never going to run again and its guard was never going
+        // to let it.
+        function onResumed(): void {
+            priv.sleeping = false;
+            if (!priv.begun)
+                return;
+            priv.afterResume = true;
+            Logger.log("lock", "resume observed — re-arming the lock conversations");
+            root.rebuildConversations("resume");
         }
     }
 
@@ -643,6 +861,25 @@ Scope {
         // the only way to notice it changing is to keep the module's own tally
         // beside the number LockPolicy documents.
         property int fingerprintTouches: 0
+
+        // #188. `fingerprintLive` is the one that stops a touch being charged:
+        // an offer is live only between a probe that found a finger and the
+        // conversation ending, and a suspend takes it out of that window from
+        // the moment logind says the machine is going. `sleeping` covers the
+        // gap in between, when the lock is being raised *into* a suspend and
+        // must not arm anything. `afterResume` and `fingerprintEverEnrolled`
+        // are what let a failed probe stay quiet on a desktop that has no
+        // reader and speak up on a laptop whose reader just went away.
+        property bool fingerprintLive: false
+        property bool sleeping: false
+        property bool afterResume: false
+        property bool fingerprintEverEnrolled: false
+
+        // The probe's two halves and its attempt count — see `settleProbe`.
+        property int probeAttempt: 0
+        property int probeExitCode: 0
+        property bool probeExited: false
+        property bool probeStreamDone: false
 
         // The dwell (#168): what the fingerprint line is saying and when it
         // started saying it, plus whatever arrived too soon to replace it.

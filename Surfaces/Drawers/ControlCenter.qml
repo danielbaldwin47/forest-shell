@@ -187,8 +187,49 @@ FocusScope {
 
     readonly property var tiles: root.policy.tiles(root.facts)
     readonly property var tileRows: root.policy.rows(root.tiles)
-    readonly property var sliderRows: root.policy.sliders(root.facts)
     readonly property string batteryLine: root.policy.batteryLine(root.facts.battery)
+
+    // --- the slider model, latched (#192) ------------------------------------
+    //
+    // Everything else here is bound straight off `facts`, and for the grid that
+    // is fine. For the sliders it was the bug: `facts` is a new object on every
+    // service tick, so `policy.sliders(facts)` was a new array of new rows on
+    // every tick, and a JS array with a new identity is a model *reset* — every
+    // delegate destroyed and re-created. A re-created ControlSlider starts with
+    // a zero-width fill, and its `Behavior` does not run during creation, so
+    // the first layout pass afterwards animates the fill from empty to the
+    // level. The level therefore "refilled" on every volume key, every
+    // brightness step, and — while recording — once a second off the elapsed
+    // clock, plus any drag in progress lost its `dragging` flag mid-drag.
+    //
+    // So the model carries identities only, and is reassigned only when the set
+    // of sliders this machine offers actually changes — hardware arriving or
+    // going away, or the user reordering them. A level change is then a
+    // property update on a live delegate, and the fill tweens from where it
+    // was, which is what the `Behavior` was written for.
+    property var sliderIds: []
+
+    function refreshSliderIds(): void {
+        const next = root.policy.sliderIds(root.facts);
+        if (root.policy.sameIds(root.sliderIds, next))
+            return;
+        root.sliderIds = next;
+        // The line seam 2 asserts on: drive the volume and this must not
+        // repeat. One line per set change is the whole claim of the latch.
+        Logger.log("control-centre", "slider set: "
+                   + (next.length > 0 ? next.join(", ") : "(none)"));
+    }
+
+    /// The row for one slider, bound per delegate rather than baked into the
+    /// model. A slider whose hardware disappears is still in `sliderIds` until
+    /// the latch above catches up, so this hands the delegate a blank track for
+    /// that moment rather than a null it would fault on.
+    function sliderRow(id: string): var {
+        return root.policy.slider(id, root.facts)
+            ?? root.policy.track(id, 0, "", "", false, false);
+    }
+
+    onFactsChanged: root.refreshSliderIds()
 
     // --- what a press does ---------------------------------------------------
     //
@@ -266,22 +307,25 @@ FocusScope {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.space1
-                visible: root.sliderRows.length > 0
+                visible: root.sliderIds.length > 0
 
                 Repeater {
-                    model: root.sliderRows
+                    model: root.sliderIds
 
                     ControlSlider {
-                        required property var modelData
+                        // The id, not the row: see `sliderIds` above. The row
+                        // is a binding of this delegate's own, so a level
+                        // change reaches it without the model moving.
+                        required property string modelData
 
                         Layout.fillWidth: true
-                        model: modelData
+                        model: root.sliderRow(modelData)
                         policy: root.policy
 
-                        onMoved: percent => ControlCenterActions.slide(modelData.id, percent)
-                        onMuteToggled: ControlCenterActions.mute(modelData.id)
+                        onMoved: percent => ControlCenterActions.slide(modelData, percent)
+                        onMuteToggled: ControlCenterActions.mute(modelData)
                         onDrillRequested: ControlCenterActions.drill(
-                            root.drillPolicy.panelForSlider(modelData.id))
+                            root.drillPolicy.panelForSlider(modelData))
                     }
                 }
             }
@@ -605,6 +649,11 @@ FocusScope {
     // would show (#22 §5).
     Component.onDestruction: ControlCenterActions.back("drawer")
 
-    Component.onCompleted: Logger.log("control-centre",
-        root.tiles.length + " tile(s), " + root.sliderRows.length + " slider(s)")
+    Component.onCompleted: {
+        // Before the count, so the first `slider set:` line is the one that
+        // built the model rather than a change to it.
+        root.refreshSliderIds();
+        Logger.log("control-centre",
+            root.tiles.length + " tile(s), " + root.sliderIds.length + " slider(s)");
+    }
 }

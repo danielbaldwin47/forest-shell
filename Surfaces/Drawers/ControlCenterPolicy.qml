@@ -296,6 +296,36 @@ QtObject {
         return out;
     }
 
+    /// Just the ids of `sliders()`, in the same order.
+    ///
+    /// This, not `sliders()`, is what the surface hands its `Repeater` (#192).
+    /// A row object carries a *level*, so it is a new object on every service
+    /// tick, and a JS array of new objects is a new array — which a
+    /// `QQmlDelegateModel` reads as a model reset and answers by destroying and
+    /// re-creating every delegate. The id list changes only when hardware
+    /// appears or goes away, so latching the model to it keeps the delegates
+    /// alive and leaves each one to bind its own row.
+    function sliderIds(facts: var): var {
+        return policy.sliders(facts).map(row => row.id);
+    }
+
+    /// Whether two id lists name the same things in the same order.
+    ///
+    /// The latch above needs this because it cannot compare references: every
+    /// call to `sliderIds()` returns a fresh array whatever is in it, so
+    /// "did the set change" has to be asked of the contents.
+    function sameIds(a: var, b: var): bool {
+        const left = a ?? [];
+        const right = b ?? [];
+        if (left.length !== right.length)
+            return false;
+        for (let i = 0; i < left.length; i++) {
+            if (left[i] !== right[i])
+                return false;
+        }
+        return true;
+    }
+
     function slider(id: string, facts: var): var {
         switch (id) {
         case "volume":     return policy.volumeSlider(facts.volume ?? ({}));

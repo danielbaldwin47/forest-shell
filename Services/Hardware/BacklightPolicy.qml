@@ -119,4 +119,76 @@ QtObject {
         const value = parseInt((text || "").trim(), 10);
         return isNaN(value) ? 0 : value;
     }
+
+    // --- freshness (#186) ----------------------------------------------------
+    //
+    // The file view asks to watch the panel's value and cannot be told, because
+    // a sysfs attribute change arrives as a `sysfs_notify` poll() wakeup and not
+    // as an inotify event. So a brightness the shell did not set — a terminal
+    // `brightnessctl`, a compositor keybind, firmware — was invisible to it
+    // until the shell next wrote brightness itself, and every surface then
+    // showed a level twelve minutes old while the next key press stepped from
+    // it.
+    //
+    // The cure is to re-read on demand rather than to keep reading: what is due
+    // and when anything ticks at all is decided here, and the facade next door
+    // only owns the read.
+
+    /// How long a read stays trusted. Short, because the point is that anything
+    /// may have moved the panel; long enough that a drawer and a bar module
+    /// appearing in the same frame are one read rather than two.
+    readonly property int staleMs: 250
+
+    /// How often to re-read while a surface is displaying a level. Only ever
+    /// armed while one is — see `pollRunning`.
+    ///
+    /// Shorter than OsdPolicy's `attributionMs`, and that is the whole reason
+    /// for the number rather than a rounder one. The OSD suppresses the idle
+    /// ladder's own dim (#175) by attributing a change to the ladder for
+    /// 1500 ms after it claims the backlight; a change this timer only notices
+    /// *after* that window would be announced as the user's, which is the pill
+    /// #175 removed coming back. So a poll always lands inside the window it
+    /// has to be judged in — the invariant is asserted at the first seam,
+    /// across both policies.
+    readonly property int pollMs: 1000
+
+    /// Whether a value stamped at `lastReadAt` needs reading again.
+    ///
+    /// A stamp of 0 is "never read", and its value is the facade's pre-read 0%.
+    /// A stamp in the future is a clock that moved — suspend and resume, which
+    /// is exactly the transition most likely to have changed the panel behind
+    /// the shell's back — and is read rather than trusted.
+    function readDue(nowMs: real, lastReadAt: real): bool {
+        if (!isFinite(nowMs) || !isFinite(lastReadAt) || lastReadAt <= 0)
+            return true;
+        if (nowMs < lastReadAt)
+            return true;
+        return nowMs - lastReadAt >= policy.staleMs;
+    }
+
+    /// Whether the re-read timer should be running.
+    ///
+    /// #186's constraint, and the reason this is a count rather than a flag:
+    /// nothing new may tick while no surface is *holding* the panel, and two
+    /// can hold it at once. A count below zero is a release that ran twice and
+    /// arms nothing.
+    ///
+    /// What may hold one is the constraint's real content — a surface that
+    /// comes and goes, not a permanent readout. A bar module that subscribed
+    /// would be a timer for the life of the session, and that is measured: 5.57
+    /// context switches/s against a budget of 5.
+    function pollRunning(watchers: int, available: bool): bool {
+        return available === true && watchers > 0;
+    }
+
+    /// #81: a subscription that logs nothing is a wakeup nobody can account for
+    /// later — and both edges get a line, because "it stopped when the drawer
+    /// closed" is the half a harness can only see by reading for it.
+    function watching(watchers: int, intervalMs: int): string {
+        return "re-reading every " + intervalMs + "ms for " + watchers + " watcher(s)";
+    }
+
+    function idle(): string {
+        return "nothing showing brightness — stopped re-reading";
+    }
 }

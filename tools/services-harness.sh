@@ -494,11 +494,19 @@ if (( CHECK_BACKLIGHT )) && [[ "$(snapshot_field "$snapshot" backlight.available
     was_raw=$(cat "/sys/class/backlight/$device/brightness" 2>/dev/null)
     was_percent=$(snapshot_field "$snapshot" backlight.percent)
 
-    sysfs_percent=$(python3 -c "
+    # What the panel is doing, as a percent, read the way the service reads it.
+    # Asked for twice — once to check the service agrees with /sys, once after
+    # an external change — so it is a function rather than the same three lines
+    # of python written out again.
+    panel_percent() {
+        python3 -c "
 import sys
 raw, mx = int(sys.argv[1]), int(sys.argv[2])
 print(round(raw / mx * 100))
-" "$(cat "/sys/class/backlight/$device/actual_brightness")" "$(cat "/sys/class/backlight/$device/max_brightness")")
+" "$(cat "/sys/class/backlight/$1/actual_brightness")" "$(cat "/sys/class/backlight/$1/max_brightness")"
+    }
+
+    sysfs_percent=$(panel_percent "$device")
     if [[ "$was_percent" == "$sysfs_percent" ]]; then
         nested_pass "the backlight service reads the panel ($device at $was_percent%)"
     else
@@ -514,6 +522,38 @@ print(round(raw / mx * 100))
         nested_pass "a step up moved the panel and logged it ($was_percent% → $stepped%)"
     else
         nested_fail "a step up left the panel at $stepped% (was $was_percent%)"
+    fi
+
+    # 6b — a change the shell did not make (#186). sysfs does not announce one:
+    # the value is a poll() wakeup rather than an inotify event, so the shell's
+    # cached percent used to sit at whatever it last wrote — for twelve minutes
+    # in the report — and the next key press stepped from that instead of from
+    # the panel. The claim here is the one that bit: after an external
+    # `brightnessctl`, a step lands one notch below the *panel*.
+    #
+    # This is the same bargain check 6 already makes — it moves the machine's
+    # own panel and puts it back, and `--no-backlight` skips both.
+    external=$(( was_percent < 50 ? 70 : 30 ))
+    brightnessctl -q -d "$device" set "${external}%" 2>/dev/null
+    sleep 0.3
+    ext_percent=$(panel_percent "$device")
+    # The same grid the policy steps on: one notch down snaps to a multiple of
+    # 5 rather than landing 5 below an arbitrary level.
+    expected=$(python3 -c "
+import math, sys
+p = int(sys.argv[1])
+print(max(1, (math.ceil(p / 5 - 1e-9) - 1) * 5))
+" "$ext_percent")
+
+    ipc nudgeBrightness -1 > /dev/null
+    sleep 0.6
+    after=$(snapshot_field "$(ipc snapshot)" backlight.percent)
+    if (( after >= expected - 1 && after <= expected + 1 )); then
+        nested_pass "a step after an external change starts from the panel"\
+" (external $ext_percent% → $after%)"
+    else
+        nested_fail "a step after an external change landed at $after%,"\
+" expected about $expected% from a panel at $ext_percent%"
     fi
 
     ipc brightness "$was_percent" > /dev/null

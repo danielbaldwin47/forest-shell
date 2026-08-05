@@ -9,11 +9,14 @@
 import QtQuick
 import QtTest
 import "../Services/Hardware"
+// For one cross-policy invariant only — see the attribution test at the bottom.
+import "../Surfaces/Osd"
 
 TestCase {
     name: "BacklightPolicy"
 
     BacklightPolicy { id: policy }
+    OsdPolicy { id: osd }
 
     // `brightnessctl -m` output, verbatim from the T480.
     readonly property string probeReply: "intel_backlight,backlight,2,0%,1515\n"
@@ -126,5 +129,77 @@ TestCase {
         compare(policy.number(""), 0);
         compare(policy.number("not a number"), 0);
         compare(policy.number(null), 0);
+    }
+
+    // --- freshness (#186) ----------------------------------------------------
+    //
+    // A sysfs attribute change is a poll() wakeup rather than an inotify event,
+    // so the file view's `watchChanges` never fires for the panel and a
+    // brightness the shell did not set stays invisible to it. The facade
+    // therefore re-reads on demand, and when a read is due is decided here.
+
+    function test_a_value_that_was_never_read_is_due() {
+        // 0 is the stamp before the first read, and the value behind it is the
+        // facade's pre-read 0% — the number #186 was reported as seeing.
+        verify(policy.readDue(10000, 0));
+    }
+
+    function test_a_value_read_a_moment_ago_is_not_read_again() {
+        // Several surfaces appearing at once — the drawer and the bar module —
+        // ask within the same frame, and that is one read, not three.
+        verify(!policy.readDue(10000, 10000 - policy.staleMs + 1));
+        verify(policy.readDue(10000, 10000 - policy.staleMs));
+        verify(policy.readDue(10000, 10000 - policy.staleMs - 1));
+    }
+
+    function test_a_clock_that_moved_backwards_reads_rather_than_waits() {
+        // Suspend and resume moves the clock, and a stamp in the future would
+        // otherwise park the value as fresh forever — on the one transition
+        // most likely to have changed the panel behind the shell's back.
+        verify(policy.readDue(500, 900));
+        verify(policy.readDue(10000, NaN));
+        verify(policy.readDue(10000, undefined));
+    }
+
+    function test_polling_runs_only_while_something_shows_brightness() {
+        // #186's constraint, and the one that rules out a bare timer: nothing
+        // new ticks while no surface is displaying a level. The count is a
+        // count and not a flag because the drawer and the bar module can each
+        // hold one at the same time.
+        verify(!policy.pollRunning(0, true));
+        verify(policy.pollRunning(1, true));
+        verify(policy.pollRunning(2, true));
+        // A machine with no backlight has nothing to read.
+        verify(!policy.pollRunning(1, false));
+        // A release that ran twice must not arm the timer with a negative count.
+        verify(!policy.pollRunning(-1, true));
+    }
+
+    function test_the_poll_interval_outlasts_the_freshness_window() {
+        // Otherwise every tick would find its own last read still fresh and the
+        // timer would run without ever reading anything.
+        verify(policy.pollMs >= policy.staleMs);
+        verify(policy.staleMs > 0);
+    }
+
+    function test_a_poll_lands_inside_the_osd_attribution_window() {
+        // #175 suppresses the idle ladder's own dim by attributing a backlight
+        // change to the ladder for `attributionMs` after it claims it. A change
+        // this timer only noticed *after* that window would be announced as the
+        // user's — the pill #175 removed, back again, on the one machine with
+        // the brightness module in its bar. Two policies, one number between
+        // them, so the relationship is asserted rather than remembered.
+        verify(policy.pollMs < osd.attributionMs);
+    }
+
+    function test_both_edges_of_the_subscription_have_a_line() {
+        // #81: a subscription that logs nothing is a wakeup nobody can account
+        // for later, and a stop with no line is the half that cannot be told
+        // from a leak.
+        const line = policy.watching(2, 2000);
+        verify(line.indexOf("2") >= 0);
+        verify(line.indexOf("2000") >= 0);
+        verify(policy.idle().length > 0);
+        verify(policy.idle() !== line);
     }
 }

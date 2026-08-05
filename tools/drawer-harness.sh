@@ -432,6 +432,13 @@ expect_since "$mark" 'drawers: controlcenter opened on ' \
 expect_since "$mark" 'control-centre: [0-9]+ tile\(s\), [0-9]+ slider\(s\)' \
     'the control centre assembled its grid from the live services'
 
+# #192's line. The slider `Repeater` is latched to the *identities* of the
+# sliders rather than to their levels, and this is the latch reporting what it
+# settled on. It is asserted here so 8f can assert its silence — a line that
+# never appears proves nothing about a line that must not repeat.
+expect_since "$mark" 'control-centre: slider set: ' \
+    'the slider model latched to the sliders this machine has'
+
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then
     nested_pass 'the control centre agrees it is open'
@@ -726,6 +733,16 @@ check_press() {
     expect_since "$mark" "$pattern" "$what"
 }
 
+# #192, asserted across the whole sweep below rather than at one press. Every
+# tile pressed from here on changes a service, and each of those changes rebuilt
+# `facts` — which used to rebuild the slider model with it and destroy all three
+# ControlSlider delegates, so a re-created slider animated its fill up from
+# empty on any change anywhere in the panel. The sliders are the one thing in
+# here that cannot be driven at this seam (see 8g: they move the caller's own
+# sound card), so the proof is taken from the other side: two dozen service
+# changes, and the latch must not report a new set for any of them.
+slider_latch_mark=$(log_lines)
+
 # The three with no hardware to be missing: state and a config key, so both
 # halves are exact.
 check_press dnd 'control-centre: dnd on' 'pressing Do Not Disturb asks for it on'
@@ -783,6 +800,11 @@ nested_ipc call controlcenter back > /dev/null 2>&1
 # and a keybind that does nothing deserves the one line saying why.
 check_press nonesuch 'control-centre: nonesuch unchanged — no such control' \
     'a press for a control that does not exist explains itself'
+
+# The silence #192 bought: none of the presses above touched which sliders
+# exist, so none of them may have moved the slider model.
+expect_quiet_since "$slider_latch_mark" 'control-centre: slider set: ' \
+    'no service change rebuilt the slider model'
 
 restore_host
 

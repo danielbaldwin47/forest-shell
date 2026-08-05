@@ -45,8 +45,8 @@ python=$(command -v python3 || true)
 # is the one tool that provably cannot match a NUL.
 "$python" tst_control_bytes.py
 
-# Every click target on the bar, the drawers and the notifications shows a
-# pointer (#185). Also a tree walk rather than a QML test: these widgets pull in
+# Every click target the shell draws shows a pointer (#185). Also a tree walk
+# rather than a QML test: these widgets pull in
 # Theme and Config, which qmltestrunner cannot load, so nothing here can be
 # instantiated. It is the breadth half of the check — every target, every run —
 # and tools/cursor-harness.sh is the half that reads what the shell actually

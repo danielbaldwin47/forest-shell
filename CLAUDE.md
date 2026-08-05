@@ -53,6 +53,11 @@ pointer capability at all, so `movecursor` alone reaches no client and a hover
 is a warp plus a middle click to make `tools/nested-click.c`'s virtual pointer
 exist; and the debug log is colourised even into a file, so a pattern like
 `wl_pointer@` matches nothing and reads exactly like a shell that never asked.
+Asserting the *absence* of something needs a control the way #78's blur run did:
+a module decides its own `shown`, so a readout that hid itself leaves bare strip
+under the pointer, which is an arrow too — each readout is configured in front
+of a control that never hides, so an empty slot fails the check rather than
+passing it.
 
 This seam is also the only place the shell is ever on more than one screen.
 `NESTED_MONITORS` declares the layout and `nested_output_add` /

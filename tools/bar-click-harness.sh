@@ -239,14 +239,7 @@ start_shell() {
 ## one that exists.
 measure_bar() {
     local info
-    info=$(nested_hyprctl layers | awk '
-        /^Monitor / { mon = $2; sub(/:$/, "", mon) }
-        /forest-shell:bar/ && !found {
-            if (match($0, /xywh: [0-9-]+ [0-9-]+ [0-9-]+ [0-9-]+/)) {
-                print mon, substr($0, RSTART + 6, RLENGTH - 6)
-                found = 1
-            }
-        }')
+    info=$(nested_bar_rect)
     read -r bar_screen bar_x bar_y bar_w bar_h <<< "$info"
 
     if [[ -z "${bar_h:-}" ]]; then

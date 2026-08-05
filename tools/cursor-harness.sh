@@ -56,12 +56,15 @@
 #                                                                  the clock
 #
 # The pointer assertions are the strong half: only an interactive module asks
-# for shape 4, so they cannot pass for the wrong reason. An arrow assertion is
-# weaker by construction — a module that hid itself (no battery on a desktop)
-# leaves bare bar strip under the pointer, which is also an arrow. `clock` is in
-# pass 2 as its own control: it rolls its own hover handling, it is supposed to
-# be the pointer, and it is the one target in that pass that proves the pass is
-# aimed at modules at all.
+# for shape 4, so they cannot pass for the wrong reason. An arrow assertion
+# would be the weak half left alone — a module decides its own `shown`, and one
+# that hid itself (no battery, no battery module) leaves bare bar strip under
+# the pointer, which is also an arrow. So each readout is configured in front of
+# a control that never hides, and the hover aims at the readout's end of the
+# cluster: if the readout is absent the control takes that spot and asks for the
+# hand, so the check fails instead of passing for the wrong reason. `clock` is
+# in pass 2 as its own control — it rolls its own hover handling and is supposed
+# to be the pointer.
 set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
@@ -95,21 +98,31 @@ NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state"
 pass_label=""
 say() { printf '%s%s' "$pass_label" "$1"; }
 
-## The scratch config: one module per cluster, bar flush rather than floating.
+## The scratch config: one cluster per argument, each a comma-separated module
+## list, bar flush rather than floating.
 write_settings() {
+    local left center right
+    left=$(json_list "$1"); center=$(json_list "$2"); right=$(json_list "$3")
     cat > "$SCRATCH/config/forest-shell/settings.json" <<EOF
 {
   "bar": {
     "floating": false,
     "autoHide": false,
     "modules": {
-      "left": ["$1"],
-      "center": ["$2"],
-      "right": ["$3"]
+      "left": [$left],
+      "center": [$center],
+      "right": [$right]
     }
   }
 }
 EOF
+}
+
+## `a,b` -> `"a", "b"`.
+json_list() {
+    local out="" name
+    for name in ${1//,/ }; do out+="${out:+, }\"$name\""; done
+    printf '%s' "$out"
 }
 
 start_shell() {
@@ -122,14 +135,7 @@ start_shell() {
 
 measure_bar() {
     local info
-    info=$(nested_hyprctl layers | awk '
-        /^Monitor / { mon = $2; sub(/:$/, "", mon) }
-        /forest-shell:bar/ && !found {
-            if (match($0, /xywh: [0-9-]+ [0-9-]+ [0-9-]+ [0-9-]+/)) {
-                print mon, substr($0, RSTART + 6, RLENGTH - 6)
-                found = 1
-            }
-        }')
+    info=$(nested_bar_rect)
     read -r bar_screen bar_x bar_y bar_w bar_h <<< "$info"
 
     if [[ -z "${bar_h:-}" ]]; then
@@ -208,13 +214,33 @@ hover_is "bar dead space"           "$dead_x"   "$mid_y" "$ARROW"
 
 pass_label="[readouts] "
 nested_kill_shell
-write_settings systemMonitor clock battery
+# Each readout is put in front of a control that is never hidden — the launcher
+# on the left, the control centre on the right. That pairing is what makes an
+# arrow here mean something: a module decides its own `shown` (no battery, no
+# battery module), and a readout that hid itself would leave bare strip under
+# the pointer, which is *also* an arrow and would pass. With a canary behind it
+# the slot is never empty: if the readout is gone the control slides into the
+# spot being hovered and the check goes red rather than quietly green.
+write_settings systemMonitor,launcher clock controlCenter,battery
 start_shell || { nested_down; exit 1; }
 measure_bar || { nested_down; exit 1; }
 
 hover_is "the system monitor" "$left_x"   "$mid_y" "$ARROW"
 hover_is "the clock"          "$centre_x" "$mid_y" "$POINTER"
 hover_is "the battery"        "$right_x"  "$mid_y" "$ARROW"
+
+pass_label="[more controls] "
+nested_kill_shell
+# Two more of the nine the ticket names, and the two that are shaped differently
+# from the buttons above: the bell is a `BarIndicator` that opens a drawer, and
+# `status` is one module holding four of them (#9 groups them), so a hand here
+# is the base's gate reaching an indicator that is not a module in its own right.
+write_settings notifications status controlCenter
+start_shell || { nested_down; exit 1; }
+measure_bar || { nested_down; exit 1; }
+
+hover_is "the notification bell" "$left_x"   "$mid_y" "$POINTER"
+hover_is "a status indicator"    "$centre_x" "$mid_y" "$POINTER"
 
 nested_down
 exit $(( nested_fail_count > 0 ))

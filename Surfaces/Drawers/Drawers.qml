@@ -150,6 +150,39 @@ Singleton {
                 // through the routing table.
                 SurfaceBus.toggle(target);
         }
+
+        /// A bar indicator with a panel behind it (#184). `id` is the
+        /// indicator's own name; the panel it opens is `DrillInPolicy`'s table
+        /// and the routing is `DrawerPolicy.barIndicatorClick` — this is again
+        /// only the part that needs the state, which here is two pieces: which
+        /// drawer is open and what is drilled inside it.
+        function barIndicator(id: string): void {
+            const wanted = ControlCenterActions.drillPolicy.panelForIndicator(id);
+            const action = root.policy.barIndicatorClick(root.current,
+                                                         ControlCenterActions.panel,
+                                                         wanted);
+            if (action === "none")
+                return;
+
+            // Both of the actions that move the drawer go back out through the
+            // bus, for the reason `barClick` above gives: that is where a bar
+            // press's log line and its absent-surface warning live (#37).
+            if (action === "close") {
+                SurfaceBus.toggle("controlcenter");
+                return;
+            }
+            if (action === "open")
+                SurfaceBus.toggle("controlcenter");
+
+            // `drill` is the tiles' own verb, which toggles — and it is safe to
+            // call here because the table has already ruled out the one case
+            // where that would shut the panel again. On "open" the drawer was
+            // closed or was another drawer, and a closed control centre has no
+            // panel: Surfaces/Drawers/ControlCenter.qml takes the drilled panel
+            // down with it on destruction, so the scanner a panel holds is
+            // never left running.
+            ControlCenterActions.drill(wanted);
+        }
     }
 
     // --- hotplug -------------------------------------------------------------

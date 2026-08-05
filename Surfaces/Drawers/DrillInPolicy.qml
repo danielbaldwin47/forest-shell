@@ -96,6 +96,31 @@ QtObject {
         return id === "volume" || id === "mic" ? "audio" : "";
     }
 
+    /// The panel a *bar indicator* opens (#184), or `""` for a reading that is
+    /// only a reading. The bar's status cluster shows the same four things
+    /// three of these panels are about, and a click on one is the request the
+    /// matching tile's chevron already makes — "which network is this" gets
+    /// asked while looking at the wifi glyph, not after opening the control
+    /// centre and finding the tile.
+    ///
+    /// Its own switch rather than a call to `panelFor` and `panelForSlider`,
+    /// even though the answers agree today: those two are asked by controls
+    /// inside the control centre, where `vpn` and `wallpaper` are also answers,
+    /// and neither of those has a bar indicator. This table is also what the
+    /// pointer cursor is drawn from (Surfaces/Bar/Modules/BarIndicator.qml), so
+    /// a name answered here is a hand cursor promising a door — battery,
+    /// brightness and the system monitor have none, and building one is a
+    /// separate piece of work.
+    function panelForIndicator(indicatorId: var): string {
+        switch (String(indicatorId ?? "")) {
+        case "wifi":      return "wifi";
+        case "bluetooth": return "bluetooth";
+        case "volume":    return "audio";
+        case "mic":       return "audio";
+        }
+        return "";
+    }
+
     // --- moving between them -------------------------------------------------
 
     /// Where a request to open `name` lands, given what is open now.

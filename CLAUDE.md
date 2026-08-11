@@ -1,4 +1,10 @@
-# CLAUDE.md
+# forest-shell
+
+A Quickshell (QML) desktop shell for Hyprland — bar, launcher, lock, and
+settings surfaces launched from one `shell.qml` (`qs -p <repo>/shell.qml`).
+Decisions live in pure-QML policy objects tested offscreen; everything
+compositor-bound is verified in a nested session. Decisions worth defending:
+`docs/adr/`.
 
 ## Test seams
 

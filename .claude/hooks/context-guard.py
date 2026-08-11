@@ -14,7 +14,7 @@ zero mktemp adoption, and one 237k-token session that pulled 162KB via `cat`
 loops without a single Read call.
 
 starter-version: 2026-08-10 (claude-principles; locally tuned: NOISY_TOOLS,
-SRC_EXT, block messages keep this repo's mktemp convention)
+LAUNCHERS, SRC_EXT, block messages keep this repo's mktemp convention)
 """
 import json
 import re
@@ -22,8 +22,7 @@ import sys
 
 # The commands whose full output belongs in a log file, never in context.
 # The script names take a path prefix ([\w./-]*): they are invoked as
-# tools/nested-session.sh, ./tests/run.sh, etc., and a command-position
-# anchor without the prefix would let those sail past.
+# tools/nested-session.sh, ./tests/run.sh, etc.
 NOISY_TOOLS = (
     r"[\w./-]*(?:run\.sh|harness\.sh|nested-session\.sh|frame-budget\.sh|idle-budget\.sh)"
     r"|qmltestrunner|pytest|mypy|ruff"
@@ -41,21 +40,26 @@ if data.get("tool_name") != "Bash":
 
 cmd = data.get("tool_input", {}).get("command", "") or ""
 
-# Match against a copy with heredoc bodies and quoted strings blanked out:
-# quoted text and heredoc content are data, not commands — a commit message
-# or issue body merely mentioning pytest/cat false-positived here.
-scan = re.sub(r"<<-?\s*(['\"]?)(\w+)\1[\s\S]*?\n\2\b", "<<HEREDOC", cmd)
-scan = re.sub(r"'[^']*'", "''", scan)
+# Heredoc bodies are data, not commands; `<<-` terminators may be indented.
+HEREDOC = r"<<-?\s*(['\"]?)(\w+)\1[\s\S]*?\n[ \t]*\2\b"
+blanked = re.sub(HEREDOC, "<<HEREDOC", cmd)
+# The noisy/gh rules also blank quoted strings: a commit message merely
+# mentioning pytest is prose. The cat rules instead use a quote-STRIPPED
+# copy (quotes removed, content kept): `cat "notes.md"` is still a cat, and
+# command-position anchoring is what protects those rules from prose.
+scan = re.sub(r"'[^']*'", "''", blanked)
 scan = re.sub(r'"[^"]*"', '""', scan)
+scan_cat = re.sub(r"[\"']", "", blanked)
 
-# Anchored at command position (line start, `;`, `&`, `|`, `(`, or a backtick/
-# $( substitution), allowing env-var assignments (`NESTED_ENV=x tests/run.sh`)
-# and an optional launcher before the tool name.
-CMD_POS = r"(?:^\s*|[;&|(`\n]\s*|\$\(\s*)"
+# Command position: line start, a separator (`;`, `&`, `|`, `(`, `)`, `{`,
+# backtick, newline), a $( substitution, or a then/do/else keyword — with
+# env-var assignments (`NESTED_ENV=x tests/run.sh`) and any chain of
+# launchers allowed before the tool name.
+CMD_POS = r"(?:^\s*|[;&|(){`\n]\s*|\$\(\s*|\b(?:then|do|else)\s+)"
 NOISY = (
     CMD_POS
     + r"(?:\w+=\S+\s+)*"
-    + r"(?:" + LAUNCHERS + r")?"
+    + r"(?:" + LAUNCHERS + r")*"
     + r"(?:" + NOISY_TOOLS + r")\b"
 )
 if re.search(NOISY + r"[^|]*\|\s*(tail|head|less|more|cat)\b", scan):
@@ -69,20 +73,21 @@ if re.search(NOISY + r"[^|]*\|\s*(tail|head|less|more|cat)\b", scan):
 # gh comment pulls: the full thread is 5-7KB per call and repeats (measured
 # 2026-08-05). Piping to tail caps nothing that matters, and dropping the pipe
 # is worse — so the rule is: comments land in a file (or a --json filter),
-# never straight in context.
-if re.search(r"\bgh\s+(issue|pr)\s+view\b[^>|]*--comments", scan) and not re.search(
-    r"--comments[^|>]*>\s*\S", scan
-):
-    sys.stderr.write(
-        "Blocked (context discipline): a comment pull lands in a file, never straight in context.\n"
-        'Use: log=$(mktemp); gh issue view <n> --comments >"$log"; then grep the log — or --json comments with a jq filter.\n'
-    )
-    sys.exit(2)
+# never straight in context. Checked per pull, within that pull's own command
+# segment; a digit before `>` is an fd redirect (2>), not a landing.
+for m in re.finditer(r"\bgh\s+(issue|pr)\s+view\b[^|;&]*--comments", scan):
+    seg = re.split(r"[|;&]", scan[m.end():], 1)[0]
+    if not re.search(r"(?<!\d)>\s*\S", seg):
+        sys.stderr.write(
+            "Blocked (context discipline): a comment pull lands in a file, never straight in context.\n"
+            'Use: log=$(mktemp); gh issue view <n> --comments >"$log" — then grep the log, or --json comments with a jq filter.\n'
+        )
+        sys.exit(2)
 
 SRC_EXT = r"\.(qml|md|sh|py|js|ts|json|yml|yaml|txt|log|conf|ini)\b"
 
 # for-loop cat sweep: `for f in Core/*.qml; do cat $f; done`
-if re.search(r"\bfor\b[^;]*" + SRC_EXT + r".*\bcat\b", scan):
+if re.search(r"\bfor\b[^;]*" + SRC_EXT + r".*\bcat\b", scan_cat):
     sys.stderr.write(
         "Blocked (context discipline): a cat loop over source files is a mass whole-file Read.\n"
         "Use the Read tool per file you will edit, or grep for the lines you actually need.\n"
@@ -91,9 +96,9 @@ if re.search(r"\bfor\b[^;]*" + SRC_EXT + r".*\bcat\b", scan):
 
 # bare cat of a source file, not piped onward and not a redirect/heredoc —
 # anchored at command position so prose mentioning "cat" never matches
-for m in re.finditer(CMD_POS + r"cat\b(?:\s+-[\w]+)*((?:\s+[\w$./*-]+)+)", scan):
+for m in re.finditer(CMD_POS + r"cat\b(?:\s+-[\w]+)*((?:\s+[\w$./*-]+)+)", scan_cat):
     args = m.group(1)
-    rest = scan[m.end():]
+    rest = scan_cat[m.end():]
     if re.search(SRC_EXT, args) and not re.match(r"\s*[|>]", rest):
         sys.stderr.write(
             "Blocked (context discipline): don't cat files into context — the rules govern content entering "

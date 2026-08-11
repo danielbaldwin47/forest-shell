@@ -3,3 +3,9 @@
 
 # Python bytecode from tools/ scripts run in place
 __pycache__/
+
+# Agent workflow exhaust: per-ticket worktrees, plus scratch-log names as a
+# cross-repo safety net (this repo's own noisy-output convention is mktemp
+# in /tmp — see CLAUDE.md context discipline; never commit a log either way)
+.claude/worktrees/
+*.scratch.log

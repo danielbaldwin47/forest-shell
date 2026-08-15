@@ -208,7 +208,7 @@ TestCase {
     }
 
     function test_a_suspect_capture_says_both_numbers() {
-        const line = policy.suspectCapture(5, 10);
+        const line = policy.suspectLine(5, 10);
         verify(line.indexOf("5%") >= 0, line);
         verify(line.indexOf("10%") >= 0, line);
     }

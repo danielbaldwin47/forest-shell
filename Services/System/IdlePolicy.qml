@@ -136,12 +136,23 @@ QtObject {
         return configured > 0 ? Math.min(configured, whileLocked) : whileLocked;
     }
 
+    /// A backlight level as a percent this ladder will hand to the facade: a
+    /// whole number between 1 and 100. Shared by the two callers that produce
+    /// one — the level the screen dims *to*, and the level the wake puts back —
+    /// so a level cannot be legal for one and not the other.
+    function levelPercent(value: var): int {
+        const number = Number(value);
+        if (!isFinite(number))
+            return 1;
+        return Math.max(1, Math.min(100, Math.round(number)));
+    }
+
     /// What the screen dims *to*, as a percent.
     function dimLevel(settings: var): int {
         const value = Number(policy.stage(settings, "dim").level);
         if (!isFinite(value))
             return 10;
-        return Math.max(1, Math.min(100, Math.round(value)));
+        return policy.levelPercent(value);
     }
 
     /// What the dim remembers, so the wake can put it back (#208).
@@ -162,29 +173,23 @@ QtObject {
     /// armed at the moment a rung fires, which is the cost #186 measured and
     /// refused (a permanent backlight poll: 5.57 context switches/s against a
     /// budget of 5).
+    ///
     /// Both arguments are `var` rather than `int` deliberately: an `int`
     /// parameter coerces a missing or unreadable number to 0, which reads here
     /// as "aiming at zero" rather than as "nothing in flight".
     function capturedLevel(reading: var, aiming: var): int {
         const aim = Number(aiming);
-        const value = isFinite(aim) && aim >= 0 ? aim : Number(reading);
-        if (!isFinite(value))
-            return 1;
-        return Math.max(1, Math.min(100, Math.round(value)));
+        return policy.levelPercent(isFinite(aim) && aim >= 0 ? aim : reading);
     }
 
     /// Whether a captured level would restore the screen no brighter than the
     /// dim left it — which is not a level to restore *to*, it is a capture that
     /// has already gone wrong. #208 was reported as exactly this shape: a wake
     /// that left the screen darker than it went idle. The level is still put
-    /// back — the remembered level is the contract — but the log says so.
+    /// back — the remembered level is the contract — but the log says so
+    /// (`suspectLine`, with the rest of what a harness reads).
     function captureSuspect(captured: int, dimLevel: int): bool {
-        return Number(captured) <= Number(dimLevel);
-    }
-
-    function suspectCapture(captured: int, dimLevel: int): string {
-        return "dim captured " + captured + "%, no brighter than the dim's own "
-             + dimLevel + "% — the restore will not undo this dim";
+        return captured <= dimLevel;
     }
 
     /// A configured command as argv. Split here rather than handed to `sh -c`:
@@ -256,6 +261,12 @@ QtObject {
 
     function blocked(id: string, why: string): string {
         return id + " held off — " + why;
+    }
+
+    /// A capture `captureSuspect` refused to believe, said out loud (#208).
+    function suspectLine(captured: int, dimLevel: int): string {
+        return "dim captured " + captured + "%, no brighter than the dim's own "
+             + dimLevel + "% — the restore will not undo this dim";
     }
 
     function frozenLine(on: bool): string {

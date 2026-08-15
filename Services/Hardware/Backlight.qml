@@ -121,6 +121,13 @@ Singleton {
     /// between two levels and is neither of them, so a read taken then is not a
     /// level anybody chose. #208 is the caller: the idle dim, capturing what to
     /// restore.
+    ///
+    /// Where this stops, stated rather than left to be discovered: the process
+    /// exiting is the *write* landing, not the panel arriving. A panel that
+    /// fades is still moving after this answers -1, and a read taken inside
+    /// that window is a level nobody chose either. Not guarded, because the
+    /// guard would be a wait — and the caller is a rung firing on a machine
+    /// nobody has touched for minutes, where the last write is long over.
     function aimingAt(): int {
         if (root.queued >= 0)
             return root.queued;

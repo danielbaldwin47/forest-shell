@@ -14,9 +14,9 @@
 # is the ticket's fourth acceptance criterion, and the only one that cannot be
 # checked by reading the code.
 #
-# Two runs, because the two interesting states are mutually exclusive: once the
-# ladder has locked the session there is no way back out of it without a
-# password, and the sleep hook's whole point is what it does to an *unlocked*
+# A run per compositor, because the interesting states are mutually exclusive:
+# once the ladder has locked the session there is no way back out of it without
+# a password, and the sleep hook's whole point is what it does to an *unlocked*
 # one.
 #
 #   run 1 — the ladder. It blanks the screen on its own timeout and puts it back
@@ -51,6 +51,7 @@
 # couple of seconds while it runs.
 #
 # ## What is deliberately not driven, and why
+#
 #   - **`loginctl lock-session`.** The nested shell inherits `XDG_SESSION_ID`,
 #     so that command would lock the *real* session, which is what this whole
 #     seam exists to avoid. What routes through it is the session menu's Lock
@@ -168,12 +169,22 @@ restart_session() {
     nested_up || return 1
 }
 
+## The scratch config every run writes into, and the environment that points the
+## shell at it rather than at the config of the session running the harness.
+##
+## Re-declared per run rather than once, because `$NESTED_WORK` is a fresh
+## directory each time `restart_session` brings a compositor up — a run that
+## kept the old paths would be editing a settings.json nothing reads.
+scratch_config() {
+    SCRATCH="$NESTED_WORK/xdg"
+    mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+    NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+    SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+}
+
 nested_up || exit 1
 
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 
 ## Timeouts in minutes, as the schema takes them: 0.05 is three seconds. The dim
 ## rung is off — it would dim the host's panel — and both commands that would
@@ -252,12 +263,15 @@ print(round(raw / mx * 100))
 " "$(cat "/sys/class/backlight/$1/actual_brightness")" "$(cat "/sys/class/backlight/$1/max_brightness")"
 }
 
-## The first backlight this machine has, or nothing. Both files have to be
-## readable: a device that cannot be read is a device this check cannot judge.
+## The first backlight this machine has, or nothing. All three files have to be
+## readable: a device that cannot be read is a device this check cannot judge,
+## and `brightness` is the one the put-back is taken from — an unreadable one
+## would leave the restore with nothing to write and the panel dim.
 backlight_device() {
     local path
     for path in /sys/class/backlight/*; do
-        if [[ -r "$path/actual_brightness" && -r "$path/max_brightness" ]]; then
+        if [[ -r "$path/actual_brightness" && -r "$path/max_brightness" \
+                && -r "$path/brightness" ]]; then
             basename "$path"
             return 0
         fi
@@ -438,10 +452,7 @@ expect_since "$mark" 'lock: compositor confirms all screens covered' \
 # calls, because the alternative is suspending the machine running the tests.
 
 restart_session || exit 1
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 write_settings false
 nested_shell shell.qml 'idle: ladder armed' || exit 1
 
@@ -568,10 +579,7 @@ logind resume > /dev/null
 # onto the same code path: a timeout widened under the running, locked shell.
 
 restart_session || exit 1
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 write_locked_dpms_settings 1 5
 nested_shell shell.qml 'idle: ladder armed' || exit 1
 
@@ -640,13 +648,30 @@ elif ! device=$(backlight_device); then
     nested_note 'no readable backlight on this machine — the dim rung checks are skipped'
 else
     was_raw=$(cat "/sys/class/backlight/$device/brightness")
+    max_raw=$(cat "/sys/class/backlight/$device/max_brightness")
+    # Nothing below runs until the way back is known: a put-back with an empty
+    # or nonsensical value is a `brightnessctl set ""` that reports nothing and
+    # abandons the panel at the dim level.
+    if [[ -z "$was_raw" || -z "$max_raw" ]] || (( max_raw <= 0 )); then
+        nested_note "the backlight $device answers nothing readable — the dim rung checks are skipped"
+        CHECK_BACKLIGHT=0
+    # And that it can be written, which is a different question from whether it
+    # can be read: a udev rule or a missing seat leaves a panel readable and
+    # refused. Asked by writing the value it is already at, so the probe moves
+    # nothing. A machine that refuses this is one this check cannot run on
+    # rather than one it has caught something on — the same reading check 6 of
+    # tools/services-harness.sh gives a `brightnessctl` that refuses.
+    elif ! brightnessctl -q -d "$device" set "$was_raw" > /dev/null 2>&1; then
+        nested_note "brightnessctl cannot write $device here — the dim rung checks are skipped"
+        CHECK_BACKLIGHT=0
+    fi
+fi
+
+if (( CHECK_BACKLIGHT )) && [[ -n "${device:-}" ]]; then
     trap 'brightnessctl -q -d "$device" set "$was_raw" 2>/dev/null; nested_down' EXIT
 
     restart_session || exit 1
-    SCRATCH="$NESTED_WORK/xdg"
-    mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-    NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-    SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+    scratch_config
     write_dim_settings false
     nested_shell shell.qml 'idle: ladder armed' || exit 1
     nested_await "$NESTED_SHELL_LOG" 'startup: stage interactive' 20 \

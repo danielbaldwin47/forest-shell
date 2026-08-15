@@ -144,6 +144,49 @@ QtObject {
         return Math.max(1, Math.min(100, Math.round(value)));
     }
 
+    /// What the dim remembers, so the wake can put it back (#208).
+    ///
+    /// Two numbers, because the panel has two truths at the moment a rung
+    /// fires. `reading` is the panel as sysfs says it is *now* — a fresh read,
+    /// not the facade's cached percent, which is the whole of #208: sysfs
+    /// announces nothing, so anything outside the shell may have moved the
+    /// panel since the last read and the remembered level would be a number
+    /// nobody had checked. `aiming` is the level a queued or running write is
+    /// on its way to, or -1 for none.
+    ///
+    /// When a write is in flight the reading is worth nothing — `actual_bright-
+    /// ness` is between the two levels and is neither of them — so the choice
+    /// is to wait for it to settle or to take the level it aims at. This repo
+    /// takes the aim: it is a level somebody just chose, so it is exactly what
+    /// a restore owes them, and waiting would mean a timer or a subscription
+    /// armed at the moment a rung fires, which is the cost #186 measured and
+    /// refused (a permanent backlight poll: 5.57 context switches/s against a
+    /// budget of 5).
+    /// Both arguments are `var` rather than `int` deliberately: an `int`
+    /// parameter coerces a missing or unreadable number to 0, which reads here
+    /// as "aiming at zero" rather than as "nothing in flight".
+    function capturedLevel(reading: var, aiming: var): int {
+        const aim = Number(aiming);
+        const value = isFinite(aim) && aim >= 0 ? aim : Number(reading);
+        if (!isFinite(value))
+            return 1;
+        return Math.max(1, Math.min(100, Math.round(value)));
+    }
+
+    /// Whether a captured level would restore the screen no brighter than the
+    /// dim left it — which is not a level to restore *to*, it is a capture that
+    /// has already gone wrong. #208 was reported as exactly this shape: a wake
+    /// that left the screen darker than it went idle. The level is still put
+    /// back — the remembered level is the contract — but the log says so.
+    function captureSuspect(captured: int, dimLevel: int): bool {
+        return Number(captured) <= Number(dimLevel);
+    }
+
+    function suspectCapture(captured: int, dimLevel: int): string {
+        return "dim captured " + captured + "%, no brighter than the dim's own "
+             + dimLevel + "% — the restore will not undo this dim";
+    }
+
     /// A configured command as argv. Split here rather than handed to `sh -c`:
     /// the config holds a command, and routing it through a shell brings that
     /// shell's quoting, globbing and word-splitting along with it for no gain —

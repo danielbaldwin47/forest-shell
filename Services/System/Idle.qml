@@ -128,8 +128,26 @@ Singleton {
             Logger.log("idle", root.policy.blocked("dim", "no backlight on this machine"));
             return;
         }
-        root.dimmedFrom = Backlight.percent;
+        // Ask the panel rather than remember it (#208). `Backlight.percent` is
+        // only as good as the last read, and sysfs announces nothing — a
+        // `brightnessctl` from a script, a key the kernel handled, the panel's
+        // own restore across a suspend, and the cached value is behind the
+        // hardware. The dim then stores the stale number and the wake
+        // faithfully restores it, which is the screen ending up darker than it
+        // went idle. This is the same discipline a step uses and for the same
+        // reason: a caller that computes from the level must not be handed a
+        // remembered one. Unconditional, not `refreshIfStale()`.
+        //
+        // `reading()` and not `percent` after the read, because the read is
+        // synchronous but the binding on it is not — `percent` here would still
+        // be the value the read was for.
+        const aiming = Backlight.aimingAt();
+        if (aiming < 0)
+            Backlight.readNow();
+        root.dimmedFrom = root.policy.capturedLevel(Backlight.reading(), aiming);
         const level = root.policy.dimLevel(root.settings);
+        if (root.policy.captureSuspect(root.dimmedFrom, level))
+            Logger.warn("idle", root.policy.suspectCapture(root.dimmedFrom, level));
         root.claimBacklight(level);
         Logger.log("idle", root.policy.reached("dim", "backlight " + root.dimmedFrom
                                                + "% → " + level + "%"));

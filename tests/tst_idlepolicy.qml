@@ -163,6 +163,56 @@ TestCase {
         compare(policy.dpmsSeconds(settings, true, true), 360);
     }
 
+    // --- the pre-dim capture (#208) ------------------------------------------
+    //
+    // What the dim remembers, so the wake can put it back. #208 is the case
+    // where it remembered a number nobody had checked against the panel: the
+    // capture read the facade's cached percent, anything outside the shell may
+    // have moved the panel since, and the wake faithfully restored the stale
+    // number — landing the screen darker than it went idle.
+
+    function test_a_settled_capture_is_the_panel_the_read_just_returned() {
+        // Nothing in flight, so the fresh read is the whole answer.
+        compare(policy.capturedLevel(65, -1), 65);
+        compare(policy.capturedLevel(3, -1), 3);
+    }
+
+    function test_a_capture_taken_mid_write_takes_the_level_being_aimed_at() {
+        // The panel is between two levels while a write is queued or running —
+        // `actual_brightness` is neither of them — so the reading is not the
+        // thing to remember. The level the write is aiming at is one somebody
+        // just chose, which is exactly what a restore owes them.
+        compare(policy.capturedLevel(42, 80), 80);
+        // Including when the write is aiming *down*: the reading is still the
+        // level being left behind, not the one being chosen.
+        compare(policy.capturedLevel(90, 20), 20);
+    }
+
+    function test_a_capture_is_a_percent_whatever_it_was_handed() {
+        // Both arguments come off a facade that can answer before its probe
+        // has, so neither is trusted to be a sane percent.
+        compare(policy.capturedLevel(0, -1), 1);
+        compare(policy.capturedLevel(140, -1), 100);
+        compare(policy.capturedLevel(NaN, -1), 1);
+        compare(policy.capturedLevel(50, NaN), 50);
+    }
+
+    function test_a_restore_at_or_below_the_dim_level_is_a_capture_gone_wrong() {
+        // The symptom #208 was reported as: a wake that leaves the screen no
+        // brighter than the dim did. It is still applied — the remembered level
+        // is the contract — but it never happens silently again.
+        verify(policy.captureSuspect(10, 10));
+        verify(policy.captureSuspect(5, 10));
+        verify(!policy.captureSuspect(11, 10));
+        verify(!policy.captureSuspect(65, 10));
+    }
+
+    function test_a_suspect_capture_says_both_numbers() {
+        const line = policy.suspectLine(5, 10);
+        verify(line.indexOf("5%") >= 0, line);
+        verify(line.indexOf("10%") >= 0, line);
+    }
+
     // --- suspend: the gate, and the guarantee --------------------------------
 
     function test_audio_blocks_suspend_and_nothing_else() {

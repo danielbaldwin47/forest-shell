@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run the idle ladder and the logind bridge inside a nested Hyprland (#48).
 #
-#   tools/idle-harness.sh          # run the checks, print PASS/FAIL, exit 0/1
-#   tools/idle-harness.sh --keep   # leave the nested session up to poke at
+#   tools/idle-harness.sh                # run the checks, print PASS/FAIL, exit 0/1
+#   tools/idle-harness.sh --keep         # leave the nested session up to poke at
+#   tools/idle-harness.sh --no-backlight # skip run 4, the one that dims this screen
 #
 # This is the second seam (CLAUDE.md). Every *rule* the ladder has is a pure
 # function in `tests/tst_idlepolicy.qml` — the stage table, the AC/battery
@@ -13,9 +14,9 @@
 # is the ticket's fourth acceptance criterion, and the only one that cannot be
 # checked by reading the code.
 #
-# Two runs, because the two interesting states are mutually exclusive: once the
-# ladder has locked the session there is no way back out of it without a
-# password, and the sleep hook's whole point is what it does to an *unlocked*
+# A run per compositor, because the interesting states are mutually exclusive:
+# once the ladder has locked the session there is no way back out of it without
+# a password, and the sleep hook's whole point is what it does to an *unlocked*
 # one.
 #
 #   run 1 — the ladder. It blanks the screen on its own timeout and puts it back
@@ -32,13 +33,25 @@
 #           dpms rung tightens to `lockedSeconds` while the session is locked
 #           (#30), and did not (#142). A fresh compositor again, because run 2
 #           ends locked for the same reason run 1 does.
+#   run 4 — the dim rung, which is the one rung that moves the machine's own
+#           hardware, and #208 is why it is now driven anyway. See below.
+#
+# ## Run 4 dims the screen you are sitting in front of
+#
+# The nested shell reads and writes the host's `/sys`, so a real dim in here
+# dims the panel of the session running the harness — which is why runs 1–3
+# leave the rung off and check only that the ladder says so. #208 is a defect
+# that lives entirely in what the rung *captures* before it dims, so nothing
+# short of a real dim reproduces it.
+#
+# Run 4 therefore takes the same bargain check 6 of tools/services-harness.sh
+# takes: it moves the machine's own backlight, puts it back raw-for-raw on the
+# way out, skips itself cleanly on a machine with no backlight, and
+# `--no-backlight` skips it outright. Expect the screen to dim to 10% for a
+# couple of seconds while it runs.
 #
 # ## What is deliberately not driven, and why
 #
-#   - **the dim rung.** The nested shell reads the host's `/sys`, so a real dim
-#     in here would dim the screen of the session running the harness — the same
-#     argument tools/osd-harness.sh makes about the host's PipeWire. The rung is
-#     turned off in the scratch config and the check is that it says so.
 #   - **`loginctl lock-session`.** The nested shell inherits `XDG_SESSION_ID`,
 #     so that command would lock the *real* session, which is what this whole
 #     seam exists to avoid. What routes through it is the session menu's Lock
@@ -54,9 +67,11 @@ set -uo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nested-session.sh"
 
+CHECK_BACKLIGHT=1
 for arg in "$@"; do
     case "$arg" in
         --keep) NESTED_KEEP=1 ;;
+        --no-backlight) CHECK_BACKLIGHT=0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -154,12 +169,22 @@ restart_session() {
     nested_up || return 1
 }
 
+## The scratch config every run writes into, and the environment that points the
+## shell at it rather than at the config of the session running the harness.
+##
+## Re-declared per run rather than once, because `$NESTED_WORK` is a fresh
+## directory each time `restart_session` brings a compositor up — a run that
+## kept the old paths would be editing a settings.json nothing reads.
+scratch_config() {
+    SCRATCH="$NESTED_WORK/xdg"
+    mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
+    NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
+    SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+}
+
 nested_up || exit 1
 
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 
 ## Timeouts in minutes, as the schema takes them: 0.05 is three seconds. The dim
 ## rung is off — it would dim the host's panel — and both commands that would
@@ -203,6 +228,55 @@ write_locked_dpms_settings() {
   }
 }
 EOF
+}
+
+## Run 4's ladder: the dim rung and nothing else, so the only thing that can
+## touch the panel inside the window is the rung under test. `$1` is whether the
+## dim rung is armed — run 4 comes up with it off, moves the panel from outside
+## the shell, and only then turns it on, because the shell reads the panel when
+## it starts and the defect needs a panel that moved *after* that read.
+write_dim_settings() {
+    cat > "$SETTINGS" <<EOF
+{
+  "system": {
+    "session": { "commands": { "suspend": "true" } },
+    "idle": {
+      "dim": { "enabled": $1, "battery": 0.05, "ac": 0.05, "level": 10 },
+      "lock": { "enabled": false },
+      "dpms": { "enabled": false, "offCommand": "true", "onCommand": "true" },
+      "suspend": { "enabled": false, "battery": 0, "ac": 0 }
+    }
+  }
+}
+EOF
+}
+
+## The panel as a percent, read the way the backlight service reads it —
+## `actual_brightness` over `max_brightness`, which is what the shell's log line
+## is a rounding of. Same three lines as check 6 of tools/services-harness.sh,
+## and for the same reason: it is asked for more than once.
+panel_percent() {
+    python3 -c "
+import sys
+raw, mx = int(sys.argv[1]), int(sys.argv[2])
+print(round(raw / mx * 100))
+" "$(cat "/sys/class/backlight/$1/actual_brightness")" "$(cat "/sys/class/backlight/$1/max_brightness")"
+}
+
+## The first backlight this machine has, or nothing. All three files have to be
+## readable: a device that cannot be read is a device this check cannot judge,
+## and `brightness` is the one the put-back is taken from — an unreadable one
+## would leave the restore with nothing to write and the panel dim.
+backlight_device() {
+    local path
+    for path in /sys/class/backlight/*; do
+        if [[ -r "$path/actual_brightness" && -r "$path/max_brightness" \
+                && -r "$path/brightness" ]]; then
+            basename "$path"
+            return 0
+        fi
+    done
+    return 1
 }
 
 write_settings false
@@ -378,10 +452,7 @@ expect_since "$mark" 'lock: compositor confirms all screens covered' \
 # calls, because the alternative is suspending the machine running the tests.
 
 restart_session || exit 1
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 write_settings false
 nested_shell shell.qml 'idle: ladder armed' || exit 1
 
@@ -508,10 +579,7 @@ logind resume > /dev/null
 # onto the same code path: a timeout widened under the running, locked shell.
 
 restart_session || exit 1
-SCRATCH="$NESTED_WORK/xdg"
-mkdir -p "$SCRATCH/config/forest-shell" "$SCRATCH/state"
-NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state")
-SETTINGS="$SCRATCH/config/forest-shell/settings.json"
+scratch_config
 write_locked_dpms_settings 1 5
 nested_shell shell.qml 'idle: ladder armed' || exit 1
 
@@ -551,7 +619,149 @@ mark=$(log_lines)
 refute_since "$mark" 'idle: idle: dpms — screen off' \
     'a widened timeout really widens — the rung is not stuck on the tighter clock' 150
 
-# --- 11. nothing is fighting itself -------------------------------------------
+# --- 11. run 4: the dim remembers the panel, not the cache (#208) ------------
+#
+# The defect: the pre-dim capture read the backlight facade's cached percent.
+# sysfs announces nothing — a `brightnessctl` from a script, a brightness key
+# the kernel handled, the panel's own restore across a suspend, and the cache
+# sits behind the hardware until something asks it to read again. The dim then
+# stored the stale number and the wake faithfully restored it, which put the
+# screen at a level nobody had chosen: reported as "even darker than when it was
+# idle".
+#
+# The shape of the reproduction is the whole check. The shell reads the panel
+# when it starts, so it starts *correct*; the rung is armed only after an
+# external `brightnessctl` has moved the panel underneath it. An unfixed shell
+# then dims from the level it read at startup and restores to that; a fixed one
+# reads the panel at the moment the rung fires and restores what is really
+# there.
+#
+# This is the run that moves the machine's own hardware — see the header. The
+# EXIT trap is replaced first so that a failure between the dim and the restore
+# still hands the panel back.
+
+if (( ! CHECK_BACKLIGHT )); then
+    nested_note 'the dim rung is skipped by request — this screen is left alone'
+elif ! command -v brightnessctl > /dev/null; then
+    nested_note 'no brightnessctl on this machine — the dim rung checks are skipped'
+elif ! device=$(backlight_device); then
+    nested_note 'no readable backlight on this machine — the dim rung checks are skipped'
+else
+    was_raw=$(cat "/sys/class/backlight/$device/brightness")
+    max_raw=$(cat "/sys/class/backlight/$device/max_brightness")
+    # Nothing below runs until the way back is known: a put-back with an empty
+    # or nonsensical value is a `brightnessctl set ""` that reports nothing and
+    # abandons the panel at the dim level.
+    if [[ -z "$was_raw" || -z "$max_raw" ]] || (( max_raw <= 0 )); then
+        nested_note "the backlight $device answers nothing readable — the dim rung checks are skipped"
+        CHECK_BACKLIGHT=0
+    # And that it can be written, which is a different question from whether it
+    # can be read: a udev rule or a missing seat leaves a panel readable and
+    # refused. Asked by writing the value it is already at, so the probe moves
+    # nothing. A machine that refuses this is one this check cannot run on
+    # rather than one it has caught something on — the same reading check 6 of
+    # tools/services-harness.sh gives a `brightnessctl` that refuses.
+    elif ! brightnessctl -q -d "$device" set "$was_raw" > /dev/null 2>&1; then
+        nested_note "brightnessctl cannot write $device here — the dim rung checks are skipped"
+        CHECK_BACKLIGHT=0
+    fi
+fi
+
+if (( CHECK_BACKLIGHT )) && [[ -n "${device:-}" ]]; then
+    trap 'brightnessctl -q -d "$device" set "$was_raw" 2>/dev/null; nested_down' EXIT
+
+    restart_session || exit 1
+    scratch_config
+    write_dim_settings false
+    nested_shell shell.qml 'idle: ladder armed' || exit 1
+    nested_await "$NESTED_SHELL_LOG" 'startup: stage interactive' 20 \
+        || nested_note 'the shell never said it was interactive'
+    sleep 2
+
+    # Where the shell believes the panel is: the level it read on the way up.
+    started_at=$(panel_percent "$device")
+
+    # And where the panel actually goes, from outside the shell entirely. Far
+    # enough from the startup level that a capture off the cache cannot pass by
+    # rounding, and well above the 10% the dim itself lands on.
+    external=$(( started_at < 50 ? 70 : 30 ))
+    brightnessctl -q -d "$device" set "${external}%" > /dev/null 2>&1
+    sleep 0.5
+    ext_percent=$(panel_percent "$device")
+
+    if (( ext_percent > 15 )) && (( ext_percent < started_at - 5 || ext_percent > started_at + 5 )); then
+        nested_note "panel moved from outside the shell: ${started_at}% → ${ext_percent}%"
+    else
+        nested_fail "the external change did not take (${started_at}% → ${ext_percent}%)"
+    fi
+
+    # A percent is a rounding of a raw value, and the shell rounds its own read
+    # of `actual_brightness` while the panel may still be a notch off it. One
+    # either side, in the log line and in the round trip below.
+    ext_re="($((ext_percent - 1))|$ext_percent|$((ext_percent + 1)))"
+
+    mark=$(log_lines)
+    write_dim_settings true
+    expect_since "$mark" 'idle: ladder on (ac|battery): dim 3s' \
+        'the dim rung arms under the running shell' 120
+
+    expect_since "$mark" "idle: idle: dim — backlight $ext_re% → 10%" \
+        'the dim captures the panel as it is now, not the level the shell last read' 200
+    expect_reply "$(idle isDimmed)" 'true' 'and the shell knows the screen is dim'
+
+    # #175: the ladder's own dim is not an OSD event. The stamp is written by
+    # `claimBacklight`, and a capture that reads the panel first must not have
+    # moved it — a read that showed up as a set would announce itself here.
+    expect_since "$mark" "osd: brightness 10% — the idle ladder's own change, not showing" \
+        'the OSD stays quiet through the dim the ladder did itself' 120
+    if since "$mark" | grep -qaE 'osd: brightness [0-9]+% — showing'; then
+        nested_fail "the OSD announced the ladder's own change: \
+$(since "$mark" | grep -aE 'osd: brightness [0-9]+% — showing' | head -1)"
+    else
+        nested_pass 'and nothing else on the brightness channel showed either'
+    fi
+
+    # The panel really went down, off sysfs rather than off the shell's report of
+    # itself. `actual_brightness` follows the write rather than arriving with it.
+    for _ in $(seq 1 30); do
+        dimmed_percent=$(panel_percent "$device")
+        (( dimmed_percent <= 12 )) && break
+        sleep 0.1
+    done
+    if (( dimmed_percent <= 12 )); then
+        nested_pass "the panel itself went to the dim level (${dimmed_percent}%)"
+    else
+        nested_fail "the panel is at ${dimmed_percent}%, not the configured dim level of 10%"
+    fi
+
+    # The wake is driven through the IPC door for the reason check 2 gives:
+    # nothing a script can send resets `ext-idle-notify-v1` in a nested session,
+    # and `wake()` runs the same `undim()` the monitor's own activity runs.
+    mark=$(log_lines)
+    idle wake > /dev/null
+    expect_since "$mark" "idle: activity: dim — backlight back to $ext_re%" \
+        'the wake restores the level that was really on the panel before the dim'
+    expect_reply "$(idle isDimmed)" 'false' 'and the shell knows the dim is undone'
+
+    for _ in $(seq 1 30); do
+        woke_percent=$(panel_percent "$device")
+        (( woke_percent >= ext_percent - 1 && woke_percent <= ext_percent + 1 )) && break
+        sleep 0.1
+    done
+    if (( woke_percent >= ext_percent - 1 && woke_percent <= ext_percent + 1 )); then
+        nested_pass "the round trip closed on the panel itself (${woke_percent}%, was ${ext_percent}%)"
+    else
+        nested_fail "the panel came back at ${woke_percent}%, not the ${ext_percent}% it went idle at"
+    fi
+
+    # Back to the raw value and not the percent, because a percent is a rounding
+    # of it and the machine is left exactly as it was found.
+    brightnessctl -q -d "$device" set "$was_raw" > /dev/null 2>&1
+    trap nested_down EXIT
+    nested_note "panel put back to raw $was_raw"
+fi
+
+# --- 12. nothing is fighting itself -------------------------------------------
 
 if grep -qa 'Binding loop' "$NESTED_SHELL_LOG"; then
     nested_fail "a binding loop was reported: $(grep -a 'Binding loop' "$NESTED_SHELL_LOG" | head -1)"

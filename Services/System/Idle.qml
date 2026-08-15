@@ -104,8 +104,21 @@ Singleton {
     /// rung that dimmed on its own would otherwise put #175 back with nothing
     /// failing.
     function claimBacklight(percent: int): void {
-        root.backlightClaimedAt = Date.now();
+        root.stampBacklightClaim();
         Backlight.setPercent(percent);
+    }
+
+    /// Stamp without moving anything, for the one thing this file does to the
+    /// backlight that is not a write: the read the dim takes first (#208).
+    ///
+    /// A read moves no panel, but it does move `Backlight.percent` — from the
+    /// stale cache to what the panel really is — and that is a change the OSD
+    /// sees. Unstamped, an external change the shell had not noticed would pop
+    /// the OSD at the moment the ladder dimmed, which is #175's bug reached
+    /// through the door #208 opened. So the claim covers the read as well as
+    /// the write: the whole sequence is the ladder's own doing.
+    function stampBacklightClaim(): void {
+        root.backlightClaimedAt = Date.now();
     }
 
     // --- dim ------------------------------------------------------------------
@@ -128,8 +141,33 @@ Singleton {
             Logger.log("idle", root.policy.blocked("dim", "no backlight on this machine"));
             return;
         }
-        root.dimmedFrom = Backlight.percent;
+        // Ask the panel rather than remember it (#208). `Backlight.percent` is
+        // only as good as the last read, and sysfs announces nothing — a
+        // `brightnessctl` from a script, a key the kernel handled, the panel's
+        // own restore across a suspend, and the cached value is behind the
+        // hardware. The dim then stores the stale number and the wake
+        // faithfully restores it, which is the screen ending up darker than it
+        // went idle. This is the same discipline a step uses and for the same
+        // reason: a caller that computes from the level must not be handed a
+        // remembered one. Taken every time there is a read to take, rather than
+        // through `refreshIfStale()` — a remembered level is exactly what is
+        // wrong here, so no staleness window makes one acceptable.
+        //
+        // `reading()` and not `percent` after the read, because the read is
+        // synchronous but the binding on it is not — `percent` here would still
+        // be the value the read was for.
+        //
+        // The stamp goes first, before anything can move: the read itself
+        // publishes a new `percent` when the panel has moved behind the shell's
+        // back, and that is the OSD's cue (#175).
+        root.stampBacklightClaim();
+        const aiming = Backlight.aimingAt();
+        if (aiming < 0)
+            Backlight.readNow();
+        root.dimmedFrom = root.policy.capturedLevel(Backlight.reading(), aiming);
         const level = root.policy.dimLevel(root.settings);
+        if (root.policy.captureSuspect(root.dimmedFrom, level))
+            Logger.warn("idle", root.policy.suspectLine(root.dimmedFrom, level));
         root.claimBacklight(level);
         Logger.log("idle", root.policy.reached("dim", "backlight " + root.dimmedFrom
                                                + "% → " + level + "%"));
@@ -145,7 +183,12 @@ Singleton {
         const restore = root.dimmedFrom;
         root.dimmedFrom = -1;
         root.claimBacklight(restore);
-        Logger.log("idle", root.policy.woke("dim", "backlight back to " + restore + "%"));
+        // Both numbers, the way the dim line carries both: "back to 70%" alone
+        // reads the same whether the capture was right or wrong, and #208 was a
+        // week of not being able to tell which from the log.
+        Logger.log("idle", root.policy.woke("dim", "backlight back to " + restore
+                                            + "% from the dim's "
+                                            + root.policy.dimLevel(root.settings) + "%"));
     }
 
     // --- lock -----------------------------------------------------------------

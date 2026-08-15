@@ -25,7 +25,7 @@ behaviour, hardware the other machine lacks, or a power-source condition. A
 ticket merely *found* on one machine but reproducible anywhere (e.g. a PATH or
 packaging issue) gets no hardware label. Unlabelled means machine-agnostic. A
 session picking up a ticket with a hardware label it is not running on should
-say so rather than fake the acceptance elsewhere.
+say so on the ticket and leave that acceptance unrun.
 
 ## Pull requests as a triage surface
 

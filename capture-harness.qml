@@ -726,9 +726,12 @@ ShellRoot {
 
             function describe(): void {
                 root.sceneDescription =
-                    "tiles=" + centre.tiles.length
-                    + " rows=" + centre.tileRows.length
-                    + " sliders=" + centre.sliderRows.length
+                    // Off the latched models (#192, #195), which is also what
+                    // the panel draws from. `centre.sliderRows` was left
+                    // behind by #192's latch and read `undefined` here.
+                    "tiles=" + (centre.tileIds ?? []).length
+                    + " rows=" + centre.tileIdRows.length
+                    + " sliders=" + (centre.sliderIds ?? []).length
                     + " mode=" + (Theme.dark ? "dark" : "light")
                     + " drill=" + (ControlCenterActions.panel || "none")
                     + " panel=" + root.region(centre.panelItem, controlBackdrop)

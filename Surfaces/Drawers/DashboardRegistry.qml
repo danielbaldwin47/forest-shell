@@ -52,6 +52,11 @@ QtObject {
     /// So the dashboard compares before it assigns, and this is the comparison.
     /// Order is part of it — reordering the cards *is* a change — which is why
     /// this is not a set difference.
+    ///
+    /// `ControlCenterPolicy.sameIds` is the same loop for the same reason, and
+    /// `DrawerPolicy.sameScreens` is the set-shaped one;
+    /// docs/adr/0003-list-identity-loops-stay-put.md is why the three are not
+    /// one function.
     function same(before: var, after: var): bool {
         const a = Array.isArray(before) ? before : [];
         const b = Array.isArray(after) ? after : [];

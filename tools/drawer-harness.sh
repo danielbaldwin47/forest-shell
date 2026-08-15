@@ -449,6 +449,14 @@ expect_since "$mark" 'control-centre: slider set: ' \
 expect_since "$mark" 'control-centre: slider [a-z]+ built' \
     'and the sliders behind it were built'
 
+# #195's pair, and the same argument one Repeater over: the grid is latched to
+# tile ids, and these are the latch and the delegates behind it saying so. Both
+# have to be seen here for 8f's silences to mean anything.
+expect_since "$mark" 'control-centre: tile set: ' \
+    'the tile model latched to the tiles this machine has'
+expect_since "$mark" 'control-centre: tile [a-z]+ built' \
+    'and the tiles behind it were built'
+
 # #186's subscription, on the machine that has one. sysfs never announces a
 # brightness the shell did not set — the value is a poll() wakeup rather than an
 # inotify event — so the panel's level was whatever the shell last wrote, and
@@ -518,6 +526,24 @@ expect_quiet_since "$slider_mark" 'control-centre: slider set: ' \
 # birth. Silent only if the delegates genuinely survived the change.
 expect_quiet_since "$slider_mark" 'control-centre: slider [a-z]+ built' \
     'and does not rebuild a slider, so no fill replays from empty'
+
+# #195, and `dnd` and `mode` are *tiles*, so this sweep drives the grid twice
+# each way. The first of the two is the one that bites, and it was measured
+# biting: a `refreshTileIds` comparing references instead of contents fails it
+# eight times over here, because `tiles()` returns a fresh array every tick and
+# a `mode` press writes a config key, which hands `tileOrder` a new array of
+# the same strings by the second path into the latch.
+expect_quiet_since "$slider_mark" 'control-centre: tile set: ' \
+    'a toggle flipping does not move the tile model'
+# Weaker than it reads, and worth saying so rather than letting it be quoted as
+# proof. Measured on this harness: reassigning the model a *same-length* array
+# updates the delegates in place — 8 reassignments produced 0 extra builds — so
+# this line stays silent for an unlatched grid too, and it is only a real check
+# when the tile count moves. What it guards is a future model whose length
+# thrashes; the claim that a live delegate keeps its `Behavior` is carried by
+# the shape of the code and by a real session, not by this.
+expect_quiet_since "$slider_mark" 'control-centre: tile [a-z]+ built' \
+    'and does not rebuild a tile, so the lit/unlit fade gets to run'
 
 reply=$(nested_ipc call controlcenter isOpen)
 if grep -qa 'true' <<< "$reply"; then

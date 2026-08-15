@@ -151,6 +151,12 @@ QtObject {
     /// Quickshell re-emits its screen list for reasons that are not a cable
     /// moving, and closing the drawer under the user's hand for one of those
     /// would be worse than the state it is meant to reset.
+    ///
+    /// The sort is what separates this from `DashboardRegistry.same` and
+    /// `ControlCenterPolicy.sameIds`, which compare in order because a
+    /// reordered `Repeater` model has to reset;
+    /// docs/adr/0003-list-identity-loops-stay-put.md is why the three are not
+    /// one function.
     function sameScreens(before: var, after: var): bool {
         const a = (before ?? []).slice().sort();
         const b = (after ?? []).slice().sort();

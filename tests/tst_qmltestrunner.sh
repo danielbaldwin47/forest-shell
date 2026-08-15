@@ -83,6 +83,17 @@ check_verdict 'empty linkage is unknown' '' 'unknown' 1
 check_verdict "ldd's own error is unknown" \
     '	not a dynamic executable' 'unknown' 1
 
+# ldd does not promise an order, so a binary naming two Qt majors must not get
+# its verdict from whichever line came out first — that is a runner that is
+# accepted on one machine and refused on the next. Any non-Qt6 Qt in there is a
+# binary that cannot be trusted with this suite, whichever end it is read from.
+mixed_ldd='	libQt6Qml.so.6 => /usr/lib/libQt6Qml.so.6 (0x1)
+	libQt5Qml.so.5 => /usr/lib/libQt5Qml.so.5 (0x2)'
+check_verdict 'Qt5 alongside Qt6 is refused, Qt6 line first' "$mixed_ldd" 'qt5' 1
+check_verdict 'Qt5 alongside Qt6 is refused, Qt5 line first' \
+    '	libQt5Qml.so.5 => /usr/lib/libQt5Qml.so.5 (0x2)
+	libQt6Qml.so.6 => /usr/lib/libQt6Qml.so.6 (0x1)' 'qt5' 1
+
 # A future Qt7 runner is not this suite's runner either, and must not read as
 # unknown — unknown is the "cannot tell" fallback, and a Qt7 binary is a thing
 # we can tell.
@@ -159,6 +170,20 @@ QMLTESTRUNNER="$fake_root/elsewhere/qmltestrunner" \
 
 QMLTESTRUNNER="$fake_root/nonexistent/qmltestrunner" \
     check_resolve 'an override that is not there fails rather than falling back' '' 1
+
+# A refused override says where a working runner would have been found, for the
+# same reason the search's refusal does: the reader is one path away from a
+# green suite and should not have to read this file to learn which path.
+fake_linkage=(["$fake_root/elsewhere/qmltestrunner"]="$qt5_ldd")
+err=$(QMLTESTRUNNER="$fake_root/elsewhere/qmltestrunner" qmltestrunner_resolve 2>&1 >/dev/null || true)
+for want in "$fake_root/elsewhere/qmltestrunner" "$fake_root/qt6/qmltestrunner" qt5; do
+    if [[ "$err" == *"$want"* ]]; then
+        printf 'PASS  the refused override names %s\n' "$want"
+    else
+        printf 'FAIL  the refused override does not name %s\n        got: %s\n' "$want" "$err"
+        failures=$((failures + 1))
+    fi
+done
 
 if (( failures )); then
     printf '\n%d qmltestrunner check(s) failed\n' "$failures" >&2

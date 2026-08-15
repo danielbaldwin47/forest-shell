@@ -54,21 +54,48 @@ qmltestrunner_linkage() {
 # anchored to the `libQt` prefix rather than to a digit: `libc.so.6` sits in
 # every one of these listings, and a looser pattern would read the Qt5 runner
 # as Qt6 — the #215 bug, now silent.
+#
+# Every Qt library named is read, not the first one, and qt6 needs all of them
+# to be 6. ldd promises no order, so a binary linking two Qt majors would
+# otherwise get its verdict from whichever line came out first — accepted here
+# and refused on the next machine. Such a binary is broken anyway; refusing it
+# both times is the answer that can be debugged.
 qmltestrunner_qt_verdict() {
-    local linkage="${1-}"
+    local rest="${1-}" match
+    local -a majors=()
 
-    if [[ "$linkage" =~ libQt([0-9]+)(QuickTest|Qml|Quick|Core) ]]; then
-        local major="${BASH_REMATCH[1]}"
-        if [[ "$major" == 6 ]]; then
-            printf 'qt6\n'
-            return 0
-        fi
-        printf 'qt%s\n' "$major"
+    while [[ "$rest" =~ libQt([0-9]+)(QuickTest|Qml|Quick|Core) ]]; do
+        majors+=("${BASH_REMATCH[1]}")
+        match="${BASH_REMATCH[0]}"
+        rest="${rest#*"$match"}"
+    done
+
+    if (( ${#majors[@]} == 0 )); then
+        printf 'unknown\n'
         return 1
     fi
 
-    printf 'unknown\n'
-    return 1
+    local major
+    for major in "${majors[@]}"; do
+        if [[ "$major" != 6 ]]; then
+            printf 'qt%s\n' "$major"
+            return 1
+        fi
+    done
+
+    printf 'qt6\n'
+}
+
+# Where a Qt6 runner is normally packaged, on stderr. Every refusal ends with
+# this: the reader is one path away from a green suite either way, and a
+# message that only names the binary it turned down leaves them to guess.
+qmltestrunner_candidate_hint() {
+    printf '  A Qt6 runner is normally at one of:\n' >&2
+    local candidate
+    for candidate in "${QMLTESTRUNNER_CANDIDATES[@]}"; do
+        printf '    %s\n' "$candidate" >&2
+    done
+    printf '  On Arch that is qt6-declarative, kept off PATH by design.\n' >&2
 }
 
 # Echoes the runner to use on stdout, or explains itself on stderr and fails.
@@ -94,6 +121,7 @@ qmltestrunner_resolve() {
         fi
         printf 'qmltestrunner: QMLTESTRUNNER=%s links %s, not Qt6.\n' "$override" "$override_verdict" >&2
         printf '  A Qt5 runner fails every file with "Library import requires a version".\n' >&2
+        qmltestrunner_candidate_hint
         return 1
     fi
 
@@ -148,7 +176,7 @@ qmltestrunner_resolve() {
     done
     printf '  A Qt5 runner cannot run this suite: it fails every file with\n' >&2
     printf '  "Library import requires a version" and prints no Totals: line.\n' >&2
-    printf '  On Arch the Qt6 one is in qt6-declarative, off PATH by design.\n' >&2
+    qmltestrunner_candidate_hint
     printf '  %s\n' "$hint" >&2
     return 1
 }

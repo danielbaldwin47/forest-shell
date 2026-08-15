@@ -21,9 +21,11 @@ export QT_QPA_PLATFORM=offscreen
 # Qt refuses file:// XHR unless this is set.
 export QML_XHR_ALLOW_FILE_READ=1
 
-runner=$(command -v qmltestrunner || true)
-[[ -n "$runner" ]] || runner=/usr/lib/qt6/bin/qmltestrunner   # not on PATH on Arch
-[[ -x "$runner" ]] || { echo "qmltestrunner not found (tried PATH and $runner)" >&2; exit 1; }
+# Which qmltestrunner, and why it is not just the PATH hit: #215. A machine
+# with Plasma has a Qt5 one there, and it cannot run a single file.
+# shellcheck source=../tools/qmltestrunner.sh
+source ../tools/qmltestrunner.sh
+runner=$(qmltestrunner_resolve) || exit 1
 
 if [[ $# -gt 0 ]]; then
   exec "$runner" -input "$1"
@@ -68,6 +70,11 @@ python=$(command -v python3 || true)
 # a decision (parse a version, compare against a floor), but it is bash, and
 # qmltestrunner only loads QML. It rides along here (#57).
 bash tst_qs_runtime.sh
+
+# And the decision this script itself made wrong until #215: which
+# qmltestrunner. Same argument — a resolution rule in bash, verified where the
+# QML runner cannot reach.
+bash tst_qmltestrunner.sh
 
 # Same shape again (#95): the frame budget's arithmetic — parse, percentile,
 # gate — is a decision, but its input is a Qt log and its runner is bash.

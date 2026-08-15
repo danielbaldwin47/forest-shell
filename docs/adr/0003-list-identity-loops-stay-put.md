@@ -35,12 +35,14 @@ Two reasons, and the first is the load-bearing one:
    reordering, and an order-sensitive one on the screen list resets every
    surface whenever the compositor enumerates outputs differently.
 
-2. **The remaining pair have no shared home.** `DashboardRegistry` and
-   `ControlCenterPolicy` are both under `Surfaces/Drawers/`, but neither may
-   import the other — the shared floor is `Core/`, which is where
-   `Core/Coerce.qml` and `Core/JsonMerge.qml` live. Moving a five-line loop
-   there for two callers puts the answer one module away from both questions
-   and buys nothing a reader wanted.
+2. **A shared home exists, and the remaining pair do not earn it.** All three
+   sit in `Surfaces/Drawers/`, where sibling QML types are visible to each
+   other with no import at all — `ControlCenterPolicy` already instantiates
+   `DrillInPolicy` that way. So reachability is not the obstacle, and the
+   honest reason is smaller: after reason 1 there are *two* callers of an
+   identical five-line loop, and a five-line loop with two callers does not
+   earn a type of its own. Extracting it would move the answer away from both
+   questions and leave each site saying less than it says now.
 
 ## Consequences
 
@@ -51,4 +53,5 @@ Two reasons, and the first is the load-bearing one:
   would cost there.
 - If a fourth caller does appear and it needs the ordered form, that is the
   point to revisit — three sites is duplication, and four with a fifth in
-  sight is a missing module. `Core/` is the home if it comes to that.
+  sight is a missing module. A sibling under `Surfaces/Drawers/` is the home
+  if all callers stay there; `Core/` if one does not.

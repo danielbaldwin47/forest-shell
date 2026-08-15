@@ -150,6 +150,15 @@ FocusScope {
     /// makes the two handlers order-independent: when the lit tile moves from
     /// one delegate to another, the loser either releases before the winner
     /// claims or finds the claim already taken and leaves it alone.
+    ///
+    /// A delegate that is *destroyed* while holding the claim needs no release
+    /// and gets none: `litTileItem` is a typed `Item` property, so QML nulls
+    /// it when the object behind it goes. That is why there is no
+    /// `onItemRemoved` next to the `onItemAdded` below.
+    ///
+    /// `var` and not `Item`, deliberately: what this reads is `claimsLit`, a
+    /// property of the delegate rather than of `Item`, so the honest type is
+    /// the one that does not promise otherwise.
     function claimLitTile(item: var): void {
         if (item.claimsLit)
             root.litTileItem = item;
@@ -209,13 +218,15 @@ FocusScope {
     // --- the two Repeater models, latched (#192, #195) -----------------------
     //
     // Everything else here is bound straight off `facts`, and for a label or a
-    // colour that is fine. For anything feeding a `Repeater` it was the bug —
-    // first the sliders (#192), then the grid (#195), the same defect twice.
+    // colour that is fine. Neither `Repeater` may be fed that way: both are
+    // latched, the sliders since #192 and the grid since #195. What each latch
+    // is *for* differs, and the tile one says so below rather than borrowing
+    // this account.
     //
-    // The sliders first, because they are where it was visible: `facts` is a
-    // new object on every
-    // service tick, so `policy.sliders(facts)` was a new array of new rows on
-    // every tick, and a JS array with a new identity is a model *reset* — every
+    // The sliders first, because they are where it was visible. `facts` is a
+    // new object on every service tick, so `policy.sliders(facts)` was a new
+    // array of new rows on every tick, and a JS array with a new identity is a
+    // model *reset* — every
     // delegate destroyed and re-created. A re-created ControlSlider starts with
     // a zero-width fill, and its `Behavior` does not run during creation, so
     // the first layout pass afterwards animates the fill from empty to the
@@ -266,9 +277,17 @@ FocusScope {
     // with the sliders: delegates surviving a same-length reassignment is an
     // undocumented property of QQmlDelegateModel rather than a promise, and a
     // model that is reassigned only when it actually changed does not need it.
-    // The cost is honest — `tiles()` is walked once to latch the ids and once
-    // more across the delegates' own rows, where it used to be walked once —
-    // and it is paid only while the panel is open.
+    //
+    // The cost went the *wrong* way and the ticket expected the opposite, so
+    // it is written down rather than left to be discovered. A tick used to
+    // resolve the grid once, in `tiles()`. It now resolves it three times: once
+    // in `refreshTileIds` to latch the ids, once per delegate in `tileRow`, and
+    // once more in `firstLitId` — which alone is cheap, since it stops at the
+    // first lit tile and that is usually the first one. Roughly two extra
+    // walks of ten small objects, paid only while the panel is open, which is
+    // why it is not an idle-budget (#22 §5) regression: DrawerSlot.qml builds
+    // the panel on open and drops it on close, so a shut drawer walks nothing.
+    // Nothing here measured it beyond that reasoning.
     ///
     /// `null` until the first latch, then a list, for `sliderIds`' reason: a
     /// grid the user emptied from the Control Center tab latches `[]`, and
@@ -292,6 +311,11 @@ FocusScope {
     readonly property string litTileId:
         root.policy.firstLitId(root.tileIds ?? [], root.facts)
 
+    // Two latches of the same eight lines, and that is the ceiling: a third
+    // would be the point to give the shape a name rather than a third copy.
+    // Kept apart for now because each logs its own line and seam 2 asserts on
+    // them separately — merging them would either log one line for two models
+    // or take a name and a format string to log two.
     function refreshTileIds(): void {
         const next = root.policy.tileIds(root.facts);
         if (root.tileIds !== null && root.policy.sameIds(root.tileIds, next))
@@ -496,9 +520,18 @@ FocusScope {
                                 Layout.fillWidth: true
                                 // A tile whose hardware went away is a
                                 // delegate on its way out — the latch drops it
-                                // in the same turn. Hidden for that turn
-                                // rather than drawn, because the placeholder
-                                // has no icon and no label.
+                                // in the same `factsChanged`. Hidden rather
+                                // than drawn, because the placeholder has no
+                                // icon and no label.
+                                //
+                                // Hiding it in a `RowLayout` takes its slot
+                                // away too, so its neighbours stretch for that
+                                // turn rather than leaving a gap. That is the
+                                // right way round: the gap is what a tile
+                                // still there would look like, and this one is
+                                // not. It is at most one frame either way —
+                                // whether the model reassignment lands before
+                                // or after this binding is not ordered.
                                 visible: tile.row.present
                                 model: tile.row
 

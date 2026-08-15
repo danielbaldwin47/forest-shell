@@ -159,10 +159,8 @@ QtObject {
     /// from a newer shell's config resolves to, which `tiles()` simply drops.
     function tileRow(id: string, facts: var): var {
         const row = policy.tile(id, facts ?? ({}));
-        if (row !== null) {
-            row.present = true;
+        if (row !== null)
             return row;
-        }
         const gone = policy.makeTile(id, false, "", "", "");
         gone.drillIn = "";
         gone.doorOnly = false;
@@ -211,9 +209,13 @@ QtObject {
     /// it.
     function makeTile(id: string, on: bool, icon: string, label: string,
                       detail: string): var {
+        // `present` is on every row rather than bolted onto the ones that
+        // need it (#195): a tile that came back from `tileRow` with the field
+        // missing and one that came back with it `false` would read the same
+        // to a careless caller, and only one of them is a tile.
         return { id: id, on: on === true, icon: icon, label: label,
                  detail: detail, drillIn: policy.drill.panelFor(id),
-                 doorOnly: policy.drill.doorOnly(id) };
+                 doorOnly: policy.drill.doorOnly(id), present: true };
     }
 
     function wifiTile(wifi: var): var {

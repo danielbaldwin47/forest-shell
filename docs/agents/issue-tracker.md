@@ -13,6 +13,20 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## Hardware labels
+
+Two labels mark tickets that only reproduce or apply on one of the two machines:
+
+- `laptop` — the T480 (Intel graphics, battery).
+- `desktop` — the desktop (RTX 4080 SUPER, NVIDIA, mains-only).
+
+Apply one only when the ticket is genuinely machine-specific — a driver/stack
+behaviour, hardware the other machine lacks, or a power-source condition. A
+ticket merely *found* on one machine but reproducible anywhere (e.g. a PATH or
+packaging issue) gets no hardware label. Unlabelled means machine-agnostic. A
+session picking up a ticket with a hardware label it is not running on should
+say so rather than fake the acceptance elsewhere.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

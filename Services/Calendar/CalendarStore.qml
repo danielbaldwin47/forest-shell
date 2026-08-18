@@ -196,6 +196,37 @@ Singleton {
         return true;
     }
 
+    /// Name an event that already exists. The quick-create panel's only verb:
+    /// the drag committed the event, so what is left to say is what it is
+    /// called. A rename to the title it already has logs nothing, so a panel
+    /// dismissed without typing is silent rather than a spurious edit in the
+    /// log seam 2 reads.
+    function renameEvent(id: string, title: string): bool {
+        const before = root.policy.byId(root.events, id);
+        if (!before)
+            return false;
+        const name = title && title.length > 0 ? title : "New event";
+        if (before.title === name)
+            return false;
+        root.commit(root.policy.retitle(root.events, id, name));
+        Logger.log("calendar", "rename " + id + " \"" + name + "\"");
+        return true;
+    }
+
+    /// Pin an event's hue by name, or hand it back to the hash with `""`.
+    function recolourEvent(id: string, colour: string): bool {
+        const before = root.policy.byId(root.events, id);
+        if (!before)
+            return false;
+        const next = root.policy.recolour(root.events, id, colour);
+        const after = root.policy.byId(next, id);
+        if (!after || after.colour === before.colour)
+            return false;
+        root.commit(next);
+        Logger.log("calendar", "colour " + id + " " + (after.colour || "auto"));
+        return true;
+    }
+
     function addGuest(id: string, contactId: string): bool {
         const before = root.policy.byId(root.events, id);
         if (!before)

@@ -153,8 +153,10 @@
 #
 # The calendar knobs pose that surface. `--cal-view` is `day`, `week` or
 # `month`; `--cal-date` is the day the view is built around; `--cal-state` names
-# an overlay to pose (nothing accepts it yet — the knob is here so later pieces
-# add a state rather than a flag). Its events and contacts come from
+# an overlay to pose: `drag-create`, `drag-move` and `resize` pose a gesture on
+# the week grid, and `command` and `shortcuts` open the two keyboard overlays
+# (the menu with a query already typed, because a picture of an empty field says
+# nothing about whether filtering works). Its events and contacts come from
 # tools/fixtures/calendar-*.json, copied into the scratch XDG dirs, so the
 # picture is the same on every machine.
 #
@@ -300,18 +302,36 @@ esac
 [[ "$CAL_NOW" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]] || {
     echo "--cal-now wants YYYY-MM-DDTHH:MM, got: $CAL_NOW" >&2; exit 2; }
 
-# `--cal-state` is checked the same way and against a list that is currently
-# empty: the knob and its plumbing landed up front so later pieces append rather
-# than restructure, but no pose is built yet. A named state that silently
-# rendered the plain view is the exact failure the comment above describes, so
-# the ones still to come are refused by name rather than ignored.
+# `--cal-state` is checked the same way, and against two lists rather than one.
+# The three drag poses are built (`capture-harness.qml`'s `calendarPoses`, which
+# hands `WeekView.posedDrag` a day and a minute at each end); the rest are named
+# so a later piece appends rather than restructures, and are refused **by name**
+# until they are. A state that silently rendered the plain view is the exact
+# failure the comment above describes.
 case "$CAL_STATE" in
     "") ;;
-    drag-create|drag-move|resize|guests|popover|shortcuts|command)
+    drag-create|drag-move|resize) ;;
+    command|shortcuts) ;;
+    guests|popover)
         echo "--cal-state $CAL_STATE is not posed yet — no calendar state" \
              "renders differently from the plain view" >&2; exit 2 ;;
     *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
 esac
+
+# A drag pose is a *week* picture: `WeekView.posedDrag` is where the pose lands
+# and the month grid has no such thing, so `--cal-view month --cal-state resize`
+# would photograph a month with nothing posed on it and look like a pass.
+#
+# The two overlay poses are not drags and are refused nowhere: the command menu
+# and the shortcuts sheet are modal over whichever grid is behind them, and a
+# month behind the menu is a legitimate — and worth photographing — picture.
+if [[ "$CAL_VIEW" == "month" ]]; then
+    case "$CAL_STATE" in
+        drag-create|drag-move|resize)
+            echo "--cal-state $CAL_STATE is a week/day pose — the month view has no drag surface" >&2
+            exit 2 ;;
+    esac
+fi
 
 # The three words Core/SettingsSchema.qml's `clockFormats` accepts. Checked here
 # rather than left to the shell because `--clock 12` would otherwise be coerced

@@ -107,9 +107,11 @@ ShellRoot {
 
     /// The calendar's pose. `--cal-view` picks day, week or month; `--cal-date`
     /// is the day the view is built around; `--cal-state` names an overlay or
-    /// an interaction to pose (`drag-create`, `guests`, `shortcuts` — none of
-    /// them exist yet, and the knob is here so that when they do, no harness
-    /// signature changes).
+    /// an interaction to pose: `drag-create`, `drag-move` and `resize` pose a
+    /// gesture on the week grid; `command` and `shortcuts` open the two
+    /// keyboard overlays. (`guests` and `popover` are named and refused by
+    /// tools/capture-harness.sh until they exist, so the knob never renders a
+    /// plain view and calls it a pose.)
     ///
     /// `CAL_NOW` is the one that is not a convenience. The now-line is drawn
     /// from the wall clock, so without a frozen one no two captures of this
@@ -1248,6 +1250,69 @@ ShellRoot {
         }
     }
 
+    /// The first descendant of `item` with this `objectName`, or null.
+    ///
+    /// The calendar poses are set on the *week grid*, which `CalendarView` owns
+    /// under an id no other file can reach — and the harness is deliberately
+    /// not allowed to reach into that file. So the grid names itself
+    /// (`objectName: "calendarWeekGrid"`) and this walks the tree for it. A
+    /// missing grid is a warning and a plain picture, never an exception: a
+    /// TypeError here would read as a broken harness rather than as a pose that
+    /// did not apply.
+    function findByObjectName(item: var, name: string): var {
+        if (!item)
+            return null;
+        if (item.objectName === name)
+            return item;
+        const kids = item.children;
+        for (let i = 0; i < kids.length; i++) {
+            const found = root.findByObjectName(kids[i], name);
+            if (found)
+                return found;
+        }
+        return null;
+    }
+
+    /// The three drag poses, as a day and a minute at each end.
+    ///
+    /// Not a synthetic pointer: `DragPolicy` is pure, so `begin` and `update`
+    /// can be called with grid coordinates and the picture is the same one a
+    /// real drag would be showing at that instant — deterministic, and with no
+    /// compositor anywhere near it. The events named are the fixture's own
+    /// (`tools/fixtures/calendar-events.json`).
+    readonly property var calendarPoses: ({
+        "drag-create": {
+            "mode": "create",
+            "eventId": "",
+            "fromIso": "2026-08-19", "fromMin": 900,
+            "toIso": "2026-08-19", "toMin": 990
+        },
+        "drag-move": {
+            "mode": "move",
+            "eventId": "evt-3",
+            "fromIso": "2026-08-18", "fromMin": 600,
+            "toIso": "2026-08-19", "toMin": 660
+        },
+        "resize": {
+            "mode": "resizeBottom",
+            "eventId": "evt-6",
+            "fromIso": "2026-08-18", "fromMin": 945,
+            "toIso": "2026-08-18", "toMin": 1020
+        }
+    })
+
+    function poseCalendarDrag(page: var): void {
+        const pose = root.calendarPoses[root.calState];
+        if (!pose)
+            return;
+        const week = root.findByObjectName(page, "calendarWeekGrid");
+        if (!week) {
+            console.warn("capture: no calendarWeekGrid to pose — the picture is the plain view");
+            return;
+        }
+        week.posedDrag = pose;
+    }
+
     /// The calendar window (#calendar), on the same terms as the settings one
     /// above and for the same reason: `CalendarView` is a `FloatingWindow`, so
     /// it is built as itself and its content is then moved onto
@@ -1267,6 +1332,18 @@ ShellRoot {
             view: root.calView
             anchorDate: root.calDate
             nowOverride: root.calNow
+
+            // The two keyboard overlays are posed as properties rather than
+            // driven with a key, for the same reason the drag is posed rather
+            // than dragged: this mode has no compositor to deliver either.
+            //
+            // The menu is posed **with a query typed** — an empty field is a
+            // picture of a menu that has not been asked anything, and the one
+            // claim worth photographing is that filtering narrows the list and
+            // the highlight lands on what is left.
+            commandOpen: root.calState === "command"
+            commandQuery: root.calState === "command" ? "to" : ""
+            shortcutsOpen: root.calState === "shortcuts"
         }
 
         onLoaded: {
@@ -1289,6 +1366,8 @@ ShellRoot {
             const page = content.children[0];
             page.parent = calendarBacking;
             page.anchors.fill = calendarBacking;
+
+            root.poseCalendarDrag(page);
 
             root.sceneDescription = "view=" + root.calView + "+date=" + root.calDate
                                   + "+now=" + root.calNow

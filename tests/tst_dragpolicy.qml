@@ -232,12 +232,12 @@ TestCase {
         compare(drag.hitEdge(13, 15, 6), "bottom");
     }
 
-    function test_the_cursor_says_which_zone_it_is_in() {
-        compare(drag.cursorFor("top", false), Qt.SizeVerCursor);
-        compare(drag.cursorFor("bottom", false), Qt.SizeVerCursor);
-        compare(drag.cursorFor("body", false), Qt.OpenHandCursor);
-        compare(drag.cursorFor("body", true), Qt.ClosedHandCursor);
-        compare(drag.cursorFor("", false), Qt.ArrowCursor);
+    function test_a_chip_with_no_height_is_all_body() {
+        // A delegate mid-rebuild has height 0, and a zone read off it decides
+        // which gesture a press starts. "top" there would turn every press on a
+        // settling column into a resize.
+        compare(drag.hitEdge(0, 0, 6), "body");
+        compare(drag.hitEdge(4, -10, 6), "body");
     }
 
     // --- adversarial probes ----------------------------------------------------
@@ -323,10 +323,9 @@ TestCase {
         compare(r.kind, "create");
     }
 
-    function test_the_handle_size_and_the_drag_flag_may_both_be_left_out() {
+    function test_the_handle_size_may_be_left_out() {
         compare(drag.hitEdge(2, 60), "top");            // edge falls back to 6
         compare(drag.hitEdge(30, 60), "body");
         compare(drag.hitEdge(5, 0, 6), "body");         // a chip with no height
-        compare(drag.cursorFor("body"), Qt.OpenHandCursor);
     }
 }

@@ -361,15 +361,27 @@ QtObject {
 
     // --- hit zones ------------------------------------------------------------
 
-    /// Which part of a chip `yInChip` is in: `"top"`, `"bottom"` or `"body"`.
+    /// How deep a resize strip really is on a chip this tall.
     ///
     /// `edge` defaults to 6px, but never eats more than a third of the chip at
     /// each end: a 15-minute chip is ~15px tall, and two 6px handles on it
     /// would leave 3px of body — so the event could be resized and never
-    /// moved, which is the bug a fixed handle size always ships with.
-    function hitEdge(yInChip: real, chipHeight: real, edge: real): string {
+    /// moved, which is the bug a fixed handle size always ships with. Zero on a
+    /// chip with no height, which is a delegate mid-rebuild.
+    ///
+    /// It is a function of its own rather than a line inside `hitEdge` because
+    /// the surface needs the same number for a second purpose: the strips it
+    /// hangs a resize cursor on have to be exactly as deep as the zones this
+    /// answers, or the cursor promises a handle where the press finds a body.
+    function edgeDepth(chipHeight: real, edge: real): real {
         const want = edge > 0 ? edge : 6;
         const e = Math.min(want, chipHeight / 3);
+        return e > 0 ? e : 0;
+    }
+
+    /// Which part of a chip `yInChip` is in: `"top"`, `"bottom"` or `"body"`.
+    function hitEdge(yInChip: real, chipHeight: real, edge: real): string {
+        const e = policy.edgeDepth(chipHeight, edge);
         if (!(e > 0))
             return "body";
         const y = Math.max(0, Math.min(chipHeight, yInChip));
@@ -378,18 +390,5 @@ QtObject {
         if (y > chipHeight - e)
             return "bottom";
         return "body";
-    }
-
-    /// The cursor a zone asks for, as a `Qt.*Cursor` a `MouseArea` can bind
-    /// straight to `cursorShape`. The two edges are the vertical resize arrow;
-    /// the body is an open hand that closes while a drag is in flight, which
-    /// is the only feedback that says "this chip is draggable" before the
-    /// pointer is pressed.
-    function cursorFor(zone: string, dragging: bool): int {
-        if (zone === "top" || zone === "bottom")
-            return Qt.SizeVerCursor;
-        if (zone === "body")
-            return dragging === true ? Qt.ClosedHandCursor : Qt.OpenHandCursor;
-        return Qt.ArrowCursor;
     }
 }

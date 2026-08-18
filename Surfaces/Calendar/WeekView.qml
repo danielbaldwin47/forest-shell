@@ -81,6 +81,21 @@ Item {
     property GuestPolicy guestPolicy: GuestPolicy {}
     property EventLayoutPolicy layoutPolicy: EventLayoutPolicy {}
     property CalendarFormat format: CalendarFormat {}
+    property DragPolicy dragPolicy: DragPolicy {}
+    property CreatePolicy createPolicy: CreatePolicy {}
+
+    /// The name seam 3 finds this by. `CalendarView` owns the instance and the
+    /// capture harness cannot reach its id, so the grid says what it is and the
+    /// harness walks the tree for it — see `capture-harness.qml`.
+    objectName: "calendarWeekGrid"
+
+    /// **A drag, posed with no pointer.** `{mode, eventId, fromIso, fromMin,
+    /// toIso, toMin}` — the harness names two grid coordinates and the view
+    /// runs `DragPolicy.begin`/`update` on them, so a mid-drag picture is a
+    /// deterministic still rather than a race against a synthetic pointer. This
+    /// is the whole payoff of keeping the drag arithmetic pure: the same code
+    /// path a real pointer takes, driven by a day and a minute.
+    property var posedDrag: null
 
     // --- the geometry, all of it from the policy -------------------------------
 
@@ -242,6 +257,262 @@ Item {
             if (view.events[i].id === id)
                 return view.events[i];
         return null;
+    }
+
+    function columnIndexOf(iso: string): int {
+        for (let i = 0; i < view.columns.length; i++)
+            if (view.columns[i].iso === iso)
+                return i;
+        return -1;
+    }
+
+    /// The horizontal middle of a column, in `content` coordinates. Only the
+    /// posed drag needs it — a real pointer brings its own x.
+    function columnCentreX(index: int): real {
+        return view.columnX(index) + view.columnWidthFor(index) / 2;
+    }
+
+    // --- the drag -------------------------------------------------------------
+    //
+    // Four functions and two strings of state. Everything that is a *decision*
+    // — where the press anchors, which way it grew, what snaps, which day the
+    // pointer crossed into, whether the gesture was really a click — is
+    // `DragPolicy`, on the other side of `tests/tst_dragpolicy.qml`. What is
+    // here is the translation: pointer coordinates into the grid's own space,
+    // and a committed proposal into the one store call that matches it.
+    //
+    // Two things are logged that no store call would log: `drag begin <mode>`
+    // and `drag cancel`. They are here because #81's argument applies to a
+    // gesture as much as to a lifecycle — a drag that begins and produces
+    // nothing has two candidate causes (the press missed, or the commit
+    // refused) and no way to tell them apart from the outside.
+
+    /// Which event is under the finger, and in which mode. Empty between drags.
+    property string dragMode: ""
+    property string dragEventId: ""
+
+    /// The context `DragPolicy` works in: the grid's own geometry plus the
+    /// event being dragged, rebuilt per gesture so a week stepped mid-drag
+    /// cannot leave stale columns behind.
+    function dragContext(record: var): var {
+        const isos = [];
+        for (let i = 0; i < view.columns.length; i++)
+            isos.push(view.columns[i].iso);
+        return {
+            "hourHeight": view.hourRow,
+            "gutterWidth": view.gutterW,
+            "gridWidth": content.width,
+            "columns": isos,
+            "event": record || null,
+            "snap": CalendarTokens.snapMin,
+            "minMinutes": CalendarTokens.snapMin,
+            "threshold": 4
+        };
+    }
+
+    function beginDrag(mode: string, x: real, y: real, record: var): void {
+        view.closeQuickCreate("drag");
+        const proposal = view.dragPolicy.begin(mode, x, y, view.dragContext(record));
+        if (!proposal.active) {
+            view.dragMode = "";
+            view.dragEventId = "";
+            return;
+        }
+        view.dragMode = mode;
+        view.dragEventId = record ? record.id : "";
+        Logger.log("calendar", "drag begin " + mode
+                   + (view.dragEventId ? " " + view.dragEventId : "")
+                   + " " + proposal.start + " " + proposal.end);
+    }
+
+    function updateDrag(x: real, y: real): void {
+        if (view.dragMode)
+            view.dragPolicy.update(x, y);
+    }
+
+    /// Let go. The proposal is read *before* `end()` resets the machine, which
+    /// is the one ordering trap in this file.
+    function endDrag(): void {
+        if (!view.dragMode)
+            return;
+        const mode = view.dragMode;
+        const id = view.dragEventId;
+        const done = view.dragPolicy.end();
+        const p = done.proposal;
+        view.dragMode = "";
+        view.dragEventId = "";
+
+        if (!done.committed) {
+            // A press that never travelled is a click, and a click on a chip
+            // selects it. On empty grid it is nothing at all: the create
+            // affordance is the drag, and a stray click that made a
+            // 15-minute event would be a store write nobody asked for.
+            if (done.kind === "click" && id)
+                view.eventActivated(id);
+            return;
+        }
+
+        if (mode === "create") {
+            const minutes = view.layoutPolicy.time.diffMinutes(p.start, p.end);
+            const startMin = view.layoutPolicy.time.parseMinutes(p.start);
+            const made = CalendarStore.createEvent(p.dayIso, startMin, minutes, "");
+            if (made)
+                view.openQuickCreate(made, p.dayIso, p.start, p.end);
+            return;
+        }
+        if (mode === "move") {
+            CalendarStore.moveEvent(id, p.start);
+            return;
+        }
+        CalendarStore.resizeEvent(id, mode === "resizeTop" ? "start" : "end",
+                                  mode === "resizeTop" ? p.start : p.end);
+    }
+
+    function cancelDrag(): void {
+        if (!view.dragMode)
+            return;
+        view.dragPolicy.cancel();
+        view.dragMode = "";
+        view.dragEventId = "";
+        Logger.log("calendar", "drag cancel");
+    }
+
+    /// Escape, but only while something is in flight. A `Shortcut` and not a
+    /// key handler on purpose: the window already has exactly one Escape
+    /// handler (`CalendarView.qml`) and it closes the calendar, so a second
+    /// handler in the focus chain would be a race about who saw the key first.
+    /// A disabled shortcut is not in the running at all, so outside a drag
+    /// Escape means what it has always meant.
+    Shortcut {
+        sequence: "Escape"
+        enabled: view.dragMode !== ""
+        onActivated: view.cancelDrag()
+    }
+
+    /// The live proposal, or a dead one. Everything the ghost draws is read off
+    /// this and nothing is recomputed.
+    readonly property var proposal: view.dragPolicy.proposal
+
+    /// The ghost is drawn once the gesture has actually travelled. Before that
+    /// a `move` would paint a second chip exactly on top of the first, and the
+    /// picture would say "you are dragging" to somebody who had only clicked.
+    readonly property bool dragShown:
+        view.proposal.active && view.proposal.moved && view.proposal.column >= 0
+
+    // --- the quick-create panel -----------------------------------------------
+
+    property string quickCreateId: ""
+    property rect quickCreateAnchor: Qt.rect(0, 0, 0, 0)
+
+    function openQuickCreate(id: string, dayIso: string, start: string, end: string): void {
+        const col = view.columnIndexOf(dayIso);
+        const rect = view.grid.eventRect(start, end, dayIso, view.hourRow);
+        if (col < 0 || !rect)
+            return;
+        view.quickCreateId = id;
+        view.quickCreateAnchor = Qt.rect(
+            view.columnX(col) + view.colInset,
+            rect.y - body.contentY + body.y,
+            Math.max(0, view.columnWidthFor(col) - view.colInset * 2),
+            Math.max(CalendarTokens.chipMinH, rect.h));
+        Logger.log("calendar", "quick-create open " + id);
+    }
+
+    function closeQuickCreate(reason: string): void {
+        if (!view.quickCreateId)
+            return;
+        Logger.log("calendar", "quick-create dismissed (" + reason + ")");
+        view.quickCreateId = "";
+    }
+
+    // --- what seam 2 aims by --------------------------------------------------
+    //
+    // A nested Hyprland tiles this window to its output, so nothing about the
+    // grid's geometry is knowable from outside: the harness cannot assume a
+    // column width, a scroll position or where the grid starts under the
+    // toolbar. So the grid says. Every number is in *window* coordinates and
+    // the columns carry their own dates, which is what lets the harness ask for
+    // "Wednesday at 09:00" rather than for a pixel and hope.
+    //
+    // Debounced rather than bound to a signal, because `contentY` changes a
+    // frame at a time while the grid settles and one line per frame would bury
+    // the log the harness reads.
+    readonly property string geometryLine: {
+        if (!view.visible || view.width <= 0 || view.columns.length === 0)
+            return "";
+        const origin = view.mapToItem(null, 0, body.y);
+        const cols = [];
+        for (let i = 0; i < view.columns.length; i++)
+            cols.push(view.columns[i].iso + ":"
+                      + Math.round(view.mapToItem(null, view.columnX(i), 0).x) + ":"
+                      + Math.round(view.columnWidthFor(i)));
+        return "geometry gutter=" + view.gutterW
+             + " hourHeight=" + view.hourRow
+             + " gridX=" + Math.round(origin.x)
+             + " gridTop=" + Math.round(origin.y)
+             + " viewH=" + Math.round(body.height)
+             + " contentY=" + Math.round(body.contentY)
+             + " cols=" + cols.join(",");
+    }
+
+    onGeometryLineChanged: geometryLog.restart()
+
+    Timer {
+        id: geometryLog
+
+        interval: 250
+        onTriggered: {
+            if (view.geometryLine)
+                Logger.log("calendar", view.geometryLine);
+        }
+    }
+
+    // --- the posed drag, for seam 3 -------------------------------------------
+
+    function poseDrag(): void {
+        const pose = view.posedDrag;
+        if (!pose || view.columns.length === 0 || view.width <= 0)
+            return;
+        const record = pose.eventId ? view.eventById(pose.eventId) : null;
+        const mode = pose.mode || "create";
+        // Days and not column indices: which index Wednesday is depends on the
+        // locale's first weekday, and a pose that named column 2 would be a
+        // different picture in en_GB and en_US.
+        const fromCol = view.columnIndexOf(pose.fromIso);
+        const toCol = view.columnIndexOf(pose.toIso);
+        if (fromCol < 0 || toCol < 0)
+            return;
+        const from = view.dragPolicy.begin(
+            mode, view.columnCentreX(fromCol),
+            view.grid.minutesToY(pose.fromMin, view.hourRow),
+            view.dragContext(record));
+        if (!from.active)
+            return;
+        view.dragMode = mode;
+        view.dragEventId = record ? record.id : "";
+        view.dragPolicy.update(view.columnCentreX(toCol),
+                               view.grid.minutesToY(pose.toMin, view.hourRow));
+        // Scrolled to the gesture, because a posed drag two screens below the
+        // parked position is a picture of an empty morning.
+        body.contentY = view.grid.visibleScrollY(
+            Math.max(0, Math.floor(Math.min(pose.fromMin, pose.toMin) / 60) - 2),
+            view.hourRow, body.height);
+        // Claim the park, or the first `onHeightChanged` after this would put
+        // the grid back at the working day and the pose would be off screen.
+        body.parked = true;
+    }
+
+    onPosedDragChanged: poseTimer.restart()
+    onWidthChanged: {
+        if (view.posedDrag)
+            poseTimer.restart();
+    }
+
+    Timer {
+        id: poseTimer
+
+        interval: 32
+        onTriggered: view.poseDrag()
     }
 
     // --- layer 1: the column washes -------------------------------------------
@@ -762,15 +1033,25 @@ Item {
             /// sign that the space between them is a place you can put
             /// something.
             ///
-            /// `acceptedButtons: Qt.NoButton` on purpose — this area is a
-            /// *sensor*, not a button. It sits under the chips and takes no
-            /// press, so a click still reaches whatever it was aimed at, and a
-            /// chip's own hover area consumes the hover before this one sees it,
-            /// which is what stops the ghost appearing under a meeting.
+            /// It sits **under the chips**, so a press on a meeting reaches the
+            /// meeting: a chip's own pointer area is declared after this one and
+            /// consumes both the hover and the press, which is what stops the
+            /// hint appearing under a chip and a create starting on top of one.
             ///
-            /// Every number in it is already a policy: `columnForX` picks the
-            /// day, `yToMinutes` and `snap` pick the quarter hour, `minutesToY`
-            /// puts it back. Nothing new is decided here.
+            /// It is the drag surface too, and it starts at the gutter's right
+            /// edge rather than filling the content: `DragPolicy` clamps a
+            /// press left of the first column *into* it, which is right for a
+            /// pointer that wandered a pixel and wrong for one resting on the
+            /// hour ruler. Not covering the ruler at all is how the ruler stays
+            /// a ruler — no hand cursor over it, no create under it.
+            ///
+            /// `DragPolicy` measures `x` from the left of the whole grid, so
+            /// the gutter is added back on the way out; `y` is already the
+            /// distance from midnight, because `content` is exactly that space.
+            ///
+            /// Every number in the hint is already a policy: `columnForX` picks
+            /// the day, `yToMinutes` and `snap` pick the quarter hour,
+            /// `minutesToY` puts it back. Nothing new is decided here.
             MouseArea {
                 id: createHover
 
@@ -779,13 +1060,25 @@ Item {
                 width: content.width - view.gutterW
                 height: content.height
                 hoverEnabled: true
-                acceptedButtons: Qt.NoButton
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+                cursorShape: Qt.PointingHandCursor
+
+                onPressed: mouse => view.beginDrag("create", mouse.x + view.gutterW,
+                                                   mouse.y, null)
+                onPositionChanged: mouse => {
+                    if (createHover.pressed)
+                        view.updateDrag(mouse.x + view.gutterW, mouse.y);
+                }
+                onReleased: view.endDrag()
+                onCanceled: view.cancelDrag()
             }
 
             Rectangle {
                 id: createHint
 
                 readonly property int col: createHover.containsMouse
+                                           && !view.dragPolicy.active
                     ? view.grid.columnForX(createHover.mouseX + view.gutterW,
                                            view.gutterW, content.width,
                                            view.columns.length)
@@ -841,6 +1134,8 @@ Item {
                             - CalendarTokens.chipGap)
 
                         delegate: EventChip {
+                            id: chipItem
+
                             required property var modelData
 
                             // The packing, verbatim from the policy: `xFrac`
@@ -914,10 +1209,72 @@ Item {
                             continuesBelow: modelData.continuesBelow
                             use24: view.use24
                             selected: view.selectedId === modelData.id
+
+                            /// One state machine for the whole grid, handed
+                            /// down: a `DragPolicy` per chip would be a hundred
+                            /// idle objects and, worse, a hundred places a
+                            /// gesture could be half-started.
+                            dragPolicy: view.dragPolicy
+                            dragging: view.dragMode !== ""
+                                      && view.dragEventId === modelData.id
+                            ghosted: view.dragShown
+                                     && view.dragEventId === modelData.id
+
+                            /// The chip reports in its own coordinates; the two
+                            /// offsets that turn those into the grid's are the
+                            /// column's x and the chip's own, both of which are
+                            /// right here. `mapToItem` would do the same sum
+                            /// through a matrix and be wrong the moment the
+                            /// chip is scaled, which it is while it is dragged.
+                            onDragBegin: (zone, mx, my) => view.beginDrag(
+                                zone === "top" ? "resizeTop"
+                                    : zone === "bottom" ? "resizeBottom" : "move",
+                                column.x + chipItem.x + mx, chipItem.y + my,
+                                modelData.event)
+                            onDragMoved: (mx, my) => view.updateDrag(
+                                column.x + chipItem.x + mx, chipItem.y + my)
+                            onDragReleased: view.endDrag()
+                            onDragCancelled: view.cancelDrag()
+
                             onActivated: id => view.eventActivated(id)
                         }
                     }
                 }
+            }
+
+            /// The proposal, drawn. Above every chip because it is the thing
+            /// being aimed, and below the now-line because the clock outranks
+            /// an intention.
+            DragGhost {
+                readonly property int col: Math.max(0, view.proposal.column)
+
+                visible: view.dragShown
+                z: 15
+                x: view.columnX(col) + view.colInset
+                width: Math.max(CalendarTokens.chipMinH,
+                                view.columnWidthFor(col) - view.colInset * 2)
+                y: Math.round(view.proposal.y)
+                height: Math.max(CalendarTokens.chipMinH, Math.round(view.proposal.h))
+
+                mode: view.proposal.mode
+                // A create ghost wears the accent — it has no identity yet and
+                // hue 0 is `accentPrimary`, the colour every other "this is
+                // about to happen" on the surface uses. A move or a resize
+                // keeps the event's own, so the chip does not appear to change
+                // what it is on the way across.
+                hue: view.dragEventId
+                     ? CalendarTokens.hues.forEvent(view.eventById(view.dragEventId))
+                     : 0
+                rangeLabel: view.dragShown
+                    ? view.format.timeRange(view.proposal.start, view.proposal.end,
+                                            view.use24)
+                    : ""
+                durationLabel: view.dragShown
+                    ? view.format.duration(view.layoutPolicy.time.diffMinutes(
+                          view.proposal.start, view.proposal.end))
+                    : ""
+                title: view.dragEventId && view.eventById(view.dragEventId)
+                       ? view.eventById(view.dragEventId).title : ""
             }
 
             /// The now-line's reach, and the thing that makes the gutter stamp
@@ -1043,5 +1400,40 @@ Item {
         width: 1
         height: view.height
         color: Theme.borderSubtle
+    }
+
+    /// The quick-create panel, hosted here rather than at the window.
+    ///
+    /// It is anchored to a *chip*, and the chip's rectangle is a thing only the
+    /// grid knows — column x, column width, scroll offset, the band's height.
+    /// Hosting it at the window would mean handing all four of those upwards
+    /// every frame. It sits outside the `Flickable` on purpose: a panel that
+    /// scrolled away from under the cursor while it was being typed into would
+    /// be a panel nobody could finish.
+    Loader {
+        id: quickCreate
+
+        readonly property var placement: view.createPolicy.popoverAnchor(
+            view.quickCreateAnchor,
+            quickCreate.width > 0 ? quickCreate.width : 320,
+            quickCreate.height, view.width, view.height,
+            Theme.space3, Theme.space3)
+
+        active: view.quickCreateId !== ""
+        z: 30
+        x: quickCreate.placement.x
+        y: quickCreate.placement.y
+
+        sourceComponent: QuickCreatePopover {
+            event: view.eventById(view.quickCreateId)
+            hue: CalendarTokens.hues.forEvent(view.eventById(view.quickCreateId))
+            use24: view.use24
+            flipped: quickCreate.placement.flipped
+
+            onRenamed: title => CalendarStore.renameEvent(view.quickCreateId, title)
+            onRecoloured: colour => CalendarStore.recolourEvent(view.quickCreateId, colour)
+            onDiscarded: CalendarStore.deleteEvent(view.quickCreateId)
+            onDismissed: reason => view.closeQuickCreate(reason)
+        }
     }
 }

@@ -91,9 +91,62 @@ Item {
     readonly property string rawTitle:
         chip.event ? (chip.event.title || "Untitled") : ""
 
+    // --- the drag ------------------------------------------------------------
+    //
+    // The chip reports a gesture in *its own* coordinates and decides nothing
+    // about it. The view maps those two numbers into the grid and hands them to
+    // `DragPolicy`, which is where "this is a move", "this is a resize" and
+    // "this was only a click" are actually settled — the chip cannot know, and
+    // a chip that guessed would be a second copy of the state machine.
+
+    /// The state machine, for the two questions a chip *can* answer on its own:
+    /// which zone the pointer is in, and which cursor that zone asks for.
+    /// Handed down by the view where there is one, so a whole column of chips
+    /// shares its instance.
+    property DragPolicy dragPolicy: DragPolicy {}
+
+    /// How deep the resize strips are at each end. `DragPolicy.edgeDepth` never
+    /// lets them eat more than a third of a short chip, so this is a wish and
+    /// `stripDepth` is what the chip actually gets.
+    property real edgeZone: 6
+
+    readonly property real stripDepth:
+        chip.dragPolicy.edgeDepth(chip.height, chip.edgeZone)
+
+    /// The zone the press landed in, latched for the length of the gesture.
+    property string dragZone: "body"
+
+    /// Set by the view while this chip is the one being dragged: the copy under
+    /// the finger lifts, and the one left behind fades to a placeholder. They
+    /// are separate flags because on a cross-day move they are two different
+    /// chips — the ghost is drawn by the view and this is the origin.
+    property bool dragging: false
+    property bool ghosted: false
+
     signal activated(string id)
+    signal dragBegin(string zone, real x, real y)
+    signal dragMoved(real x, real y)
+    signal dragReleased
+    signal dragCancelled
 
     implicitHeight: CalendarTokens.chipMinH
+
+    /// The hole a lifted chip leaves.
+    ///
+    /// `0.35` is the spec's and it has to be *visible* rather than gone: a chip
+    /// that vanished the moment it was picked up would take the answer to
+    /// "where was this before I started" with it, and the grid would re-pack
+    /// under the pointer. The chip that travels is `DragGhost`, drawn by the
+    /// view — this one stays exactly where it was and waits to be told.
+    opacity: chip.ghosted ? 0.35 : 1
+
+    Behavior on opacity {
+        enabled: Theme.animateTransforms
+        NumberAnimation {
+            duration: Theme.duration(Theme.motionFast)
+            easing.type: Easing.OutCubic
+        }
+    }
 
     /// The selection ring. See the header for why it is not a border.
     Rectangle {
@@ -385,7 +438,7 @@ Item {
             height: 3
             radius: 1.5
             color: CalendarTokens.bar(chip.hue)
-            opacity: resizeEdge.containsMouse ? 0.95 : 0.7
+            opacity: pointer.hoverZone === "bottom" ? 0.95 : 0.7
 
             Behavior on opacity {
                 enabled: Theme.duration(Theme.motionFast) > 0
@@ -448,28 +501,85 @@ Item {
         return chip.layoutPolicy.clipTitle(chip.rawTitle, Math.floor(avail / advance));
     }
 
+    /// The chip's whole pointer surface — one area, three zones.
+    ///
+    /// It was two areas: a body that clicked and a 6px strip at the bottom that
+    /// only changed the cursor. Two is what a *hover* needs and one is what a
+    /// *drag* needs, because the zone has to be latched at the press and then
+    /// stay latched: a resize that started on the bottom edge and travelled
+    /// through the body must keep resizing, and with two areas the second one
+    /// never sees the motion at all. So the zone is `DragPolicy.hitEdge` of the
+    /// press point, the zone in force decides the cursor, and the strip that used
+    /// to be an area is now a number the policy owns.
     MouseArea {
         id: pointer
 
         anchors.fill: parent
         hoverEnabled: true
+        acceptedButtons: Qt.LeftButton
+
+        /// **The grid is a `Flickable`, and a vertical drag on a chip is the
+        /// same gesture as a flick.** Without this the flick wins at the
+        /// standard 10px drag threshold, the press is taken away mid-gesture,
+        /// and the chip's own `onCanceled` cancels the drag — measured at seam
+        /// 2 (`tools/calendar-harness.sh`): a resize logged `drag begin
+        /// resizeBottom` and then `drag cancel` 93ms later, having scrolled the
+        /// grid a few pixels instead. A chip is a grab target, so it keeps the
+        /// press; the grid still flicks everywhere a chip is not.
+        preventStealing: true
+
+        /// Where the pointer is *now*. Only the grip's own brightness reads it
+        /// — the cursor is the two strips below, and the *gesture* reads the
+        /// zone latched at the press.
+        readonly property string hoverZone: pointer.containsMouse
+            ? chip.dragPolicy.hitEdge(pointer.mouseY, chip.height, chip.edgeZone)
+            : ""
+
+        /// The hand, flat. A chip is clickable everywhere, and the two edges
+        /// say otherwise by being covered — see the strips below.
         cursorShape: Qt.PointingHandCursor
-        onClicked: chip.activated(chip.event ? chip.event.id : "")
+
+        onPressed: mouse => {
+            chip.dragZone = chip.dragPolicy.hitEdge(mouse.y, chip.height, chip.edgeZone);
+            chip.dragBegin(chip.dragZone, mouse.x, mouse.y);
+        }
+        onPositionChanged: mouse => {
+            if (pointer.pressed)
+                chip.dragMoved(mouse.x, mouse.y);
+        }
+        onReleased: chip.dragReleased()
+        onCanceled: chip.dragCancelled()
     }
 
-    /// The bottom strip, over the body's own pointer area so the edge answers
-    /// with the resize cursor rather than the hand. 6px, which is the smallest
-    /// strip a pointer lands on reliably and half of what would eat the last
-    /// line of type on a chip that shows one.
-    MouseArea {
-        id: resizeEdge
+    /// The two resize strips: a cursor each and nothing else.
+    ///
+    /// `HoverHandler` and not a second `MouseArea`, and this is the shape the
+    /// cursor seam was built around (#185): a hover handler carries a cursor
+    /// without taking a press, so the press still reaches the one area above
+    /// that runs the gesture. Two `MouseArea`s would split the drag in half —
+    /// the strip would see the press and the body would see the motion — which
+    /// is the bug the single area above exists to avoid.
+    ///
+    /// Their depth is `DragPolicy.edgeDepth`, the same number `hitEdge` splits
+    /// the zones at, so the cursor never promises a handle where the press
+    /// finds a body.
+    Item {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: chip.stripDepth
+        visible: chip.stripDepth > 0
 
-        visible: chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+        HoverHandler { cursorShape: Qt.SizeVerCursor }
+    }
+
+    Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 6
-        hoverEnabled: true
-        cursorShape: Qt.SizeVerCursor
+        height: chip.stripDepth
+        visible: chip.stripDepth > 0
+
+        HoverHandler { cursorShape: Qt.SizeVerCursor }
     }
 }

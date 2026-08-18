@@ -71,6 +71,14 @@ QtObject {
     /// A copy with every field present and of the right type. What the store
     /// runs each entry of a hand-edited file through, so nothing downstream has
     /// to ask whether `guests` exists.
+    ///
+    /// **This function is the schema.** Everything it does not name is dropped
+    /// on the next read, silently, which is why the Google sync fields are here
+    /// rather than only in `GoogleEventPolicy`: `googleId`/`etag`/`updated` are
+    /// what a pull matches and compares against, `modifiedAt` is the local half
+    /// of that comparison, and `recurringEventId`/`originalStartTime` are what
+    /// say an event is one instance of a series rather than a thing of its own.
+    /// A local-only event simply has them all empty.
     function normalize(event: var): var {
         const raw = event || {};
         const guests = [];
@@ -84,7 +92,13 @@ QtObject {
             "end": typeof raw.end === "string" ? raw.end : "",
             "allDay": raw.allDay === true,
             "colour": typeof raw.colour === "string" ? raw.colour : "",
-            "guests": guests
+            "guests": guests,
+            "googleId": typeof raw.googleId === "string" ? raw.googleId : "",
+            "etag": typeof raw.etag === "string" ? raw.etag : "",
+            "updated": typeof raw.updated === "string" ? raw.updated : "",
+            "modifiedAt": typeof raw.modifiedAt === "string" ? raw.modifiedAt : "",
+            "recurringEventId": typeof raw.recurringEventId === "string" ? raw.recurringEventId : "",
+            "originalStartTime": typeof raw.originalStartTime === "string" ? raw.originalStartTime : ""
         };
     }
 

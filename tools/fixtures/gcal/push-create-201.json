@@ -1,0 +1,13 @@
+{
+  "kind": "calendar#event",
+  "etag": "\"3421119002000000\"",
+  "id": "9d3f7h1k5mmq8r2t6vwx4y0z",
+  "status": "confirmed",
+  "created": "2026-08-18T08:20:01.000Z",
+  "updated": "2026-08-18T08:20:01.512Z",
+  "summary": "Dentist",
+  "start": { "dateTime": "2026-08-20T15:00:00+01:00", "timeZone": "Europe/London" },
+  "end": { "dateTime": "2026-08-20T15:45:00+01:00", "timeZone": "Europe/London" },
+  "iCalUID": "9d3f7h1k5mmq8r2t6vwx4y0z@google.com",
+  "sequence": 0
+}

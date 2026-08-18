@@ -112,6 +112,59 @@ TestCase {
         compare(e.guests.join(","), "mira,juno");
     }
 
+    // normalize is the schema: a field it does not name is dropped on the next
+    // read of events.json, so the sync identity has to survive it or every pull
+    // re-creates every event it already pulled.
+    function test_normalize_keeps_the_sync_identity() {
+        const e = policy.normalize({ "id": "evt-1", "start": "2026-08-18T09:00",
+                                     "end": "2026-08-18T10:00",
+                                     "googleId": "g-abc", "etag": "\"42\"",
+                                     "updated": "2026-08-18T07:00:00.000Z",
+                                     "modifiedAt": "2026-08-18T09:10:00Z",
+                                     "recurringEventId": "g-series",
+                                     "originalStartTime": "2026-08-18T09:00:00+02:00" });
+        compare(e.googleId, "g-abc");
+        compare(e.etag, "\"42\"");
+        compare(e.updated, "2026-08-18T07:00:00.000Z");
+        compare(e.modifiedAt, "2026-08-18T09:10:00Z");
+        compare(e.recurringEventId, "g-series");
+        compare(e.originalStartTime, "2026-08-18T09:00:00+02:00");
+        // And a local-only event carries them empty rather than missing.
+        const local = policy.normalize({ "id": "evt-2", "start": "2026-08-18T09:00",
+                                         "end": "2026-08-18T10:00", "googleId": 7 });
+        compare(local.googleId, "");
+        compare(local.modifiedAt, "");
+    }
+
+    // Every mutation goes through `replace`, which normalizes twice — so the
+    // sync identity survives a drag, a rename and a recolour, or the first edit
+    // after a pull would orphan the event and the next pull would create it a
+    // second time. This is the half of the schema change that nothing else
+    // asserts: `normalize` naming the fields is necessary, carrying them
+    // through the mutations is what makes it true.
+    function test_a_mutation_keeps_the_sync_identity() {
+        const synced = testCase.event("evt-1", "2026-08-18T09:00", "2026-08-18T10:00", {
+            "googleId": "g-abc", "etag": "\"42\"",
+            "updated": "2026-08-18T07:00:00.000Z", "modifiedAt": "2026-08-18T09:10:00Z",
+            "recurringEventId": "g-series", "originalStartTime": "2026-08-18T09:00:00+02:00"
+        });
+        const moved = policy.byId(policy.move([synced], "evt-1", "2026-08-19T14:00"), "evt-1");
+        compare(moved.start, "2026-08-19T14:00");
+        compare(moved.googleId, "g-abc");
+        compare(moved.etag, "\"42\"");
+        compare(moved.updated, "2026-08-18T07:00:00.000Z");
+        compare(moved.recurringEventId, "g-series");
+        compare(moved.originalStartTime, "2026-08-18T09:00:00+02:00");
+        const named = policy.byId(policy.retitle([synced], "evt-1", "Standup"), "evt-1");
+        compare(named.title, "Standup");
+        compare(named.googleId, "g-abc");
+        compare(named.modifiedAt, "2026-08-18T09:10:00Z");
+        // And a create from a pulled event keeps it too — that is the path a
+        // pull takes into the store.
+        const made = policy.create([], synced);
+        compare(made[0].googleId, "g-abc");
+    }
+
     function test_sanitize_keeps_the_good_and_names_the_bad() {
         const clean = policy.sanitize([
             event("evt-2", "2026-08-18T10:00", "2026-08-18T11:00"),

@@ -1,0 +1,34 @@
+{
+  "kind": "calendar#calendarList",
+  "etag": "\"p33gcnl4nqcbnu0g\"",
+  "nextSyncToken": "CJj1o7HF1IgDEhhkYW5pZWxAZXhhbXBsZS5jb20",
+  "items": [
+    {
+      "kind": "calendar#calendarListEntry",
+      "etag": "\"1755504764221\"",
+      "id": "daniel@example.com",
+      "summary": "daniel@example.com",
+      "timeZone": "Europe/London",
+      "colorId": "14",
+      "backgroundColor": "#9fe1e7",
+      "foregroundColor": "#000000",
+      "selected": true,
+      "accessRole": "owner",
+      "primary": true,
+      "defaultReminders": [{ "method": "popup", "minutes": 10 }]
+    },
+    {
+      "kind": "calendar#calendarListEntry",
+      "etag": "\"1755504764222\"",
+      "id": "en.uk#holiday@group.v.calendar.google.com",
+      "summary": "Holidays in United Kingdom",
+      "timeZone": "Europe/London",
+      "colorId": "8",
+      "backgroundColor": "#16a765",
+      "foregroundColor": "#000000",
+      "selected": true,
+      "accessRole": "reader",
+      "defaultReminders": []
+    }
+  ]
+}

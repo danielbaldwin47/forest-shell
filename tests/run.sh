@@ -66,6 +66,14 @@ python=$(command -v python3 || true)
 # numbers, even though only the window itself needs a real session.
 "$python" tst_idle_rungs.py
 
+# The Google Calendar helper (tools/gcal-sync.py). Same argument again, and the
+# strongest case of it: OAuth is all decision — which token to spend, when to
+# refresh, what a 410 means, how a refused push maps — and none of it needs an
+# account. The loopback consent flow is a real socket on 127.0.0.1 answered by
+# the test itself, and the two things that could hurt someone (the token file's
+# mode, and whether a secret ever reaches stdout) are asserted over every run.
+"$python" tst_gcal_sync.py
+
 # Same reason, different language: which quickshell binary may run the shell is
 # a decision (parse a version, compare against a floor), but it is bash, and
 # qmltestrunner only loads QML. It rides along here (#57).

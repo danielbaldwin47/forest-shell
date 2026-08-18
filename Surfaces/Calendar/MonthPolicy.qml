@@ -216,6 +216,42 @@ QtObject {
                                    chip, headerHeight, space);
     }
 
+    /// The two capacities a cell actually has: `{ full, withMore }`.
+    ///
+    /// **"+N more" is not a chip and charging it as one costs a whole event.**
+    /// `chipCapacity` counts chip-sized rows, and `cellChips` gives the last of
+    /// them back to the affordance — which is right only while the affordance is
+    /// as tall as a chip. It is not: it is one line of 11pt text, `moreHeight`
+    /// tall, and at the surface's own numbers (113px row, 26px numeral band,
+    /// 21px chips at a 2px gap) charging it 21 is the difference between three
+    /// events and two. `full` is what fits when nothing is hidden; `withMore` is
+    /// what fits beside the line that says so.
+    ///
+    /// `moreHeight` defaults to `chipHeight`, which is exactly the old
+    /// behaviour, so a caller that has no separate affordance keeps it.
+    function cellCapacity(cellHeight: real, lanes: int, chipHeight, headerHeight, gap, laneHeight, moreHeight): var {
+        const chip = chipHeight === undefined || chipHeight === null ? policy.chipHeight : chipHeight;
+        const space = gap === undefined || gap === null ? policy.chipGap : gap;
+        const more = moreHeight === undefined || moreHeight === null ? chip : moreHeight;
+        const full = policy.chipCapacity(cellHeight, lanes, chip, headerHeight, space, laneHeight);
+        const withMore = policy.chipCapacity(cellHeight - (more + space), lanes,
+                                             chip, headerHeight, space, laneHeight);
+        return { "full": full, "withMore": Math.min(withMore, full) };
+    }
+
+    /// `cellChips` again, asked with both capacities: everything if it fits,
+    /// otherwise as many chips as fit *beside* the "+N more" line.
+    function cellChipsFor(events: var, iso: string, capacity: var): var {
+        const timed = policy.cellEvents(events, iso, -1).timed;
+        const caps = capacity || ({ "full": 0, "withMore": 0 });
+        const full = isNaN(caps.full) ? 0 : Math.floor(caps.full);
+        if (timed.length <= full)
+            return { "shown": timed, "moreCount": 0 };
+        const room = Math.max(0, isNaN(caps.withMore) ? 0 : Math.floor(caps.withMore));
+        const shown = timed.slice(0, room);
+        return { "shown": shown, "moreCount": timed.length - shown.length };
+    }
+
     /// What a cell draws when its banners are drawn as **row bars** rather than
     /// as chips inside it: `{ shown, moreCount }` over the timed events alone.
     ///
@@ -259,9 +295,21 @@ QtObject {
     /// month grid whose rows jump when you create an event reads as a bug. The
     /// longest-first tiebreak is what keeps the long bar on top, where the eye
     /// expects the thing that lasts longest.
-    function spans(events: var, rowStartIso: string): var {
+    ///
+    /// **A bar that crosses a week boundary keeps its lane.** `laneHints` is the
+    /// `{ id: lane }` map the *previous* row hands forward (see `laneHintsOf`),
+    /// and a segment that continues from it is placed in that lane first, before
+    /// the greedy pass runs. Measured without it: Cabin weekend (Sat 22 → Mon
+    /// 24) drew in lane 2 on Saturday and lane 1 on Sunday, and the horizontal
+    /// thread the eye follows across the wrap was broken by the jump — the two
+    /// halves read as two events that happen to share a name. A hint whose lane
+    /// is already taken by a longer bar is dropped rather than forced; the
+    /// greedy pass then answers as it always did, so a hint can never make a row
+    /// deeper than it needs to be.
+    function spans(events: var, rowStartIso: string, laneHints): var {
         if (!policy.time.isDay(rowStartIso))
             return [];
+        const hints = (laneHints === undefined || laneHints === null) ? ({}) : laneHints;
         const rowEnd = policy.time.addDays(rowStartIso, policy.columns - 1);
 
         const segments = [];
@@ -282,7 +330,7 @@ QtObject {
                 "span": endCol - startCol + 1,
                 "continuesLeft": policy.time.compare(first, rowStartIso) < 0,
                 "continuesRight": policy.time.compare(last, rowEnd) > 0,
-                "lane": 0
+                "lane": -1
             });
         }
 
@@ -295,24 +343,40 @@ QtObject {
         });
 
         const lanes = [];
-        for (const segment of segments) {
-            let lane = 0;
-            for (;; lane++) {
-                if (lane === lanes.length)
-                    lanes.push(new Array(policy.columns).fill(false));
-                let free = true;
-                for (let column = segment.startCol; column < segment.startCol + segment.span; column++) {
-                    if (lanes[lane][column]) {
-                        free = false;
-                        break;
-                    }
-                }
-                if (free)
-                    break;
-            }
+        const freeIn = function (lane, segment) {
+            while (lane >= lanes.length)
+                lanes.push(new Array(policy.columns).fill(false));
+            for (let column = segment.startCol; column < segment.startCol + segment.span; column++)
+                if (lanes[lane][column])
+                    return false;
+            return true;
+        };
+        const occupy = function (lane, segment) {
             for (let column = segment.startCol; column < segment.startCol + segment.span; column++)
                 lanes[lane][column] = true;
             segment.lane = lane;
+        };
+
+        // The continuations first, each into the lane it held last row. A hint
+        // that no longer fits is simply not taken.
+        for (const carried of segments) {
+            if (!carried.continuesLeft)
+                continue;
+            const hint = hints[carried.id];
+            if (hint === undefined || hint === null || isNaN(hint) || hint < 0)
+                continue;
+            const lane = Math.floor(hint);
+            if (freeIn(lane, carried))
+                occupy(lane, carried);
+        }
+
+        for (const segment of segments) {
+            if (segment.lane >= 0)
+                continue;
+            let lane = 0;
+            while (!freeIn(lane, segment))
+                lane++;
+            occupy(lane, segment);
         }
 
         segments.sort(function (a, b) {
@@ -321,6 +385,18 @@ QtObject {
             return a.startCol - b.startCol;
         });
         return segments;
+    }
+
+    /// What this row hands the next one: `{ id: lane }` for every segment that
+    /// runs off its right edge. Only those — a bar that ended here has no claim
+    /// on next week's lanes, and hinting it would pin a lane against events that
+    /// really are there.
+    function laneHintsOf(segments: var): var {
+        const out = ({});
+        for (const segment of (segments || []))
+            if (segment.continuesRight)
+                out[segment.id] = segment.lane;
+        return out;
     }
 
     /// How many lanes deep a row's banners go — the height the view has to

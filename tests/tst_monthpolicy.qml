@@ -377,6 +377,139 @@ TestCase {
         compare(policy.chipCapacity(101, 1, 21, 26, 2, 30), 1);
     }
 
+    /// **The month view's own numbers, pinned here rather than read off a
+    /// capture.** At the surface's 1180x760 implicit size a month row is 113px,
+    /// and `MonthView` spends 26 on the numeral band and draws the spec's 21px
+    /// chips at a 2px gap. Three chips *and* the "+N more" line under them have
+    /// to fit, and they do — because the line is charged what it costs.
+    ///
+    /// **The pixel this test used to be about was the affordance's height.** An
+    /// earlier pass charged "+N more" a full chip row, which at 21px does not
+    /// fit, and shrank the chip to 20 to buy the row back — enshrining an
+    /// off-spec chip height at the seam. The line is one line of 11pt text: 16,
+    /// not 21. 26 + 3*21 + 2*2 + 2 + 16 = 111, inside 113. One pixel is not
+    /// something a picture argues about twice: it is arithmetic, so it is
+    /// checked here.
+    function test_the_month_grid_s_own_cell_fits_three_chips_and_the_more_line() {
+        const caps = policy.cellCapacity(113, 0, 21, 26, 2, 21, 16);
+        compare(caps.full, 3);
+        compare(caps.withMore, 3);
+
+        // Five timed events in one cell — the fixture's own busiest shape.
+        const busy = [
+            { "id": "b1", "title": "One", "start": "2026-08-18T09:00", "end": "2026-08-18T09:30", "allDay": false },
+            { "id": "b2", "title": "Two", "start": "2026-08-18T10:00", "end": "2026-08-18T11:00", "allDay": false },
+            { "id": "b3", "title": "Three", "start": "2026-08-18T11:00", "end": "2026-08-18T12:00", "allDay": false },
+            { "id": "b4", "title": "Four", "start": "2026-08-18T15:00", "end": "2026-08-18T16:00", "allDay": false },
+            { "id": "b5", "title": "Five", "start": "2026-08-18T16:30", "end": "2026-08-18T17:30", "allDay": false }
+        ];
+        const fits = policy.cellChipsFor(busy, "2026-08-18", caps);
+        compare(fits.shown.length, 3);
+        compare(fits.moreCount, 2);
+
+        // And the metric it replaced does not: this is the bug, stated. A
+        // chip-sized affordance costs the third event.
+        compare(policy.chipCapacity(113, 0, 21, 26, 2, 21), 3);
+        compare(policy.cellChips(busy, "2026-08-18",
+                                 policy.chipCapacity(113, 0, 21, 26, 2, 21)).shown.length, 2);
+
+        // A cell with exactly three timed events spends the third row on the
+        // third chip rather than on an affordance with nothing behind it.
+        compare(policy.cellChipsFor(busy.slice(0, 3), "2026-08-18", caps).moreCount, 0);
+
+        // A row that also carries one banner lane pays for it, as always: two
+        // events beside the line rather than three.
+        const under = policy.cellCapacity(113, 1, 21, 26, 2, 21, 16);
+        compare(under.full, 2);
+        compare(under.withMore, 2);
+        compare(policy.cellChipsFor(busy, "2026-08-18", under).shown.length, 2);
+        compare(policy.cellChipsFor(busy, "2026-08-18", under).moreCount, 3);
+    }
+
+    /// `withMore` never exceeds `full`: the line only ever costs room, and a
+    /// caller that reads the wrong one of the two must not get a *bigger*
+    /// answer for the harder case.
+    function test_the_more_line_only_ever_costs_room() {
+        for (let h = 0; h <= 200; h += 7) {
+            const caps = policy.cellCapacity(h, 0, 21, 26, 2, 21, 16);
+            verify(caps.withMore <= caps.full);
+            verify(caps.withMore >= 0);
+        }
+        // With no separate affordance height it is exactly the old behaviour.
+        const same = policy.cellCapacity(113, 0, 21, 26, 2, 21);
+        compare(same.full, policy.chipCapacity(113, 0, 21, 26, 2, 21));
+    }
+
+    /// **A bar that crosses the week wrap keeps its lane.** Cabin weekend runs
+    /// Saturday 22 into Sunday 23, which on a Sunday-first grid is the last
+    /// column of one row and the first of the next. Without a hint the greedy
+    /// pass gives the second half lane 0 while the first half sat in lane 1, and
+    /// the two halves read as two events that share a name.
+    function test_a_bar_that_crosses_the_wrap_keeps_its_lane() {
+        const events = [
+            { "id": "long", "title": "Nordic QML Days", "start": "2026-08-20T09:00", "end": "2026-08-22T17:00", "allDay": false },
+            { "id": "cabin", "title": "Cabin weekend", "start": "2026-08-22T00:00", "end": "2026-08-24T00:00", "allDay": true }
+        ];
+        // Week of Sun 16 → Sat 22. The long bar starts first and takes lane 0;
+        // Cabin weekend overlaps it on the Saturday, so it takes lane 1 and runs
+        // off the right edge.
+        const first = policy.spans(events, "2026-08-16");
+        const cabinFirst = first.filter(s => s.id === "cabin")[0];
+        compare(cabinFirst.lane, 1);
+        verify(cabinFirst.continuesRight);
+
+        const hints = policy.laneHintsOf(first);
+        compare(hints["cabin"], 1);
+        compare(hints["long"], undefined);   // it ended inside the row
+
+        // Week of Sun 23. Alone in the row, the greedy pass says lane 0.
+        const bare = policy.spans(events, "2026-08-23");
+        compare(bare.filter(s => s.id === "cabin")[0].lane, 0);
+
+        const carried = policy.spans(events, "2026-08-23", hints);
+        const cabinSecond = carried.filter(s => s.id === "cabin")[0];
+        compare(cabinSecond.lane, 1);
+        verify(cabinSecond.continuesLeft);
+    }
+
+    /// A hint is a preference, not a reservation. Two bars carried into the same
+    /// row cannot both have the lane they held: the longer one keeps it — bars
+    /// are taken longest-first, which is the same order the greedy pass uses —
+    /// and the other falls through to greedy, which is the answer it would have
+    /// had anyway.
+    function test_a_hint_that_no_longer_fits_is_dropped() {
+        const events = [
+            { "id": "a", "title": "A", "start": "2026-08-21T00:00", "end": "2026-08-25T00:00", "allDay": true },
+            { "id": "b", "title": "B", "start": "2026-08-22T00:00", "end": "2026-08-26T00:00", "allDay": true }
+        ];
+        const carried = policy.spans(events, "2026-08-23", { "a": 0, "b": 0 });
+        compare(carried.filter(s => s.id === "b")[0].lane, 0);
+        compare(carried.filter(s => s.id === "a")[0].lane, 1);
+        compare(policy.laneCount(carried), 2);
+
+        // And a hint into an empty lane above the greedy answer is honoured, so
+        // a bar that was deep in one row does not jump to the top in the next.
+        const deep = policy.spans(events, "2026-08-23", { "a": 3 });
+        compare(deep.filter(s => s.id === "a")[0].lane, 3);
+        compare(deep.filter(s => s.id === "b")[0].lane, 0);
+    }
+
+    /// Nonsense hints are no hints. A lane of `null`, a negative one, an id that
+    /// is not in this row — none of them may throw or shift a bar.
+    function test_hints_that_mean_nothing_change_nothing() {
+        const events = [
+            { "id": "cabin", "title": "Cabin weekend", "start": "2026-08-22T00:00", "end": "2026-08-24T00:00", "allDay": true }
+        ];
+        const plain = policy.spans(events, "2026-08-23");
+        compare(plain[0].lane, 0);
+        compare(policy.spans(events, "2026-08-23", null)[0].lane, 0);
+        compare(policy.spans(events, "2026-08-23", {})[0].lane, 0);
+        compare(policy.spans(events, "2026-08-23", { "cabin": -1 })[0].lane, 0);
+        compare(policy.spans(events, "2026-08-23", { "cabin": null })[0].lane, 0);
+        compare(policy.spans(events, "2026-08-23", { "ghost": 3 })[0].lane, 0);
+        compare(policy.laneHintsOf(null).cabin, undefined);
+    }
+
     function test_lanes_that_are_not_a_number_are_no_lanes() {
         compare(policy.chipCapacity(100, undefined), 3);
         compare(policy.chipCapacity(100, -4), 3);

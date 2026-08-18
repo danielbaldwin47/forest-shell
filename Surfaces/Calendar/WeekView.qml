@@ -1029,19 +1029,8 @@ Item {
         property bool parked: false
         onHeightChanged: {
             if (!body.parked && body.height > 0) {
-                const defaultY = view.grid.visibleScrollY(view.grid.defaultStartHour,
+                body.contentY = view.grid.visibleScrollY(view.grid.defaultStartHour,
                                                           view.hourRow, body.height);
-                // If today is on screen but its now-line falls outside the
-                // 7am-default viewport, park on the now-line instead — about a
-                // third of the way down — rather than open onto a today that
-                // is not actually visible.
-                const range = view.grid.visibleRange(defaultY, body.height, view.hourRow);
-                const nowMinutes = view.grid.yToMinutes(view.nowY, view.hourRow);
-                const inView = range && nowMinutes >= range.startMinutes && nowMinutes <= range.endMinutes;
-                body.contentY = (view.nowColumn >= 0 && !inView)
-                    ? Math.max(0, Math.min(view.grid.minutesToY(nowMinutes, view.hourRow) - body.height / 3,
-                                            view.grid.dayHeight(view.hourRow) - body.height))
-                    : defaultY;
                 body.parked = true;
             }
         }

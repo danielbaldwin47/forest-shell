@@ -415,6 +415,10 @@ QtObject {
     /// deciding whether an event needs to be scrolled to at all. Clamped
     /// because a `Flickable` overshoots at both ends, and "the view is showing
     /// minute -40" is a fact about a bounce rather than about the day.
+    ///
+    /// This is the harness/scroll-into-view API: the arithmetic exists and is
+    /// tested here, but no surface calls it yet — `WeekView`'s opening scroll
+    /// always parks on `visibleScrollY(defaultStartHour, ...)`, never on this.
     function visibleRange(scrollY: real, viewportHeight: real, hourHeight): var {
         const h = grid.hourPixels(hourHeight);
         if (isNaN(h) || !isFinite(scrollY) || !isFinite(viewportHeight) || viewportHeight < 0)

@@ -8,7 +8,10 @@
       "end": "2026-08-17T09:30",
       "allDay": false,
       "colour": "",
-      "guests": ["mira", "juno"]
+      "guests": [
+        "mira",
+        "juno"
+      ]
     },
     {
       "id": "evt-2",
@@ -17,7 +20,9 @@
       "end": "2026-08-17T14:00",
       "allDay": false,
       "colour": "",
-      "guests": ["rune"]
+      "guests": [
+        "rune"
+      ]
     },
     {
       "id": "evt-3",
@@ -26,7 +31,10 @@
       "end": "2026-08-18T11:30",
       "allDay": false,
       "colour": "",
-      "guests": ["mira", "tabby"]
+      "guests": [
+        "mira",
+        "tabby"
+      ]
     },
     {
       "id": "evt-4",
@@ -35,7 +43,9 @@
       "end": "2026-08-18T12:00",
       "allDay": false,
       "colour": "",
-      "guests": ["opal"]
+      "guests": [
+        "opal"
+      ]
     },
     {
       "id": "evt-5",
@@ -44,7 +54,11 @@
       "end": "2026-08-18T12:30",
       "allDay": false,
       "colour": "",
-      "guests": ["juno", "birch", "wren"]
+      "guests": [
+        "juno",
+        "birch",
+        "wren"
+      ]
     },
     {
       "id": "evt-6",
@@ -53,7 +67,9 @@
       "end": "2026-08-18T15:45",
       "allDay": false,
       "colour": "",
-      "guests": ["opal"]
+      "guests": [
+        "opal"
+      ]
     },
     {
       "id": "evt-7",
@@ -71,7 +87,11 @@
       "end": "2026-08-19T15:00",
       "allDay": false,
       "colour": "",
-      "guests": ["mira", "juno", "cass"]
+      "guests": [
+        "mira",
+        "juno",
+        "cass"
+      ]
     },
     {
       "id": "evt-9",
@@ -80,7 +100,9 @@
       "end": "2026-08-22T17:00",
       "allDay": false,
       "colour": "",
-      "guests": ["rune"]
+      "guests": [
+        "rune"
+      ]
     },
     {
       "id": "evt-10",
@@ -89,7 +111,9 @@
       "end": "2026-08-21T20:00",
       "allDay": false,
       "colour": "",
-      "guests": ["cass"]
+      "guests": [
+        "cass"
+      ]
     },
     {
       "id": "evt-11",
@@ -99,6 +123,271 @@
       "allDay": false,
       "colour": "",
       "guests": []
+    },
+    {
+      "id": "evt-12",
+      "title": "Sprint planning",
+      "start": "2026-08-20T08:00",
+      "end": "2026-08-20T09:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "mira",
+        "rune"
+      ]
+    },
+    {
+      "id": "evt-13",
+      "title": "Standup",
+      "start": "2026-08-20T09:00",
+      "end": "2026-08-20T09:15",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "mira",
+        "juno"
+      ]
+    },
+    {
+      "id": "evt-14",
+      "title": "Roadmap sync",
+      "start": "2026-08-20T14:00",
+      "end": "2026-08-20T15:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "opal"
+      ]
+    },
+    {
+      "id": "evt-15",
+      "title": "Interview: Wren",
+      "start": "2026-08-20T15:00",
+      "end": "2026-08-20T16:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "wren",
+        "birch"
+      ]
+    },
+    {
+      "id": "evt-16",
+      "title": "Release cut",
+      "start": "2026-08-20T16:30",
+      "end": "2026-08-20T17:30",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "rune"
+      ]
+    },
+    {
+      "id": "evt-17",
+      "title": "Cabin weekend",
+      "start": "2026-08-22T00:00",
+      "end": "2026-08-24T00:00",
+      "allDay": true,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-18",
+      "title": "Team retreat",
+      "start": "2026-08-30T00:00",
+      "end": "2026-09-02T00:00",
+      "allDay": true,
+      "colour": "",
+      "guests": [
+        "mira",
+        "juno",
+        "cass"
+      ]
+    },
+    {
+      "id": "evt-19",
+      "title": "Standup",
+      "start": "2026-08-05T09:00",
+      "end": "2026-08-05T09:15",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-20",
+      "title": "Arch review",
+      "start": "2026-08-05T10:00",
+      "end": "2026-08-05T11:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "rune"
+      ]
+    },
+    {
+      "id": "evt-21",
+      "title": "Lunch w/ Birch",
+      "start": "2026-08-05T12:30",
+      "end": "2026-08-05T13:30",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "birch"
+      ]
+    },
+    {
+      "id": "evt-22",
+      "title": "Budget walkthrough",
+      "start": "2026-08-05T14:00",
+      "end": "2026-08-05T15:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "opal"
+      ]
+    },
+    {
+      "id": "evt-23",
+      "title": "Interview: Fern",
+      "start": "2026-08-05T16:00",
+      "end": "2026-08-05T17:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "wren"
+      ]
+    },
+    {
+      "id": "evt-24",
+      "title": "Physio",
+      "start": "2026-08-04T08:00",
+      "end": "2026-08-04T08:45",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-25",
+      "title": "Board prep",
+      "start": "2026-08-06T13:00",
+      "end": "2026-08-06T14:30",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "mira"
+      ]
+    },
+    {
+      "id": "evt-26",
+      "title": "Field week",
+      "start": "2026-08-10T00:00",
+      "end": "2026-08-13T00:00",
+      "allDay": true,
+      "colour": "",
+      "guests": [
+        "juno"
+      ]
+    },
+    {
+      "id": "evt-27",
+      "title": "Standup",
+      "start": "2026-08-11T09:00",
+      "end": "2026-08-11T09:15",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-28",
+      "title": "Sync w/ Cass",
+      "start": "2026-08-11T11:00",
+      "end": "2026-08-11T12:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "cass"
+      ]
+    },
+    {
+      "id": "evt-29",
+      "title": "Deploy window",
+      "start": "2026-08-11T15:00",
+      "end": "2026-08-11T16:00",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-30",
+      "title": "Retro",
+      "start": "2026-08-12T14:00",
+      "end": "2026-08-12T15:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "mira",
+        "opal"
+      ]
+    },
+    {
+      "id": "evt-31",
+      "title": "Quarter close",
+      "start": "2026-08-26T09:30",
+      "end": "2026-08-26T10:30",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "rune"
+      ]
+    },
+    {
+      "id": "evt-32",
+      "title": "Docs day",
+      "start": "2026-08-26T11:00",
+      "end": "2026-08-26T12:00",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-33",
+      "title": "Dentist",
+      "start": "2026-08-27T08:15",
+      "end": "2026-08-27T09:00",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-34",
+      "title": "Handover",
+      "start": "2026-07-30T10:00",
+      "end": "2026-07-30T11:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "rune"
+      ]
+    },
+    {
+      "id": "evt-35",
+      "title": "Trail run",
+      "start": "2026-08-01T09:00",
+      "end": "2026-08-01T10:30",
+      "allDay": false,
+      "colour": "",
+      "guests": []
+    },
+    {
+      "id": "evt-36",
+      "title": "Q4 kickoff",
+      "start": "2026-09-03T14:00",
+      "end": "2026-09-03T15:00",
+      "allDay": false,
+      "colour": "",
+      "guests": [
+        "mira"
+      ]
     }
   ]
 }

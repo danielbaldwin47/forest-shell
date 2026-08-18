@@ -333,6 +333,38 @@ QtObject {
         return deepest + 1;
     }
 
+    /// How many lanes deep the banners are **over one column** — the height that
+    /// column's own chips have to clear, which is not the row's.
+    ///
+    /// The difference is a whole week of events. A row's lane count is the
+    /// deepest stack anywhere in it, and charging every cell that height was
+    /// measured to empty the three busiest days of a month: at 1180x760 a row is
+    /// 113px, two banner lanes cost 46, and the Monday and Tuesday either side
+    /// of a Wednesday conference — with no bar over them at all — were left with
+    /// 43px, room for one row, which the "+N more" affordance then took. Three
+    /// cells showed nothing but "+4 more" while the cell between them showed a
+    /// chip.
+    ///
+    /// Charging each column only for the bars that actually cross it keeps the
+    /// alignment where alignment is the point — a cell under a banner starts its
+    /// chips below that banner, so a bar never has a chip beside it pretending
+    /// to be in the same lane — and gives the pixels back everywhere else. The
+    /// stack stays top-aligned in every cell either way, which is the edge the
+    /// eye actually reads down.
+    ///
+    /// Depth, not count: a lane-1 bar over a column with no lane-0 bar still
+    /// sits at the lane-1 offset, so the column owes both.
+    function laneDepthAt(segments: var, column: int): int {
+        const col = Math.floor(column);
+        let deepest = -1;
+        for (const segment of (segments || [])) {
+            const start = segment.startCol;
+            if (col >= start && col < start + segment.span)
+                deepest = Math.max(deepest, segment.lane);
+        }
+        return deepest + 1;
+    }
+
     // --- paging ---------------------------------------------------------------
 
     /// The anchor `delta` months away, with the day **clamped** into the month

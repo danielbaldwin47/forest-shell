@@ -493,6 +493,51 @@ TestCase {
         compare(policy.laneCount(policy.spans(testCase.sample, "2026-08-09")), 0);
     }
 
+    /// A column pays only for the bars that cross it. The row below is two
+    /// lanes deep, but four of its seven columns have no bar over them at all,
+    /// and charging those four for the deepest stack in the row is what emptied
+    /// the busiest cells of the month (see `laneDepthAt`).
+    function test_a_column_pays_only_for_the_bars_that_cross_it() {
+        const stacked = [
+            // Wednesday to Friday, lane 0.
+            { "id": "evt-1", "start": "2026-08-19T00:00", "end": "2026-08-22T00:00", "allDay": true },
+            // Wednesday alone, so it stacks under evt-1 on that one column.
+            { "id": "evt-2", "start": "2026-08-19T00:00", "end": "2026-08-20T00:00", "allDay": true }
+        ];
+        const row = policy.spans(stacked, "2026-08-16");
+        compare(policy.laneCount(row), 2);
+
+        compare(policy.laneDepthAt(row, 0), 0);   // Sunday   — nothing over it
+        compare(policy.laneDepthAt(row, 2), 0);   // Tuesday  — nothing over it
+        compare(policy.laneDepthAt(row, 3), 2);   // Wednesday — both bars
+        compare(policy.laneDepthAt(row, 4), 1);   // Thursday  — the long bar only
+        compare(policy.laneDepthAt(row, 5), 1);   // Friday    — its last day
+        compare(policy.laneDepthAt(row, 6), 0);   // Saturday  — past its end
+    }
+
+    /// Depth, not population: a bar in lane 1 sits at the lane-1 offset whether
+    /// or not anything occupies lane 0 above it, so the column owes both.
+    function test_a_lone_bar_in_a_lower_lane_still_costs_the_lanes_above_it() {
+        const stacked = [
+            // Sunday–Monday, first in, lane 0.
+            { "id": "evt-1", "start": "2026-08-16T00:00", "end": "2026-08-18T00:00", "allDay": true },
+            // Monday–Thursday: it collides on Monday, so it takes lane 1 and
+            // carries it all the way to Thursday, where nothing is above it.
+            { "id": "evt-2", "start": "2026-08-17T00:00", "end": "2026-08-21T00:00", "allDay": true }
+        ];
+        const row = policy.spans(stacked, "2026-08-16");
+        compare(testCase.byId(row, "evt-1").lane, 0);
+        compare(testCase.byId(row, "evt-2").lane, 1);
+        // Wednesday is reached by the lane-1 bar alone and still owes two.
+        compare(policy.laneDepthAt(row, 3), 2);
+        compare(policy.laneDepthAt(row, 0), 1);
+    }
+
+    function test_lane_depth_survives_an_empty_or_missing_row() {
+        compare(policy.laneDepthAt([], 3), 0);
+        compare(policy.laneDepthAt(null, 3), 0);
+    }
+
     function test_a_bad_row_start_is_no_segments() {
         compare(policy.spans(testCase.sample, "2026-8-16").length, 0);
         compare(policy.spans(testCase.sample, "").length, 0);

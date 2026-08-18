@@ -78,13 +78,12 @@ Item {
     /// than left to its defaults, so the arithmetic that caps the stack and the
     /// delegate that draws it are reading one number.
     ///
-    /// **20 and not the visual spec's 21**, and the pixel was measured rather
-    /// than argued: at 1180x760 a row is 113px, and a 23px pitch fits two chip
-    /// rows under a banner lane where a 22px pitch fits three. One pixel per
-    /// chip bought back a whole line in every cell of every row that has a
-    /// multi-day event in it — the 18th showed one chip and "+3 more" at 21,
-    /// and two chips and "+2 more" at 20.
-    readonly property int chipH: 20
+    /// 21 and 2, the visual spec's numbers. An earlier pass shaved the chip to
+    /// 20 to buy back a line in the rows that carry a banner lane; the review
+    /// read that back off the capture as the one place the month grid did not
+    /// match its own spec, and a line bought by breaking the shared metric is
+    /// not worth the line.
+    readonly property int chipH: 21
     readonly property int chipGap: 2
 
     /// The room the day numeral takes above the first chip: the 21px today
@@ -106,48 +105,75 @@ Item {
     /// "+N more" at cell+22, which is a ragged stack at a glance.
     readonly property int contentInset: Theme.space2
 
-    /// Where the *text* column starts inside that: past the hue dot and the gap
-    /// after it. Stated here rather than inside the chip because the "+N more"
-    /// row has no dot of its own and still has to sit in the same column.
+    /// The hue dot the chip carries. Handed down rather than left to the
+    /// chip's default so the grid owns every metric that repeats 42 times.
+    ///
+    /// **There is no title column, and that is the point.** A previous pass
+    /// gave the time a fixed slot measured off the widest string the formatter
+    /// can produce and right-aligned the digits inside it, so that every title
+    /// in a stack began at one x. Measured off the capture, that slot opened a
+    /// 42px void between the dot and the time on every short time — 22% of a
+    /// 194px cell spent on nothing — and elided four of six titles at widths
+    /// where the reference fits them whole. The chips already share a left
+    /// edge, because their bodies do; buying a second alignment with the
+    /// title's own width is the wrong trade at this size.
     readonly property int chipDotD: 6
-    readonly property int chipTitleInset: view.chipDotD + Theme.space1
 
-    // --- the month boundary, as a fill ------------------------------------------
+    // --- the cell ladder --------------------------------------------------------
     //
-    // The single thing a month view exists to show is which days are in the
-    // month, and the first pass showed it with nothing but numeral opacity —
-    // measured identical fills either side of the boundary. The spec's
-    // `bgSunken at 0.4` cannot carry it in dark mode: `bgSunken` is `#070a08`
-    // against a `#0b100d` page, a 1.04:1 step that is invisible at any alpha
-    // (`CalendarTokens` measured the same trap on the weekend wash).
+    // **Two cues, and they are not the same cue.** Weekday/weekend is a *fill*
+    // and runs the full height of a column; in/out of month is a *recede* and
+    // applies to whichever fill the cell already had. Collapsing both onto one
+    // four-rung ladder is what the pass before this did, and the review
+    // measured the result: out-of-month landed on `bgSunken` at g 10, darker
+    // than every in-month cell by 17, so the leading row read as a hole punched
+    // in the surface rather than a month falling away — and the trailing row
+    // checkered dark/light mid-week where the two cues crossed.
     //
-    // So the boundary is drawn the other way up: the month's own days are
-    // *lifted* to `Theme.surface`, the panel colour, and the neighbouring
-    // months' days sink to `bgSunken`. That is a 1.13:1 step, and it is the
-    // largest step in the grid on purpose — bigger than the weekend wash, which
-    // was previously the loudest cue and inverted the hierarchy (a Sunday in
-    // July read lighter than a Wednesday in August).
+    // So (green channel, dark palette, where the eye's response is steepest):
     //
-    // Light mode needs no inversion: paper is already above the well, so the
-    // same two tokens land the same way round.
-    readonly property color inMonthFill: Theme.surface
-    readonly property color outMonthFill: Theme.bgSunken
+    //     weekday, in      surfaceRaised                        g 38
+    //     weekday, out     the same, sunk 28%                   g 30
+    //     weekend, in      surfaceRaised sunk 60%               g 21
+    //     weekend, out     the same, sunk 28%                   g 18
+    //     grid rule        borderSubtle                         g 56
+    //
+    // The weekday→weekend step is 17 and the rule now clears its cell by 18 —
+    // comparable, where before the rule was `borderSubtle` lightened 35% (g 76,
+    // a 38 step) and so shouted down a weekend delta of 11. A rule louder than
+    // every wash in the grid is a rule the eye reads instead of the shape.
+    //
+    // The weekend *recedes*, which is what a weekend is: the brief asks for the
+    // week's shape to be readable peripherally, and a receding Saturday says
+    // "quiet" where a lifted one said "look here". Out of month, the fill moves
+    // one small step and the numeral's 40% opacity and the chips' 55% carry the
+    // rest — the boundary is a change in *weight*, not a change in ground.
+    //
+    // **Today wears no wash at all.** The spec asks for one mark on today, a
+    // 22px filled circle behind the numeral, and a previous pass added a cell
+    // tint on top of it that measured (43,65,62) — a teal shift, not a lift, so
+    // today's cell was the one square in the grid whose ground had a hue. The
+    // circle is unambiguous and it is enough.
+    //
+    // Light mode walks the same ladder downward from paper; `surfaceRaised`
+    // there is pure white and `bgSunken` is the bottom of the token set, so the
+    // same two mixes land in the same relative places.
+    readonly property color cellWeekday: Theme.surfaceRaised
+    readonly property color cellWeekend: Qt.tint(Theme.surfaceRaised,
+        Qt.alpha(Theme.bgSunken, 0.6))
 
-    /// The weekend cue, deliberately the *smaller* of the two washes, and
-    /// applied over whichever fill the cell already has. Out of the month it is
-    /// weaker again: a Saturday in September is a September day first.
-    readonly property color weekendOverIn: Theme.dark
-        ? Qt.alpha(Theme.surfaceOverlay, 0.45) : Qt.alpha(Theme.bgSunken, 0.55)
-    readonly property color weekendOverOut: Theme.dark
-        ? Qt.alpha(Theme.surfaceOverlay, 0.26) : Qt.alpha(Theme.borderSubtle, 0.16)
+    /// How far out of the month a cell sinks, on whichever rung it started.
+    /// Applied as arithmetic rather than as a translucent layer so every cell
+    /// in the grid is one opaque colour — stacked washes are what let a
+    /// Saturday out-shout today in the pass before last.
+    function outsideOf(base: color): color {
+        return Qt.tint(base, Qt.alpha(Theme.bgSunken, 0.28));
+    }
 
-    /// The grid lines, softer than `borderSubtle` alone. Once the cells carry
-    /// their own fill the rule is only separating two greys that already
-    /// differ, so it can drop back to a hairline — at full strength (`#2a3830`
-    /// on a near-black cell) the three empty top rows read as a spreadsheet.
-    /// Measured on the capture: 1.14:1 against the cell it sits on, against
-    /// 1.20:1 at 0.55 and 1.6:1 at full strength.
-    readonly property color ruleColor: Qt.alpha(Theme.borderSubtle, 0.42)
+    /// The grid lines. `borderSubtle` at full strength: 18/255 over the weekday
+    /// rung, which is the same order as the weekday→weekend step, so the rule
+    /// draws the grid without becoming the loudest thing in it.
+    readonly property color ruleColor: Theme.borderSubtle
 
     readonly property real rowH: view.policy.rows > 0
         ? Math.max(0, (view.height - view.headingH) / view.policy.rows) : 0
@@ -213,12 +239,15 @@ Item {
             const rowStart = week.length > 0 ? week[0].iso : "";
             const segments = view.policy.spans(view.events, rowStart);
             const lanes = view.policy.laneCount(segments);
-            const capacity = view.policy.chipCapacity(
-                view.rowH - view.cellFootH, lanes,
-                view.chipH, view.cellHeaderH, view.chipGap, view.chipH);
             const cells = [];
             for (let c = 0; c < week.length; c++) {
                 const day = week[c];
+                // Per column, not per row: a Monday with no bar over it keeps
+                // its own height. `laneDepthAt` states why.
+                const depth = view.policy.laneDepthAt(segments, c);
+                const capacity = view.policy.chipCapacity(
+                    view.rowH - view.cellFootH, depth,
+                    view.chipH, view.cellHeaderH, view.chipGap, view.chipH);
                 const chips = view.policy.cellChips(view.events, day.iso, capacity);
                 cells.push({
                     "iso": day.iso,
@@ -226,6 +255,7 @@ Item {
                     "inMonth": day.inMonth,
                     "isToday": day.isToday,
                     "isWeekend": day.isWeekend,
+                    "laneDepth": depth,
                     "shown": chips.shown,
                     "moreCount": chips.moreCount
                 });
@@ -261,6 +291,17 @@ Item {
         anchors.top: parent.top
         height: view.headingH
 
+        /// **The band is grid, not chrome.** It was previously transparent,
+        /// which let the window's `bgBase` through — so the caps read as the
+        /// bottom of the toolbar and the grid appeared to start a row late.
+        /// Painting it on the same rung the weekday cells use puts it on the
+        /// grid's own ground, and the toolbar's `bgBase` above it is then a
+        /// 22/255 step that separates the two without a second rule.
+        Rectangle {
+            anchors.fill: parent
+            color: view.cellWeekday
+        }
+
         Repeater {
             model: view.headings
 
@@ -279,14 +320,13 @@ Item {
                 width: view.colEdges[cap.index + 1] - view.colEdges[cap.index]
                 height: heading.height
 
-                /// The weekend wash runs *through* the header rather than
-                /// starting under it. Measured complaint from the first pass:
-                /// the caps carried no weekend cue at all while the columns
-                /// beneath them were washed, so the header disagreed with its
-                /// own grid.
+                /// The weekend cue runs *through* the header rather than
+                /// starting under it, on the same rung the weekend cells take,
+                /// so the header cannot disagree with its own grid about which
+                /// two columns are quiet.
                 Rectangle {
                     anchors.fill: parent
-                    color: view.weekendOverIn
+                    color: view.cellWeekend
                     visible: cap.isWeekend
                 }
 
@@ -312,8 +352,8 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 1
-            color: Theme.borderSubtle
+            height: view.ruleW
+            color: view.ruleColor
         }
     }
 
@@ -341,10 +381,14 @@ Item {
                 readonly property var cells: row.rowData ? row.rowData.cells : []
                 readonly property var segments: row.rowData ? row.rowData.segments : []
 
-                /// Where this row's chips begin: under the numeral, and under
-                /// however many banner lanes the row reserved.
-                readonly property real chipTop: view.cellHeaderH
-                    + (row.rowData ? row.rowData.lanes : 0) * (view.chipH + view.chipGap)
+                /// Where a cell's chips begin: under the numeral, and under the
+                /// banner lanes that cross *that* column. A row-wide reservation
+                /// charged a bar-free Monday for a Wednesday conference and left
+                /// it no room for its own events — `MonthPolicy.laneDepthAt`
+                /// carries the measurement.
+                function chipTop(depth: int): real {
+                    return view.cellHeaderH + depth * (view.chipH + view.chipGap);
+                }
 
                 // Whole-pixel rows, and each row ends exactly where the next
                 // one begins. A fractional `rowH` used directly gave a grid
@@ -376,35 +420,19 @@ Item {
                         width: view.colEdges[wash.index + 1] - view.colEdges[wash.index]
                         height: row.height
 
-                        /// The month, as a fill. The loudest step in the grid,
-                        /// and the one the view exists to make.
+                        /// **One rectangle, one colour.** The column's fill
+                        /// picks the rung; the month boundary sinks it. Both
+                        /// resolve to a single opaque value before anything is
+                        /// painted, so no cell can be lifted by a wash that
+                        /// belongs to another cue.
                         Rectangle {
                             anchors.fill: parent
-                            color: !wash.cell ? view.outMonthFill
-                                 : wash.cell.inMonth ? view.inMonthFill
-                                 : view.outMonthFill
-                        }
 
-                        /// The weekend stripe runs the **whole grid**, through
-                        /// the days of the neighbouring months in the first and
-                        /// last rows — a Saturday is a Saturday whether or not
-                        /// it belongs to the month on the toolbar. It is quieter
-                        /// out of the month so it can never out-shout the
-                        /// boundary above it.
-                        Rectangle {
-                            anchors.fill: parent
-                            color: (wash.cell && wash.cell.inMonth)
-                                ? view.weekendOverIn : view.weekendOverOut
-                            visible: wash.cell ? wash.cell.isWeekend : false
-                        }
+                            readonly property color base: wash.cell && wash.cell.isWeekend
+                                ? view.cellWeekend : view.cellWeekday
 
-                        /// Today's cell, tinted. The numeral's filled circle is
-                        /// the mark; this is what makes the mark findable from
-                        /// across the grid without borrowing a second colour.
-                        Rectangle {
-                            anchors.fill: parent
-                            color: CalendarTokens.todayWash
-                            visible: wash.cell ? wash.cell.isToday : false
+                            color: wash.cell && wash.cell.inMonth
+                                ? base : view.outsideOf(base)
                         }
                     }
                 }
@@ -438,6 +466,7 @@ Item {
                         visible: rule.index > 0
                     }
                 }
+
 
                 // --- the day numerals -----------------------------------------
 
@@ -544,10 +573,18 @@ Item {
                         leadPad: bar.leftInset > 0 ? 0 : view.contentInset
                         visible: !!bar.source
 
+                        /// **One unbroken pill between its true ends.** The
+                        /// pass before this had the bar crease itself at every
+                        /// column edge it crossed, so that the grid still read
+                        /// through it; the review measured those creases as
+                        /// ~3px dark gaps and a three-day event as a dashed row
+                        /// of slabs. Which days a banner covers is already said
+                        /// by the numerals it runs under, and a continuous run
+                        /// is the only shape that says "one event" at a glance.
+
                         event: bar.source
                         hue: CalendarTokens.hues.forEvent(bar.source)
                         dotD: view.chipDotD
-                        titleInset: view.chipTitleInset
                         banner: true
                         continuesLeft: bar.segment ? bar.segment.continuesLeft : false
                         continuesRight: bar.segment ? bar.segment.continuesRight : false
@@ -575,12 +612,15 @@ Item {
 
                         // The same inset as the numeral above and the banners
                         // beside: one left edge per cell.
+                        readonly property real stackTop: row.chipTop(
+                            stack.cell ? stack.cell.laneDepth : 0)
+
                         x: view.colEdges[stack.index] + view.contentInset
-                        y: row.chipTop
+                        y: stack.stackTop
                         width: Math.max(0, view.colEdges[stack.index + 1]
                                            - view.colEdges[stack.index]
                                            - 2 * view.contentInset)
-                        height: Math.max(0, row.height - row.chipTop)
+                        height: Math.max(0, row.height - stack.stackTop)
 
                         // A neighbouring month's events still happened, and a
                         // cell that hid them would be lying about the row it is
@@ -608,7 +648,6 @@ Item {
                                     event: chipItem.source
                                     hue: CalendarTokens.hues.forEvent(chipItem.source)
                                     dotD: view.chipDotD
-                                    titleInset: view.chipTitleInset
                                     selected: chipItem.source
                                         ? view.selectedId === chipItem.source.id : false
                                     use24: view.use24
@@ -629,11 +668,14 @@ Item {
 
                                 Text {
                                     anchors.left: parent.left
-                                    // Lined up with the chip *titles* above it,
-                                    // not with the chip's edge: the dot and the
-                                    // gap after it are what every title starts
-                                    // behind, and the chip owns that number.
-                                    anchors.leftMargin: view.chipTitleInset
+                                    // Flush with the chip bodies above it and
+                                    // the numeral above them — the cell has one
+                                    // left edge and this row is on it. The pass
+                                    // before this indented it to where chip
+                                    // *titles* began, which measured 87px into
+                                    // a cell whose content starts at 13 and
+                                    // read as a caption floating mid-cell.
+                                    anchors.leftMargin: 0
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: "+" + stack.moreCount + " more"
                                     color: Theme.textSecondary
@@ -657,5 +699,18 @@ Item {
                 }
             }
         }
+    }
+
+    /// **The grid has four sides.** Only the internal rules were drawn before,
+    /// so Saturday ran off the right edge of the window with nothing closing it
+    /// and the last row sat on bare background — the grid read as a fragment of
+    /// a larger table scrolled out of view. This is the outer frame, drawn last
+    /// and over everything, so the header band and the grid are one object.
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.width: view.ruleW
+        border.color: view.ruleColor
+        z: 6
     }
 }

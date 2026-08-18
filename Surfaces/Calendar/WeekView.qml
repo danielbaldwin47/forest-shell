@@ -99,8 +99,9 @@ Item {
     property var posedDrag: null
 
     /// The dashed rectangle the drag's origin is drawn with lives in
-    /// `DashedEdge.qml` beside this file — `EventChip` needs it too, and an
-    /// inline `component` is reachable from exactly one file.
+    /// `DashedRect.qml` beside this file (one edge of it in `DashedEdge.qml`) —
+    /// `EventChip` needs the same four edges to hollow itself out, and an inline
+    /// `component` is reachable from exactly one file.
 
     // --- the geometry, all of it from the policy -------------------------------
 
@@ -199,6 +200,20 @@ Item {
     readonly property int nowColumn: view.nowY < 0
         ? -1
         : view.columnIndexOf(view.eventPolicy.time.dayOf(view.nowStamp))
+
+    /// Whether the now-line is inside the scrolled viewport — the one question
+    /// `TimeGridPolicy.visibleRange` answers, asked here rather than left as an
+    /// API nobody calls. It changes no scroll position: the grid still opens on
+    /// the working day, because a view that chased the clock would land
+    /// somewhere different every hour of the day. It only makes "today is in
+    /// view and its line is not" a fact the log can be asserted on.
+    readonly property bool nowLineVisible: {
+        const range = view.grid.visibleRange(body.contentY, body.height, view.hourRow);
+        if (!range || view.nowColumn < 0)
+            return false;
+        const minutes = view.grid.yToMinutes(view.nowY, view.hourRow);
+        return minutes >= range.startMinutes && minutes <= range.endMinutes;
+    }
     /// The three column questions, all answered from `TimeGridPolicy`'s whole-
     /// pixel edges rather than from `columnW`. Multiplying a fractional width
     /// out per column drifted 148/150/148/149 across a week — the same design
@@ -433,8 +448,8 @@ Item {
     /// The hour rule the proposal starts in, so the gutter can say which hour
     /// this is landing in without the reader tracking a box back to the labels.
     readonly property real dragHourY: view.dragShown
-        ? Math.floor(view.grid.yToMinutes(view.proposal.y, view.hourRow) / 60)
-          * view.hourRow
+        ? view.grid.hourTopY(view.grid.yToMinutes(view.proposal.y, view.hourRow),
+                             view.hourRow)
         : -1
 
     // --- the quick-create panel -----------------------------------------------
@@ -890,20 +905,16 @@ Item {
 
                 readonly property real lead: view.columnX(modelData.startCol)
                     + (bandBar.runsIn ? 0 : view.colInset)
-                ///
-                /// **Except against the frame.** A span that continues runs
-                /// hard into its column edge, and for a span that reaches
-                /// Saturday that edge is the window's own: the bar and its
-                /// arrow ended flush against the frame with no gutter at all,
-                /// which photographs as a chip clipped by the viewport rather
-                /// than as one carrying on into next week. There is nothing to
-                /// disambiguate it from there — no eighth column can follow —
-                /// so the last column keeps the ordinary lead-in and the arrow
-                /// gets air to sit in.
-                readonly property real trail: Math.min(
-                    view.columnRight(modelData.startCol + modelData.span - 1)
-                    - (bandBar.runsOn ? 0 : CalendarTokens.chipGap * 3),
-                    view.columnRight(view.columns.length - 1) - view.colInset)
+
+                /// The trailing edge, and the clamp against the frame that goes
+                /// with it — both `EventLayoutPolicy.bandBarTrailX`, which is
+                /// where the reasoning for each lives. What is here is only the
+                /// two pixel positions it takes: this span's own right edge, and
+                /// the last column's less the ordinary inset.
+                readonly property real trail: view.layoutPolicy.bandBarTrailX(
+                    view.columnRight(modelData.startCol + modelData.span - 1),
+                    view.columnRight(view.columns.length - 1) - view.colInset,
+                    bandBar.runsOn, CalendarTokens.chipGap * 3)
 
                 /// What the bar's own contents measure, which is the one number
                 /// `bandBarWidth` cannot work out for itself — a font metric,
@@ -1032,6 +1043,13 @@ Item {
                 body.contentY = view.grid.visibleScrollY(view.grid.defaultStartHour,
                                                           view.hourRow, body.height);
                 body.parked = true;
+                // Once, on the frame the grid settles: today is on screen and
+                // its now-line is not. Nothing acts on it — see `nowLineVisible`
+                // — but a week opened at 09:00 with the clock at 22:00 is a
+                // picture with no "now" in it, and the log is where that is
+                // visible without a screenshot.
+                if (view.nowColumn >= 0 && !view.nowLineVisible)
+                    Logger.log("calendar", "now-line offscreen");
             }
         }
 
@@ -1550,8 +1568,7 @@ Item {
                             /// the chip it came from and buries its two lines
                             /// of text under its own. See `originCovered`.
                             originCovered:
-                                view.proposal.mode === "resizeTop"
-                                || view.proposal.mode === "resizeBottom"
+                                view.dragPolicy.isResize(view.proposal.mode)
 
                             /// Every other chip steps back while a drag is in
                             /// flight. The vacated slot is drawn over them, so
@@ -1611,8 +1628,7 @@ Item {
 
                 readonly property var origin: view.proposal.origin
                 readonly property bool resizing:
-                    view.proposal.mode === "resizeTop"
-                    || view.proposal.mode === "resizeBottom"
+                    view.dragPolicy.isResize(view.proposal.mode)
 
                 /// **Resize only.** A move leaves its origin drawn by the
                 /// chip itself, hollowed in place (see `EventChip.ghostInk`) —
@@ -1673,40 +1689,8 @@ Item {
                     color: CalendarTokens.vacatedFill(view.dragHue)
                 }
 
-                DashedEdge {
-                    x: 0
-                    y: 0
-                    width: parent.width
-                    height: 2
-                    ink: CalendarTokens.vacatedEdge(view.dragHue)
-                    halo: CalendarTokens.vacatedHalo
-                }
-
-                DashedEdge {
-                    x: 0
-                    y: parent.height - 2
-                    width: parent.width
-                    height: 2
-                    ink: CalendarTokens.vacatedEdge(view.dragHue)
-                    halo: CalendarTokens.vacatedHalo
-                }
-
-                DashedEdge {
-                    x: 0
-                    y: 0
-                    width: 2
-                    height: parent.height
-                    vertical: true
-                    ink: CalendarTokens.vacatedEdge(view.dragHue)
-                    halo: CalendarTokens.vacatedHalo
-                }
-
-                DashedEdge {
-                    x: parent.width - 2
-                    y: 0
-                    width: 2
-                    height: parent.height
-                    vertical: true
+                DashedRect {
+                    anchors.fill: parent
                     ink: CalendarTokens.vacatedEdge(view.dragHue)
                     halo: CalendarTokens.vacatedHalo
                 }

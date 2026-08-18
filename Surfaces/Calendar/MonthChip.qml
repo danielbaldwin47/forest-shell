@@ -166,26 +166,19 @@ Item {
 
     /// **A banner is filled; a timed chip has no ground at all.**
     ///
-    /// The banner's fill is `HuePolicy.bannerAlpha` over the cell rather than
-    /// the chip table's `tintAlpha`, and the difference is what the fill is
-    /// being measured against. A week-grid chip's tint is one step from the
-    /// tinted chips beside it; a month banner has no tinted neighbours left, so
-    /// its step is against the bare cell, and at 0.16 the capture came back with
-    /// six banners that read as smudges rather than as pills — the one shape
-    /// carrying "this owns the day" was the faintest object in the grid.
+    /// The banner's own measurement is `CalendarTokens.bannerFill`, which is
+    /// where the reason it is not the chip table's tint lives.
     ///
     /// A timed chip's ground is the cell, and the only time it paints one is
     /// under the pointer or under a selection — where the mark being made is
     /// "this row", not "this hue", so it is the shell's own `surfaceOverlay`
     /// rather than a tint. That is also what keeps hover legible on a shape
     /// with no edge of its own.
-    readonly property color bannerFill: CalendarTokens.hues.tint(
-        String(CalendarTokens.bar(chip.hue)), String(Theme.surfaceRaised),
-        CalendarTokens.hues.bannerAlpha(Theme.dark))
-
-    readonly property color ground: chip.banner ? chip.bannerFill : "transparent"
+    readonly property color ground: chip.banner
+        ? CalendarTokens.bannerFill(chip.hue)
+        : "transparent"
     readonly property color groundHover: chip.banner
-        ? Qt.tint(chip.bannerFill, Qt.alpha(Theme.surfaceOverlay, 0.12))
+        ? CalendarTokens.bannerFillHover(chip.hue)
         : Theme.surfaceOverlay
 
     /// The title's ink, and **the one thing a finished event changes.**
@@ -214,12 +207,13 @@ Item {
 
     /// The hue mark: a full-height accent bar down a banner's true start, and a
     /// short rounded lozenge in front of a timed line. Same width and same left
-    /// rule for both, so one cell's marks make a column. Past, it drops to half
-    /// alpha over whatever ground it is on — still plainly its own colour, which
-    /// is the point of it, and plainly the quieter of two marks side by side.
-    readonly property color markInk: chip.past
-        ? Qt.alpha(CalendarTokens.bar(chip.hue), 0.5)
-        : CalendarTokens.bar(chip.hue)
+    /// rule for both, so one cell's marks make a column. Past, it steps down the
+    /// **same** rung a week chip's bar takes — `CalendarTokens.barFor`, off
+    /// `HuePolicy.pastBarStrength` — so the two grids quiet a finished event by
+    /// one number rather than by two that drift. Still plainly its own colour,
+    /// which is the point of it, and plainly the quieter of two marks side by
+    /// side.
+    readonly property color markInk: CalendarTokens.barFor(chip.hue, chip.past)
 
     readonly property int markW: 4
     readonly property int markH: 13

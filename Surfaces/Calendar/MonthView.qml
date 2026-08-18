@@ -55,15 +55,10 @@ Item {
     /// on (`MonthPolicy.isPast`). Passed in for the same reason `todayIso` is —
     /// a capture has to take the same photograph twice.
     ///
-    /// **Empty falls back to the end of `todayIso`**, so a caller that has a
-    /// date but no clock still gets the useful half of the split: every week
-    /// before this one recedes, and today's own cell stays at full strength
-    /// rather than guessing at an hour nobody supplied.
+    /// **Empty means nothing is past**, which is `HuePolicy.isPast`'s own rule
+    /// and not a second one invented here: a grid that dims itself against a
+    /// clock nobody supplied is a grid guessing at an hour.
     property string nowStamp: ""
-
-    readonly property string nowBound: view.nowStamp.length > 0
-        ? view.nowStamp
-        : (view.todayIso.length > 0 ? view.todayIso + "T00:00" : "")
 
     /// The whole store's worth of events. The view splits them into bars and
     /// chips itself, because the split is the policy's rule and not the
@@ -699,7 +694,7 @@ Item {
                         hue: CalendarTokens.hues.forEvent(bar.source)
                         policy: view.policy
                         banner: true
-                        past: view.policy.isPast(bar.source, view.nowBound)
+                        past: view.policy.isPast(bar.source, view.nowStamp)
                         continuesLeft: bar.segment ? bar.segment.continuesLeft : false
                         continuesRight: bar.segment ? bar.segment.continuesRight : false
                         selected: bar.segment ? view.selectedId === bar.segment.id : false
@@ -763,7 +758,7 @@ Item {
                                     event: chipItem.source
                                     hue: CalendarTokens.hues.forEvent(chipItem.source)
                                     policy: view.policy
-                                    past: view.policy.isPast(chipItem.source, view.nowBound)
+                                    past: view.policy.isPast(chipItem.source, view.nowStamp)
                                     selected: chipItem.source
                                         ? view.selectedId === chipItem.source.id : false
                                     use24: view.use24

@@ -322,21 +322,14 @@ Item {
                 // with two rows in it is a small card rather than a tall one
                 // with a hole in the bottom.
                 //
-                // The ceiling is 60% of the *window*, and it is on the list
-                // rather than on the card on purpose: a cap on the card would
-                // have to come out of something, and the two things it would
-                // come out of — the field you are typing into and the legend
-                // that says how to leave — are the two that must never scroll
-                // away. So the list scrolls and the chrome stays whole.
-                //
-                // 0.66 and not 0.6: the whole grouped keymap is 452px tall on a
-                // 760px window and 0.6 clipped it by four — a menu that scrolls
-                // by half a row is a menu that looks broken rather than long.
-                // The cap is still a cap; it is just set above the one list
-                // this surface is guaranteed to draw.
+                // The ceiling is a fraction of the *window*, and it is on the
+                // list rather than on the card — `CalendarTokens
+                // .menuListFraction`, where the reason for both is written.
                 height: menu.rows.length === 0
                       ? 64
-                      : Math.min(list.contentHeight, Math.round(menu.height * 0.66))
+                      : Math.min(list.contentHeight,
+                                 Math.round(menu.height
+                                            * CalendarTokens.menuListFraction))
                         + Theme.space2 * 2
 
                 ListView {
@@ -367,22 +360,15 @@ Item {
                                                        && rowItem.index === menu.highlight
 
                         width: ListView.view.width
-                        // A heading is a label *for* the rows beneath it, so it
-                        // has to sit closer to them than to the group it just
-                        // left — otherwise it floats equidistant and binds to
-                        // neither, which is what round 2 measured: 38px above,
-                        // 40px below, four headings that named nothing.
-                        //
-                        // 42 tall with the label 4px off its own bottom puts 55
-                        // device px of air above the caps and 25 below, better
-                        // than 2:1, and the binding is no longer something the
-                        // reader has to work out.
-                        //
-                        // The *first* heading is 32, because the rule under the
-                        // search field is already doing the separating there and
-                        // a full measure of air under it would open a hole in
-                        // the top of the list.
-                        height: rowItem.isGroup ? (rowItem.index === 0 ? 32 : 42) : 40
+                        // A heading binds to the rows beneath it and the first
+                        // one binds to the rule above it instead — the three
+                        // heights and the argument are `CalendarTokens.menuRowH`
+                        // and its two neighbours.
+                        height: rowItem.isGroup
+                              ? (rowItem.index === 0
+                                 ? CalendarTokens.menuFirstGroupH
+                                 : CalendarTokens.menuGroupH)
+                              : CalendarTokens.menuRowH
 
                         // --- a heading ---------------------------------------
 

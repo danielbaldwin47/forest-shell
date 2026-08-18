@@ -19,7 +19,9 @@
 // same mark: `WeekView` outlines the extent a resize is leaving, and
 // `EventChip` hollows itself into the slot a move is leaving. An inline
 // component is reachable from exactly one file, and a second copy of a dash
-// pattern is a second thing to keep in step.
+// pattern is a second thing to keep in step. Both of them assemble it into a
+// whole rectangle the same way, so that assembly is `DashedRect.qml` and this
+// is only ever one side of it.
 pragma ComponentBehavior: Bound
 import QtQuick
 

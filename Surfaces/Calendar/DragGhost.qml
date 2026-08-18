@@ -66,11 +66,19 @@ Item {
     opacity: 0.92
     scale: Theme.animateTransforms ? 1.02 : 1
 
+    /// `DragPolicy` for `isResize` alone. The ghost holds no drag state — it is
+    /// handed a `mode` and draws it — but which modes count as a resize is the
+    /// policy's word rather than a second list kept here.
+    property DragPolicy dragPolicy: DragPolicy {}
+
     /// Which end of the box the gesture has hold of, if either. A resize is the
     /// one drag whose ghost sits almost exactly on top of the chip it came
-    /// from, so it is also the one that has to say *which edge is moving*.
-    readonly property bool gripBottom: ghost.mode === "resizeBottom"
+    /// from, so it is also the one that has to say *which edge is moving* — the
+    /// one place on the surface where the two resizes are not interchangeable,
+    /// which is why exactly one comparison names an end.
+    readonly property bool resizing: ghost.dragPolicy.isResize(ghost.mode)
     readonly property bool gripTop: ghost.mode === "resizeTop"
+    readonly property bool gripBottom: ghost.resizing && !ghost.gripTop
 
     /// The elevation — a stacked falloff, not a plate. The ramp itself and the
     /// argument for it are `CalendarTokens.liftShadow`; what is here is only the
@@ -229,7 +237,7 @@ Item {
         /// nothing on it saying which end was travelling and read as a plain
         /// selected event that happened to be the wrong length.
         Rectangle {
-            visible: ghost.gripBottom || ghost.gripTop
+            visible: ghost.resizing
             width: 24
             height: 3
             radius: Theme.radiusFull

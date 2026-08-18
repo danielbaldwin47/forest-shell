@@ -1274,6 +1274,32 @@ TestCase {
         compare(layoutPolicy.bandBarWidth(870, 160, false, undefined), 160);
     }
 
+    /// The trailing gap is the continuation cue: a span that ends inside the
+    /// week stops short of its column edge, and one that runs on is cut by it.
+    function test_a_band_bar_that_ends_inside_the_week_stops_short() {
+        // Wednesday's right edge is 500, the frame's usable edge far beyond it.
+        compare(layoutPolicy.bandBarTrailX(500, 860, false, 6), 494);
+        compare(layoutPolicy.bandBarTrailX(500, 860, true, 6), 500);
+    }
+
+    /// **Except against the frame.** A span reaching the last column is clamped
+    /// to the frame's own edge even when it continues, so its arrow has air to
+    /// sit in rather than photographing as a chip clipped by the viewport.
+    function test_a_band_bar_reaching_the_frame_keeps_its_gutter() {
+        // Saturday's right edge is 860; the frame less the column inset is 858.
+        compare(layoutPolicy.bandBarTrailX(860, 858, true, 6), 858);
+        // Ending there too: the ordinary gap is already inside the clamp.
+        compare(layoutPolicy.bandBarTrailX(860, 858, false, 6), 854);
+    }
+
+    function test_a_band_bar_trail_survives_a_missing_number() {
+        // No frame edge given: the ordinary rule, unclamped.
+        compare(layoutPolicy.bandBarTrailX(500, NaN, false, 6), 494);
+        // No gap given: flush, rather than a NaN edge that draws nothing.
+        compare(layoutPolicy.bandBarTrailX(500, 860, false, NaN), 500);
+        compare(layoutPolicy.bandBarTrailX(NaN, 860, false, 6), -6);
+    }
+
     // --- the column's own margins ----------------------------------------------
 
     function test_a_week_column_keeps_its_hairline_inset() {

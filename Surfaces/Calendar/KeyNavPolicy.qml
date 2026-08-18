@@ -418,29 +418,56 @@ QtObject {
 
     // --- the same table, for humans -------------------------------------------
 
-    /// Every binding as `{keys, label, group}`, in the order the shortcuts sheet
-    /// prints it. Generated fresh on each call, because a `Repeater` handed the
-    /// same array object back does not rebuild its delegates.
+    /// Every binding as `{id, keys, label, group}`, in the order the shortcuts
+    /// sheet prints it. Generated fresh on each call, because a `Repeater`
+    /// handed the same array object back does not rebuild its delegates.
     ///
     /// Rows pair the alternatives that run the same verb (`J / ←`), which is
     /// what keeps this list the length of the *keymap* rather than the length
     /// of the key table.
+    ///
+    /// **This table is where the printed key forms live, and `commands` reads
+    /// them off it** — see `keysById`. `id` is the command the row runs, and it
+    /// is the join between the two lists rather than the label, which the two
+    /// deliberately word differently ("Previous period" on a sheet that cannot
+    /// know the view; "Previous week" in a menu that can). Three rows name no
+    /// command — the arrow keys that move the selection, `Esc`, and `Ctrl+K`,
+    /// which opens the menu the commands are listed in — and carry no `id`.
     function shortcutsTable(): var {
         return [
-            { "keys": "D", "label": "Day view", "group": "Views" },
-            { "keys": "W", "label": "Week view", "group": "Views" },
-            { "keys": "M", "label": "Month view", "group": "Views" },
-            { "keys": "T", "label": "Jump to today", "group": "Navigate" },
-            { "keys": "J / ←", "label": "Previous period", "group": "Navigate" },
-            { "keys": "K / →", "label": "Next period", "group": "Navigate" },
+            { "id": "view.day", "keys": "D", "label": "Day view", "group": "Views" },
+            { "id": "view.week", "keys": "W", "label": "Week view", "group": "Views" },
+            { "id": "view.month", "keys": "M", "label": "Month view", "group": "Views" },
+            { "id": "today", "keys": "T", "label": "Jump to today", "group": "Navigate" },
+            { "id": "period.previous", "keys": "J / ←", "label": "Previous period",
+              "group": "Navigate" },
+            { "id": "period.next", "keys": "K / →", "label": "Next period",
+              "group": "Navigate" },
             { "keys": "↑ / ↓", "label": "Select previous / next event", "group": "Navigate" },
-            { "keys": "C / Ctrl+N", "label": "New event at the next slot", "group": "Events" },
-            { "keys": "Enter", "label": "Open the selected event", "group": "Events" },
-            { "keys": "Backspace / Del", "label": "Delete the selected event", "group": "Events" },
+            { "id": "event.create", "keys": "C / Ctrl+N",
+              "label": "New event at the next slot", "group": "Events" },
+            { "id": "event.open", "keys": "Enter", "label": "Open the selected event",
+              "group": "Events" },
+            { "id": "event.delete", "keys": "Backspace / Del",
+              "label": "Delete the selected event", "group": "Events" },
             { "keys": "Esc", "label": "Close the overlay, then the window", "group": "General" },
-            { "keys": "?", "label": "Keyboard shortcuts", "group": "General" },
+            { "id": "help.shortcuts", "keys": "?", "label": "Keyboard shortcuts",
+              "group": "General" },
             { "keys": "Ctrl+K", "label": "Command menu", "group": "General" }
         ];
+    }
+
+    /// Command id -> the printed key form, off `shortcutsTable`. One direction
+    /// only: the sheet's table is the source and `commands` reads it, so a
+    /// binding added there reaches the menu without being typed twice. A row
+    /// with no `id` names no command and is not in the map.
+    function keysById(): var {
+        const out = ({});
+        const table = policy.shortcutsTable();
+        for (let i = 0; i < table.length; i++)
+            if (table[i].id)
+                out[table[i].id] = table[i].keys;
+        return out;
     }
 
     /// The same table gathered under its headings, `[{group, rows}]`, in the
@@ -504,8 +531,11 @@ QtObject {
     /// while what the menu should *teach* is every way in — `C / Ctrl+N`, not
     /// the half of it that happens to be a single keystroke. Collapsing them
     /// would mean either a rail that under-reports the keymap or a probe that
-    /// cannot press what it reads. `keys` is the same string the shortcuts
-    /// sheet prints, so the menu and the sheet still cannot drift.
+    /// cannot press what it reads. **`keys` is not written here at all** — it is
+    /// read out of `shortcutsTable` by `id` through `keysById`, so the menu and
+    /// the sheet cannot drift because there is only one string. `shortcut` stays
+    /// a literal: it is the single key a probe presses, and the sheet has no
+    /// column for it.
     ///
     /// **The icons are one set, and that is a constraint on which names may
     /// appear here.** Lucide draws on a 24-unit grid and its glyphs do not share
@@ -531,30 +561,31 @@ QtObject {
         const c = ctx || {};
         const noun = ({ "day": "day", "week": "week", "month": "month" })[c.view] || "period";
         const subject = c.selectedTitle ? "“" + c.selectedTitle + "”" : "the selected event";
+        const printed = policy.keysById();
         const out = [
-            { "id": "view.day", "label": "Day view", "shortcut": "D", "keys": "D",
-              "group": "View", "icon": "calendar" },
-            { "id": "view.week", "label": "Week view", "shortcut": "W", "keys": "W",
-              "group": "View", "icon": "calendar-range" },
-            { "id": "view.month", "label": "Month view", "shortcut": "M", "keys": "M",
-              "group": "View", "icon": "calendar-days" },
-            { "id": "today", "label": "Jump to today", "shortcut": "T", "keys": "T",
-              "group": "Navigate", "icon": "calendar-check" },
+            { "id": "view.day", "label": "Day view", "shortcut": "D",
+              "keys": printed["view.day"], "group": "View", "icon": "calendar" },
+            { "id": "view.week", "label": "Week view", "shortcut": "W",
+              "keys": printed["view.week"], "group": "View", "icon": "calendar-range" },
+            { "id": "view.month", "label": "Month view", "shortcut": "M",
+              "keys": printed["view.month"], "group": "View", "icon": "calendar-days" },
+            { "id": "today", "label": "Jump to today", "shortcut": "T",
+              "keys": printed["today"], "group": "Navigate", "icon": "calendar-check" },
             { "id": "period.previous", "label": "Previous " + noun, "shortcut": "J",
-              "keys": "J / ←", "group": "Navigate", "icon": "arrow-left" },
+              "keys": printed["period.previous"], "group": "Navigate", "icon": "arrow-left" },
             { "id": "period.next", "label": "Next " + noun, "shortcut": "K",
-              "keys": "K / →", "group": "Navigate", "icon": "arrow-right" },
+              "keys": printed["period.next"], "group": "Navigate", "icon": "arrow-right" },
             { "id": "event.create", "label": "New event", "shortcut": "C",
-              "keys": "C / Ctrl+N", "group": "Actions", "icon": "calendar-plus" }
+              "keys": printed["event.create"], "group": "Actions", "icon": "calendar-plus" }
         ];
         if (c.selectedId) {
             out.push({ "id": "event.open", "label": "Open " + subject, "shortcut": "Enter",
-                       "keys": "Enter", "group": "Actions", "icon": "square-pen" });
+                       "keys": printed["event.open"], "group": "Actions", "icon": "square-pen" });
             out.push({ "id": "event.delete", "label": "Delete " + subject, "shortcut": "Backspace",
-                       "keys": "Backspace / Del", "group": "Actions", "icon": "trash-2" });
+                       "keys": printed["event.delete"], "group": "Actions", "icon": "trash-2" });
         }
         out.push({ "id": "help.shortcuts", "label": "Keyboard shortcuts", "shortcut": "?",
-                   "keys": "?", "group": "Actions", "icon": "command" });
+                   "keys": printed["help.shortcuts"], "group": "Actions", "icon": "command" });
         return out;
     }
 

@@ -618,16 +618,16 @@ QtObject {
     /// today's row before the grid means anything; a month whose finished half
     /// recedes hands them the answer with no search.
     ///
-    /// **The rule itself is `HuePolicy.isPast`, and this only unwraps the
-    /// event.** The week grid already asked this question and answered it there
-    /// — end-not-start, a bare date as that day's last minute, an absent clock
-    /// as "nothing is past" — and a month view that re-derived any of those
-    /// would be two policies disagreeing about one word by a minute, at exactly
-    /// the minute the answer changes.
+    /// **The rule itself is `HuePolicy.eventIsPast`, and this only names it for
+    /// the month grid.** The week grid already asked this question and answered
+    /// it there — end-not-start, a bare date as that day's last minute, an
+    /// absent clock as "nothing is past" — and a month view that re-derived any
+    /// of those would be two policies disagreeing about one word by a minute, at
+    /// exactly the minute the answer changes. That includes an event with no
+    /// `end` at all: it has no moment it is over, so it never dims, rather than
+    /// dimming at its own `start`.
     function isPast(event: var, nowStamp: string): bool {
-        if (!event)
-            return false;
-        return policy.hues.isPast(String(event.end || event.start || ""), nowStamp);
+        return policy.hues.eventIsPast(event, nowStamp);
     }
 
     /// What the overflow row says: **`"3 more"`, with no plus.**

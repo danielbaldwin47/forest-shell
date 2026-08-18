@@ -990,8 +990,22 @@ TestCase {
         compare(policy.isPast(event, "not-a-stamp"), false);
         compare(policy.isPast(null, "2026-08-18T13:40"), false);
         compare(policy.isPast({}, "2026-08-18T13:40"), false);
-        // An event with only a start is judged on that start.
-        compare(policy.isPast({ "start": "2026-08-18T09:00" }, "2026-08-18T13:40"), true);
+    }
+
+    /// **An event with no `end` never dims.** The split is on `end` and only on
+    /// `end`; falling back to `start` would dim a chip the moment it began,
+    /// which is the one reading `HuePolicy.isPast` exists to rule out — the
+    /// meeting you are sitting in is the loudest thing on the grid, and an
+    /// event that never says when it is over has no minute at which it is.
+    function test_an_event_without_an_end_is_never_past() {
+        const now = "2026-08-18T13:40";
+        // Started this morning, no end: still full strength at 13:40.
+        compare(policy.isPast({ "start": "2026-08-18T09:00" }, now), false);
+        // Started this very minute, and years ago: neither is past.
+        compare(policy.isPast({ "start": "2026-08-18T13:40" }, now), false);
+        compare(policy.isPast({ "start": "2020-01-01T09:00" }, now), false);
+        // An empty end is the same as no end at all.
+        compare(policy.isPast({ "start": "2026-08-18T09:00", "end": "" }, now), false);
     }
 
     // --- the words the cell uses ----------------------------------------------

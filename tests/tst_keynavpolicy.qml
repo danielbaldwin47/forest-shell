@@ -836,12 +836,42 @@ TestCase {
         verify(printed["J / ←"]);
         verify(printed["C / Ctrl+N"]);
 
-        // And the printed form is the sheet's, so the two cannot drift.
+        // And the printed form is the sheet's — read off it by id rather than
+        // copied, so this checks the join rather than a pair of literals. Both
+        // directions, because one alone permits a whole class of drift: a
+        // command whose row was deleted answers `undefined`, and a row whose
+        // command was never added is a binding the menu cannot run.
         const table = ({});
         for (const row of keys.shortcutsTable())
-            table[row.keys] = true;
-        for (const cmd of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" })))
-            verify(table[cmd.keys], cmd.keys + " is on no row of the shortcuts sheet");
+            if (row.id)
+                table[row.id] = row.keys;
+        const listed = ({});
+        for (const cmd of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" }))) {
+            verify(table[cmd.id] !== undefined,
+                   cmd.id + " is on no row of the shortcuts sheet");
+            compare(cmd.keys, table[cmd.id]);
+            listed[cmd.id] = true;
+        }
+        for (const row of keys.shortcutsTable())
+            if (row.id)
+                verify(listed[row.id], row.id + " names a command the menu never lists");
+    }
+
+    /// The three rows that name no command: the arrows that move the selection,
+    /// `Esc`, and the `Ctrl+K` that opens the menu the commands are listed in.
+    /// They carry no `id` on purpose, so the bidirectional check above is a
+    /// check rather than a demand that every binding become a menu row.
+    function test_probe_the_sheet_rows_that_run_no_command() {
+        const without = keys.shortcutsTable().filter(function (row) { return !row.id; });
+        compare(without.length, 3);
+        compare(without.map(function (row) { return row.keys; }).join(" "),
+                "↑ / ↓ Esc Ctrl+K");
+        // And nothing in the map answers for them.
+        const map = keys.keysById();
+        compare(Object.keys(map).length, keys.shortcutsTable().length - 3);
+        compare(map["view.day"], "D");
+        compare(map["period.next"], "K / →");
+        compare(map["nope"], undefined);
     }
 
     function test_probe_every_row_of_the_sheet_breaks_into_caps() {

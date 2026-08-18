@@ -47,6 +47,19 @@ TestCase {
         drag.cancel();
     }
 
+    // --- which modes are which ------------------------------------------------
+
+    /// Both resizes and nothing else. The surfaces ask this rather than spelling
+    /// out a pair of comparisons each, so a third mode arriving is one edit.
+    function test_isResize_is_both_edges_and_nothing_else() {
+        verify(drag.isResize("resizeTop"));
+        verify(drag.isResize("resizeBottom"));
+        verify(!drag.isResize("move"));
+        verify(!drag.isResize("create"));
+        verify(!drag.isResize(""));
+        verify(!drag.isResize("resize"));
+    }
+
     // --- the grid's own arithmetic --------------------------------------------
 
     function test_snapping_goes_to_the_nearest_quarter_not_down() {

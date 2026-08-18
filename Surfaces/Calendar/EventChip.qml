@@ -227,22 +227,10 @@ Item {
     /// is legible over it, it does not leave a hole.
     property bool dimmed: false
 
-    /// The hole a lifted chip leaves — which is nothing at all.
-    ///
-    /// It was `0.35`, on the argument that the reader needs to see where the
-    /// chip started. That argument survives; the implementation did not. A chip
-    /// at 0.35 measured 1.02:1 against its column, its title 1.57:1, and it sat
-    /// *under* the two chips cascading off it, which drew over the gap
-    /// completely. Worse on a resize, where the ghost lands on the same
-    /// rectangle: the faded chip kept rendering its own time line under the
-    /// ghost's live one, two `Text` items a few pixels apart, which photographs
-    /// as a smear and reads as a rendering fault.
-    ///
-    /// So the origin is not this chip's job any more. `WeekView` draws a dashed
-    /// slot at the vacated rectangle, above every chip and above the ghost, and
-    /// this one gets out of the way entirely. The grid still does not re-pack —
-    /// the chip is transparent, not absent.
-    /// And 0.62 for a neighbour, not 0.45.
+    /// **0.62 for a neighbour, not 0.45.** This is the chip's whole opacity, and
+    /// it moves for one reason: something *else* is being dragged. What the
+    /// dragged chip itself does to its own rectangle is `ghostInk` below, which
+    /// is a different question with a different answer.
     ///
     /// 0.45 was chosen so the gesture would read *over* the week, and it bought
     /// that by half-erasing the week: a blind read of the drag capture reported
@@ -633,47 +621,11 @@ Item {
     /// not solid because a broken line is read as an absence and a continuous
     /// one as an object — a solid outline here reads as a second, selected
     /// event sitting where the first one used to be.
-    Item {
+    DashedRect {
         anchors.fill: parent
         visible: chip.ghosted
-
-        DashedEdge {
-            x: 0
-            y: 0
-            width: parent.width
-            height: 2
-            ink: CalendarTokens.vacatedEdge(chip.hue)
-            halo: CalendarTokens.vacatedHalo
-        }
-
-        DashedEdge {
-            x: 0
-            y: parent.height - 2
-            width: parent.width
-            height: 2
-            ink: CalendarTokens.vacatedEdge(chip.hue)
-            halo: CalendarTokens.vacatedHalo
-        }
-
-        DashedEdge {
-            x: 0
-            y: 0
-            width: 2
-            height: parent.height
-            vertical: true
-            ink: CalendarTokens.vacatedEdge(chip.hue)
-            halo: CalendarTokens.vacatedHalo
-        }
-
-        DashedEdge {
-            x: parent.width - 2
-            y: 0
-            width: 2
-            height: parent.height
-            vertical: true
-            ink: CalendarTokens.vacatedEdge(chip.hue)
-            halo: CalendarTokens.vacatedHalo
-        }
+        ink: CalendarTokens.vacatedEdge(chip.hue)
+        halo: CalendarTokens.vacatedHalo
     }
 
     // --- the two strings, and the one measurement behind them -----------------

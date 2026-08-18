@@ -232,6 +232,17 @@ QtObject {
 
     // --- the state machine ----------------------------------------------------
 
+    /// Whether a mode is one of the two resizes. There are two of them because
+    /// they move opposite ends, and almost every caller cares only that an edge
+    /// is being dragged rather than a whole card — which end it is matters in
+    /// exactly one place each (`DragGhost`'s grip, and which field the store is
+    /// written back to). Open-coded, that is one `||` per site and a third mode
+    /// away from being wrong somewhere; here it is the one place a
+    /// `resizeStart`/`resizeEnd` rename would have to touch.
+    function isResize(mode: string): bool {
+        return mode === "resizeTop" || mode === "resizeBottom";
+    }
+
     /// Latch a press. `mode` is `create|move|resizeTop|resizeBottom`; the
     /// three that are not `create` need `ctx.event` — `{id, start, end}` — and
     /// refuse without it rather than proposing an event out of nothing.
@@ -241,8 +252,7 @@ QtObject {
     /// then follows, instead of jumping on the first motion event.
     function begin(mode: string, x: real, y: real, ctx: var): var {
         const c = policy._norm(ctx);
-        const known = mode === "create" || mode === "move"
-                   || mode === "resizeTop" || mode === "resizeBottom";
+        const known = mode === "create" || mode === "move" || policy.isResize(mode);
         if (!known) {
             policy.cancel();
             return policy.proposal;

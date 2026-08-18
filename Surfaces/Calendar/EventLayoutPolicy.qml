@@ -501,6 +501,14 @@ QtObject {
     ///
     /// `contentWidth` is a measurement — the surface takes it off `TextMetrics`
     /// — and everything done with it is here.
+    ///
+    /// `columns` is **how many day columns the span covers, and it is untyped on
+    /// purpose**, the same way `cascadeIsLegible`'s `clear` and `showsGrip`'s
+    /// `clearHeight` are: an `int` annotation would coerce an omitted argument to
+    /// 0, and this has to be able to tell "not given" from a real count so an
+    /// older caller passing three arguments still means one column. Anything
+    /// absent, null or non-finite is 1; anything else is rounded to a whole
+    /// number of columns.
     function bandBarWidth(track: real, contentWidth: real, continues: bool,
                           columns): real {
         const t = isFinite(track) ? Math.max(0, track) : 0;
@@ -512,6 +520,37 @@ QtObject {
             return t;
         const natural = isFinite(contentWidth) ? Math.max(0, contentWidth) : 0;
         return Math.min(t, Math.max(policy.bandBarMinWidth, natural));
+    }
+
+    /// Where a band bar's trailing edge sits, given the right edge of the column
+    /// its span ends in (`spanRight`), the right edge of the **last** column in
+    /// the view (`viewRight`), and whether the span runs on past this week.
+    ///
+    /// **The trailing gap is the continuation cue.** Two bars ended on the same
+    /// pixel and only one carried an arrow, which read as a forgotten arrow
+    /// rather than as one bar stopping and another running on. So a span that
+    /// ends inside the week stops `gap` short of its column edge with both right
+    /// corners rounded, and one that continues runs hard into that edge and is
+    /// cut by it.
+    ///
+    /// **Except against the frame**, which is the clamp. For a span reaching the
+    /// last column that edge is the window's own: a bar and its arrow flush
+    /// against the frame photograph as a chip clipped by the viewport rather than
+    /// as one carrying on into next week, and there is nothing out there to
+    /// disambiguate it — no eighth column can follow. So the last column keeps
+    /// the ordinary inset (`viewRight` is passed already less it) and the arrow
+    /// gets air to sit in.
+    ///
+    /// Both edges are pixel positions from the surface, which is why they are
+    /// arguments and not something derived here; the rule about what to do with
+    /// them is the only thing this owns.
+    function bandBarTrailX(spanRight: real, viewRight: real, continues: bool,
+                           gap: real): real {
+        const right = isFinite(spanRight) ? spanRight : 0;
+        const inset = (continues === true || !isFinite(gap)) ? 0 : gap;
+        if (!isFinite(viewRight))
+            return right - inset;
+        return Math.min(right - inset, viewRight);
     }
 
     // --- which row an event belongs on ----------------------------------------

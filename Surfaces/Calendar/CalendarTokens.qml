@@ -272,6 +272,31 @@ Singleton {
     /// outlier that produced the scatter in the first place.
     readonly property int glyphInk: 2
 
+    /// The three row heights the command menu's list is built from, and the one
+    /// fraction that caps it.
+    ///
+    /// **A heading is a label *for* the rows beneath it**, so it has to sit
+    /// closer to them than to the group it just left. Round 2 measured 38px
+    /// above and 40px below — four headings floating equidistant, binding to
+    /// neither side. `menuGroupH` at 42 with the label 4px off its own bottom
+    /// puts 55 device px of air above the caps and 25 below, better than 2:1.
+    ///
+    /// `menuFirstGroupH` is smaller because the rule under the search field is
+    /// already doing the separating at the top of the list, and a full measure
+    /// of air under it opens a hole there instead.
+    ///
+    /// `menuListFraction` caps the list — not the card: a cap on the card would
+    /// have to come out of the field being typed into or the legend saying how
+    /// to leave, and those are the two things that must never scroll away. It is
+    /// 0.66 and not 0.6 because the whole grouped keymap is 452px tall on a 760px
+    /// window and 0.6 clipped it by four; a menu that scrolls by half a row looks
+    /// broken rather than long. Still a cap — just set above the one list this
+    /// surface is guaranteed to draw.
+    readonly property int menuRowH: 40
+    readonly property int menuGroupH: 42
+    readonly property int menuFirstGroupH: 32
+    readonly property real menuListFraction: 0.66
+
     // --- the column washes ----------------------------------------------------
 
     /// The weekend column's wash, and **the one place this file departs from
@@ -418,6 +443,27 @@ Singleton {
     /// at 4.91 and up, so light mode spends the extra half-step of glare and
     /// keeps the floor.
     readonly property color liftInk: Theme.dark ? Theme.bgBase : "#ffffff"
+
+    /// **A month banner's ground**, which is a different measurement from a week
+    /// chip's `fill` and not a second opinion about it. `HuePolicy.bannerAlpha`
+    /// over the raised cell rather than the chip table's `tintAlpha`: a week-grid
+    /// chip's tint is one step from the tinted chips beside it, while a month
+    /// banner has no tinted neighbours left, so its step is against the bare
+    /// cell. At the chip alpha the capture came back with six banners reading as
+    /// smudges — the one shape carrying "this owns the day" was the faintest
+    /// object in the grid.
+    function bannerFill(index: int): color {
+        return tokens.hues.tint(String(tokens.bar(index)),
+                                String(Theme.surfaceRaised),
+                                tokens.hues.bannerAlpha(Theme.dark));
+    }
+
+    /// The same ground under the pointer. The mark being made is "this row", not
+    /// "this hue", so it is the shell's own overlay rather than more tint.
+    function bannerFillHover(index: int): color {
+        return Qt.tint(tokens.bannerFill(index),
+                       Qt.alpha(Theme.surfaceOverlay, 0.12));
+    }
 
     /// **The vacated slot: an outline, not a fill.** 12% of the hue behind a
     /// dashed hairline of it. The fill alone was invisible the moment a

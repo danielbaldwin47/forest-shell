@@ -57,6 +57,24 @@ TestCase {
         verify(isNaN(grid.dayHeight(0)));
     }
 
+    /// The drag gutter's pill sits on the rule the proposal is *inside*, so a
+    /// landing at 13:40 names 13:00. `snap` would name 14:00 — the nearest line
+    /// is the wrong one for a label that has to sit above the ghost.
+    function test_hourTopY_names_the_rule_a_minute_falls_inside() {
+        compare(grid.hourTopY(0, 60), 0);
+        compare(grid.hourTopY(59, 60), 0);
+        compare(grid.hourTopY(60, 60), 60);        // exactly on a rule is that rule
+        compare(grid.hourTopY(820, 60), 780);      // 13:40 -> 13:00
+        compare(grid.hourTopY(820, 44), 13 * 44);  // any hour height
+        compare(grid.hourTopY(1439, 60), 1380);    // 23:59 is still in the day
+    }
+
+    function test_hourTopY_is_nan_when_the_axis_is_not_one() {
+        verify(isNaN(grid.hourTopY(820, 0)));
+        verify(isNaN(grid.hourTopY(820, -44)));
+        verify(isNaN(grid.hourTopY(NaN, 60)));
+    }
+
     function test_snap_rounds_to_the_nearest_line() {
         compare(grid.snap(547), 540);
         compare(grid.snap(548), 555);

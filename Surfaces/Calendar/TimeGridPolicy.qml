@@ -83,6 +83,23 @@ QtObject {
         return y / grid.hourPixels(hourHeight) * 60;
     }
 
+    /// The y of the hour rule a minute falls **inside** — 13:40 answers 13:00's
+    /// line, not 14:00's. This is the gutter's question rather than the grid's:
+    /// a drag lands at some minute, and the pill that says which hour it landed
+    /// in has to sit on the rule above it or the reader tracks a box back to the
+    /// labels to find out.
+    ///
+    /// It is a floor and not `snap`, which rounds to the *nearest* line and
+    /// would put 13:40's pill an hour below the ghost. Non-finite minutes, or an
+    /// hour height that is not one, answer `NaN` the way every other reading on
+    /// this axis does.
+    function hourTopY(minutes: real, hourHeight): real {
+        const h = grid.hourPixels(hourHeight);
+        if (!isFinite(minutes) || !isFinite(h))
+            return NaN;
+        return Math.floor(minutes / 60) * h;
+    }
+
     /// To the nearest `step` minutes, a half rounding forward to the later
     /// line. A non-positive step is a no-op rather than a division by zero.
     function snap(minutes, step) {
@@ -416,9 +433,11 @@ QtObject {
     /// because a `Flickable` overshoots at both ends, and "the view is showing
     /// minute -40" is a fact about a bounce rather than about the day.
     ///
-    /// This is the harness/scroll-into-view API: the arithmetic exists and is
-    /// tested here, but no surface calls it yet — `WeekView`'s opening scroll
-    /// always parks on `visibleScrollY(defaultStartHour, ...)`, never on this.
+    /// `WeekView.nowLineVisible` is the caller, and it deliberately moves
+    /// nothing: the opening scroll still parks on
+    /// `visibleScrollY(defaultStartHour, ...)`, because a grid that chased the
+    /// clock would open somewhere different every hour. What the range buys
+    /// there is the log line — today on screen with its now-line off it.
     function visibleRange(scrollY: real, viewportHeight: real, hourHeight): var {
         const h = grid.hourPixels(hourHeight);
         if (isNaN(h) || !isFinite(scrollY) || !isFinite(viewportHeight) || viewportHeight < 0)

@@ -165,8 +165,13 @@
 #
 # `--cal-now` is the one that is not a convenience: the now-line is drawn from
 # the wall clock, so without freezing it no two captures of this surface are the
-# same picture and a diff between two runs is unreadable. It defaults to
-# 2026-08-18T13:40, inside the fixture week.
+# same picture and a diff between two runs is unreadable. **Left out, it is
+# `--cal-date` at 13:40** — early enough in the afternoon that the fixture day
+# has finished events above the line and unstarted ones below it, so the
+# past/future split every chip is drawn on is posed rather than left to whatever
+# hour the run happens at. Following `--cal-date` is the part that matters: a
+# fixed default would have put "now" in another week the moment the caller moved
+# the date, which draws no now-line at all and dims every chip on the grid.
 #
 # --clock writes `weatherTime.clock.format` into the scratch config: `auto`,
 # `12h` or `24h`. #93 was the bar and the lock reading the same minute two ways,
@@ -203,7 +208,10 @@ PICK=""
 CAL_VIEW="week"
 CAL_STATE=""
 CAL_DATE="2026-08-18"
-CAL_NOW="2026-08-18T13:40"
+# Empty until the arguments are parsed: the default is `$CAL_DATE` at
+# CAL_DEFAULT_HOUR, which cannot be known before `--cal-date` has been read.
+CAL_NOW=""
+CAL_DEFAULT_HOUR="13:40"
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -241,7 +249,7 @@ while (( $# )); do
         --palette)     PALETTE="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
-        --help|-h)     sed -n '2,174p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,183p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -302,6 +310,11 @@ case "$CAL_VIEW" in
 esac
 [[ "$CAL_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
     echo "--cal-date wants YYYY-MM-DD, got: $CAL_DATE" >&2; exit 2; }
+# The clock defaults to the posed *date*, not to a fixed stamp: a `--cal-date`
+# in another week with a hard-coded "now" behind it draws no now-line and dims
+# every chip, which is a picture of nothing. Checked after the fill-in so the
+# shape check covers a default as well as an argument.
+[[ -n "$CAL_NOW" ]] || CAL_NOW="${CAL_DATE}T${CAL_DEFAULT_HOUR}"
 [[ "$CAL_NOW" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]] || {
     echo "--cal-now wants YYYY-MM-DDTHH:MM, got: $CAL_NOW" >&2; exit 2; }
 

@@ -103,6 +103,17 @@ QtObject {
 
         let y = ay;
         y = Math.max(m, Math.min(y, Math.max(m, boundsH - panelH - m)));
-        return { "x": x, "y": y, "flipped": x < ax };
+
+        // Where the caret goes, in the panel's own coordinates: the anchor's
+        // vertical centre, clamped so the point never runs off a rounded
+        // corner. A caret is a *claim* about which chip the panel belongs to,
+        // and a caret sitting on the corner radius points at nothing — so a
+        // panel that had to slide away from its chip gets a caret at the
+        // nearest end rather than a caret half off the edge.
+        const ah = a.height > 0 ? a.height : 0;
+        const inset = 12;
+        const centre = ay + ah / 2 - y;
+        const caretY = Math.max(inset, Math.min(centre, Math.max(inset, panelH - inset)));
+        return { "x": x, "y": y, "flipped": x < ax, "caretY": caretY };
     }
 }

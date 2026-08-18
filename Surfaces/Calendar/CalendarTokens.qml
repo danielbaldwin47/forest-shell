@@ -117,6 +117,36 @@ Singleton {
     /// the two agree by construction at any size either of them is ever set in.
     readonly property int titleBaseline: 34
 
+    // --- motion ---------------------------------------------------------------
+    //
+    // Four durations and one distance, stated once here so no surface picks its
+    // own. Every one of them is handed to `Theme.duration()` at the point of
+    // use, which is what makes `appearance.reducedEffects` collapse the whole
+    // window for free — there is no second reduce-motion knob on this surface
+    // and there must not be one. Transforms are additionally guarded by
+    // `Theme.animateTransforms`, so the ladder's middle rung keeps the fades and
+    // drops the slides.
+
+    /// A view or period change: 140ms, and an 8px slide in the travel direction
+    /// (`KeyNavPolicy.viewSign` / `periodSign` decide the sign, not the surface).
+    /// The slide is small on purpose — it has to say *which way* without ever
+    /// making the reader wait for the grid to arrive.
+    readonly property int motionView: 140
+    readonly property int motionSlide: 8
+
+    /// A chip settling from where the pointer left it to where the store put it:
+    /// 160ms, position and size together. It is longer than the view change
+    /// because it is the one motion whose *endpoint* is the information — a
+    /// snap that arrives instantly is indistinguishable from a drag that never
+    /// moved.
+    readonly property int motionSettle: 160
+
+    /// A popover arriving: 120ms, scale 0.96 → 1 with the fade. The shortest of
+    /// the four, because it is the only one the reader is waiting on before
+    /// they can type.
+    readonly property int motionPopover: 120
+    readonly property real popoverScaleFrom: 0.96
+
     /// Lining, tabular figures — `font.features` for every number on this
     /// surface that sits in a column with another number: the hour gutter, the
     /// day-header numerals, the now stamp, and every time printed on a chip.
@@ -150,10 +180,10 @@ Singleton {
     /// chrome sinks past `bgSunken` toward `borderStrong`'s slate, which is the
     /// same 8-10 points measured downward.
     ///
-    /// The canvas itself is deliberately untouched by this. Every chip fill in
-    /// the table below is solved for ≥2.2:1 against `bgBase`, so moving the
-    /// page would move forty-eight colours with it; moving the furniture moves
-    /// two rectangles.
+    /// The canvas itself is deliberately untouched by this. Every chip fill is
+    /// a tint of `Theme.surface` (`HuePolicy.tintAlpha`), so moving the page
+    /// would move sixteen colours with it; moving the furniture moves two
+    /// rectangles.
     readonly property color chromeGround: Theme.dark
         ? Theme.surfaceRaised
         : Qt.tint(Theme.bgSunken, Qt.alpha(Theme.borderStrong, 0.20))
@@ -281,25 +311,54 @@ Singleton {
 
     // --- the toolbar's three ranks ---------------------------------------------
 
-    /// The selected segment of the view switcher.
+    /// The selected segment of the view switcher — **accent-tinted, not grey**.
     ///
     /// The switcher is the one control in this bar that answers a *question*
     /// (which scale am I in) rather than offering an action, and it answers it
-    /// by lifting one tile. That only works if the tile is plainly the lightest
-    /// thing in the bar: at `surfaceOverlay` it was two steps over the resting
-    /// buttons beside it, close enough that a glance read the whole switcher as
-    /// unselected — three labels in a box.
+    /// by lifting one tile. Two passes lifted it by value alone: `surfaceOverlay`
+    /// first, then `surfaceOverlay` carried 14% toward `textPrimary`. Both were
+    /// grey, and a grey tile lifted a step or two out of a grey bar is the exact
+    /// shape this shell draws *hover* with everywhere else — so the capture read
+    /// "the pointer is over Week", not "you are in Week". A selected state that
+    /// is indistinguishable from a hover state is not a selected state.
     ///
-    /// So the thumb is taken past every other surface in the window rather than
-    /// borrowed from the ladder: `surfaceOverlay` carried 14% of the way to
-    /// `textPrimary` lands at about #3f4a43 in dark, five steps clear of the
-    /// `bgSunken` track under it and two clear of `chromeGround`, which is the
-    /// plane the whole bar rests on. In light the roles are already the right
-    /// way round, so the thumb is simply `surfaceRaised` (white) in a sunken
-    /// track.
+    /// Lightness alone cannot fix that, because hover is also lightness. Hue
+    /// can: the thumb takes 40% of `accentPrimary` over `surfaceOverlay`,
+    /// landing near `#436b69` — 3.4:1 over the sunken track, so it still lifts,
+    /// and unmistakably teal, so nothing else in the chrome reads that way.
+    /// It stays a *tint* rather than the solid accent because `createFill` two
+    /// controls left is the bar's one saturated field and this must not tie
+    /// with it; state is quieter than action.
+    ///
+    /// Light mode reaches the same idea from the other side — a wash of teal
+    /// over white, edged in the accent, because two pale tiles a lightness step
+    /// apart on paper is the same unreadable pair dark mode had.
     readonly property color switcherThumb: Theme.dark
-        ? Qt.tint(Theme.surfaceOverlay, Qt.alpha(Theme.textPrimary, 0.14))
-        : Theme.surfaceRaised
+        ? Qt.tint(Theme.surfaceOverlay, Qt.alpha(Theme.accentPrimary, 0.40))
+        : Qt.tint(Theme.surfaceRaised, Qt.alpha(Theme.accentPrimary, 0.20))
+
+    /// The hairline around that thumb. Dark gets none — the hue is the edge —
+    /// and light gets the accent at 0.35, which is what makes a pale wash on
+    /// paper a tile rather than a smudge.
+    readonly property color switcherEdge: Qt.alpha(Theme.accentPrimary, Theme.dark ? 0 : 0.35)
+
+    /// Ink on that thumb: `textPrimary` in both modes, measured at 4.9:1 dark
+    /// and 12:1 light. The resting segments stay `textMuted`, so the control
+    /// now differs in hue, value and weight at once.
+    readonly property color switcherInk: Theme.textPrimary
+
+    /// A menu that opens *inside* a panel — the guest picker's results list.
+    ///
+    /// It was `bgSunken`, which is the darkest plane in the window, and that is
+    /// elevation pointing the wrong way: a list that opens over the panel it
+    /// belongs to is *above* it, and drawing it below made the panel look like
+    /// it had a hole cut in it. Every other menu in this shell lifts.
+    ///
+    /// Dark takes `surfaceOverlay`, one rung above the `surfaceRaised` panel it
+    /// sits on. Light cannot go up from white, so it stays on the panel's own
+    /// plane and lets the shadow do the whole job — which is the same way a
+    /// white menu over a white card reads anywhere.
+    readonly property color dropdownFill: Theme.dark ? Theme.surfaceOverlay : Theme.surfaceRaised
 
     /// The create button's field and the glyph on it — the one coloured fill
     /// in the chrome.
@@ -335,42 +394,45 @@ Singleton {
     /// `bar` is the accent bar down every chip's left edge; `fill` is the chip
     /// body; `text` is what is legible on that fill.
     ///
-    /// **Two ratios are gated here, not one, and the second is the one the
-    /// first table missed.** Text-on-fill was ≥7:1 across the board and the
-    /// chips were still hard to find, because the number nobody had measured
-    /// was *fill against the page*: `#2d3527` on `#0b100d` is **1.51:1**, so
-    /// the olive chip was a title floating on the grid with no body under it.
-    /// A chip is an object; an object needs an edge. The dark fills are
-    /// re-tinted (33–41% of the hue over `Theme.surface`) to land at **≥2.2:1
-    /// against `bgBase`**, and the light ones at ≥1.28:1 against paper — the
-    /// same step light mode's `bgSunken` gets, which is the lightest wash that
-    /// still reads as a filled shape. Text is then re-solved against the new
-    /// fills and holds ≥4.5:1 in both modes.
-    ///
-    /// The two tables are written out rather than computed with `Qt.tint`
-    /// because a computed tint is only as good as the base it is computed
-    /// against, and `Theme.surface` moves between themes while these have to
-    /// hold their contrast ratio wherever they land.
     readonly property var barsDark: ["#6fbec4", "#8fbf6a", "#d8ac81", "#e07a5f",
                                      "#5b9dd9", "#afbd7a", "#b295cf", "#9d9e8d"]
-    readonly property var fillsDark: ["#325150", "#3d5132", "#554b3a", "#684235",
-                                      "#304f65", "#464f37", "#50495d", "#484d44"]
+
+    /// **The fills are computed, not written out, and that is the correction.**
+    /// An earlier pass hand-solved two eight-entry hex tables so a chip would
+    /// clear 2.2:1 against the page — a chip is an object, an object needs an
+    /// edge, and at the spec's tint the fill alone was 1.5:1. The edge was the
+    /// right diagnosis and the fill was the wrong place to put it: eight
+    /// hand-solved values are eight values that drift, and the week's tint and
+    /// the month's had already stopped agreeing by the time anybody compared
+    /// them side by side.
+    ///
+    /// So the edge moved to where an edge belongs — the 3px bar down the chip's
+    /// left and the 1px hue hairline around it (`chipBorder`, 0.28 dark) — and
+    /// the fill went back to being a tint: `HuePolicy.tintAlpha` over
+    /// `Theme.surface`, one number, tested next door, read by the week band,
+    /// the grid chip, the month chip and the drag ghost alike. At 0.16 dark and
+    /// 0.12 light the eight land on the design spec's fill table exactly, and
+    /// every ink below clears 7:1 on its fill rather than the 6 they were
+    /// solved at, because a weaker fill only ever helps the text on it.
+    readonly property real tintAlpha: tokens.hues.tintAlpha(Theme.dark)
+
+    function tintOf(hue: string): color {
+        return tokens.hues.tint(hue, String(Theme.surface), tokens.tintAlpha);
+    }
+
     /// Text on fill, at **6:1 and not 4.5**, and the extra 1.5 is not headroom
     /// for its own sake. 4.5:1 is a threshold on two flat colours; a chip prints
     /// pt(9)–pt(12.5) type, antialiased, so every glyph's edge pixels are blends
     /// of ink and fill and the *measured* ratio off a capture comes in below the
     /// computed one — 4.56 computed read 4.3 on the picture, and the second line
-    /// read 3.9. Solving at 6.0 puts the whole set over AA once the renderer has
-    /// had its say, and the hues are still the hues: each ink keeps its hue and
-    /// saturation and only its lightness moved.
+    /// read 3.9. Solved at 6.0 against the old heavy fills, these inks land at
+    /// 8.9–9.6:1 on the tinted ones, which is the direction a weaker fill moves
+    /// the only ratio that matters here.
     readonly property var textsDark: ["#bbdede", "#c7ddb9", "#e6d6c2", "#efd0c7",
                                       "#c3daed", "#d2dbbd", "#ddd5e8", "#d6d7d0"]
 
     readonly property var barsLight: ["#0c757b", "#4a7d35", "#8a5a2f", "#b0512f",
                                       "#23608f", "#59682c", "#6b4a8f", "#68695b"]
-    readonly property var fillsLight: ["#bfd9d8", "#cad9c3", "#ded4c7", "#e6d1c5",
-                                       "#c8d7df", "#d1d6c5", "#d8d2df", "#d5d6d0"]
-
     /// Light mode's text used to *be* its bar. It cannot be any more: the
     /// fills darkened to make a chip a shape, and the bar hues are now 3.3–4.7:1
     /// on them. These are the same inks stepped down until every one clears
@@ -380,7 +442,7 @@ Singleton {
                                        "#1c4d74", "#434e21", "#593d77", "#4b4b41"]
 
     readonly property var bars: Theme.dark ? tokens.barsDark : tokens.barsLight
-    readonly property var fills: Theme.dark ? tokens.fillsDark : tokens.fillsLight
+    readonly property var fills: tokens.bars.map(hue => tokens.tintOf(hue))
     readonly property var texts: Theme.dark ? tokens.textsDark : tokens.textsLight
 
     /// An index that cannot miss. A delegate mid-rebuild asks with whatever it

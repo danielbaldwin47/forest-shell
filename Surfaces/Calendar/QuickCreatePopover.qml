@@ -50,6 +50,12 @@ Item {
     /// the week grid today and by the month grid tomorrow.
     property bool flipped: false
 
+    /// Where the caret points, in this panel's own coordinates — the anchor
+    /// chip's vertical centre, already clamped off the corners by
+    /// `CreatePolicy.popoverAnchor`. The panel does not compute it for the same
+    /// reason it does not place itself.
+    property real caretY: 0
+
     property CalendarFormat format: CalendarFormat {}
 
     signal renamed(string title)
@@ -108,7 +114,7 @@ Item {
         /// Scale-and-fade in from the anchored edge, `motionFast`, the same
         /// motion every other popover in this surface uses.
         transformOrigin: popover.flipped ? Item.TopRight : Item.TopLeft
-        scale: Theme.animateTransforms ? 0.96 : 1
+        scale: Theme.animateTransforms ? CalendarTokens.popoverScaleFrom : 1
         opacity: Theme.animateTransforms ? 0 : 1
         Component.onCompleted: {
             card.scale = 1;
@@ -117,16 +123,50 @@ Item {
         Behavior on scale {
             enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.duration(Theme.motionFast)
+                duration: Theme.duration(CalendarTokens.motionPopover)
                 easing.type: Easing.OutCubic
             }
         }
         Behavior on opacity {
             enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.duration(Theme.motionFast)
+                duration: Theme.duration(CalendarTokens.motionPopover)
                 easing.type: Easing.OutCubic
             }
+        }
+
+        /// **The caret.** A 10px square turned 45° at the panel's anchored
+        /// edge, half of it outside and half of it under the panel's own fill.
+        ///
+        /// Without one the panel is a card floating eight pixels from a column
+        /// of six chips, and which of the six it is about is a guess the reader
+        /// has to make from the time printed inside it. The point closes that:
+        /// it is the same claim an arrow makes, drawn in the panel's own two
+        /// colours so it reads as part of the card rather than as a mark on the
+        /// grid.
+        ///
+        /// The 1px plate beside it is the seam — it paints out the card's
+        /// border and the caret's where the two meet, so the join is open and
+        /// the outline runs continuously around both.
+        Rectangle {
+            id: caret
+
+            width: 10
+            height: 10
+            x: popover.flipped ? card.width - width / 2 : -width / 2
+            y: Math.max(6, Math.min(card.height - 16, popover.caretY - height / 2))
+            rotation: 45
+            color: card.color
+            border.width: 1
+            border.color: card.border.color
+        }
+
+        Rectangle {
+            x: popover.flipped ? card.width - caret.width + 1 : 0
+            y: caret.y - 4
+            width: caret.width - 1
+            height: caret.height + 8
+            color: card.color
         }
 
         Column {
@@ -193,12 +233,35 @@ Item {
                     }
                 }
 
+                /// The rule under the field when it is idle — the borderless
+                /// affordance the header argues for.
                 Rectangle {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     height: 1
-                    color: titleField.activeFocus ? Theme.accentPrimary : Theme.borderSubtle
+                    visible: !titleField.activeFocus
+                    color: Theme.borderSubtle
+                }
+
+                /// **And a real ring when it is focused.** An accent underline
+                /// is what a field does when it is one of several and the eye
+                /// is comparing them; this field is alone in the panel, so an
+                /// underline is a colour change nobody looks for. A 2px ring in
+                /// the same accent, drawn a `space2` outside the text, is the
+                /// shape every focused field in this shell takes and the only
+                /// one that survives a glance at the whole window: it says
+                /// *keystrokes land here*, which is the entire state a
+                /// quick-create panel has.
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -Theme.space2
+                    anchors.bottomMargin: -Theme.space1
+                    visible: titleField.activeFocus
+                    radius: Theme.radiusSm
+                    color: Qt.alpha(Theme.accentPrimary, 0.06)
+                    border.width: 2
+                    border.color: Theme.accentPrimary
                 }
             }
 

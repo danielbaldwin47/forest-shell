@@ -187,4 +187,99 @@ TestCase {
         for (let i = 0; i < 7; i++)
             verify(spread[i] >= 0 && spread[i] < hues.autoCount);
     }
+
+    // --- the tint ----------------------------------------------------------------
+    //
+    // How strongly a hue is laid over the panel to become a chip's body. It is
+    // one number and it lives here because it was three: two hand-solved hex
+    // tables and a month view that had drifted off both. What is pinned is the
+    // arithmetic and the alphas, not the eight results — the results are
+    // `CalendarTokens`' business.
+
+    function test_the_alphas_are_the_specs() {
+        compare(hues.tintAlpha(true), 0.16);
+        compare(hues.tintAlpha(false), 0.12);
+    }
+
+    // The eight dark fills in DESIGN-SPEC.md are exactly `bar` over
+    // `Theme.surface` at 0.16, which is the claim that lets the table be
+    // deleted and computed instead.
+    function test_dark_tints_land_on_the_spec_table() {
+        const surface = "#141b17";
+        compare(hues.tint("#6fbec4", surface, 0.16), "#233533");
+        compare(hues.tint("#8fbf6a", surface, 0.16), "#283524");
+        compare(hues.tint("#5b9dd9", surface, 0.16), "#1f3036");
+        compare(hues.tint("#9d9e8d", surface, 0.16), "#2a302a");
+    }
+
+    function test_light_tints_land_on_the_spec_table() {
+        const surface = "#f7f9f5";
+        compare(hues.tint("#0c757b", surface, 0.12), "#dbe9e6");
+        compare(hues.tint("#4a7d35", surface, 0.12), "#e2eade");
+        compare(hues.tint("#68695b", surface, 0.12), "#e6e8e3");
+    }
+
+    function test_the_ends_of_the_range_are_the_two_colours() {
+        compare(hues.tint("#6fbec4", "#141b17", 0), "#141b17");
+        compare(hues.tint("#6fbec4", "#141b17", 1), "#6fbec4");
+    }
+
+    // A binding mid-rebuild hands this whatever it has. Black on black is the
+    // failure mode; a base that survives is the requirement.
+    function test_nonsense_falls_back_to_the_base_rather_than_to_black() {
+        compare(hues.tint("", "#141b17", 0.16), "#141b17");
+        compare(hues.tint(undefined, "#141b17", 0.16), "#141b17");
+        compare(hues.tint("#6fbec4", "not a colour", 0.16), "#000000");
+    }
+
+    function test_alpha_is_clamped_rather_than_extrapolated() {
+        compare(hues.tint("#6fbec4", "#141b17", -3), "#141b17");
+        compare(hues.tint("#6fbec4", "#141b17", 9), "#6fbec4");
+    }
+
+    function test_short_hex_is_accepted() {
+        compare(hues.tint("#fff", "#000", 1), "#ffffff");
+        compare(hues.tint("#fff", "#000000", 0.5), "#808080");
+    }
+
+    // Every ink the surface prints on a tint has to clear AA on it. Solved at
+    // 6:1 against the old heavy fills, they land far above it on these.
+    function test_every_ink_clears_4_5_on_its_tint() {
+        const barsDark = ["#6fbec4", "#8fbf6a", "#d8ac81", "#e07a5f",
+                          "#5b9dd9", "#afbd7a", "#b295cf", "#9d9e8d"];
+        const inksDark = ["#bbdede", "#c7ddb9", "#e6d6c2", "#efd0c7",
+                          "#c3daed", "#d2dbbd", "#ddd5e8", "#d6d7d0"];
+        for (let i = 0; i < barsDark.length; i++) {
+            const fill = hues.tint(barsDark[i], "#141b17", hues.tintAlphaDark);
+            verify(testCase.contrast(inksDark[i], fill) >= 4.5,
+                   inksDark[i] + " on " + fill + " is "
+                   + testCase.contrast(inksDark[i], fill).toFixed(2) + ":1");
+        }
+        const barsLight = ["#0c757b", "#4a7d35", "#8a5a2f", "#b0512f",
+                           "#23608f", "#59682c", "#6b4a8f", "#68695b"];
+        const inksLight = ["#085256", "#305224", "#664323", "#783821",
+                           "#1c4d74", "#434e21", "#593d77", "#4b4b41"];
+        for (let i = 0; i < barsLight.length; i++) {
+            const fill = hues.tint(barsLight[i], "#f7f9f5", hues.tintAlphaLight);
+            verify(testCase.contrast(inksLight[i], fill) >= 4.5,
+                   inksLight[i] + " on " + fill + " is "
+                   + testCase.contrast(inksLight[i], fill).toFixed(2) + ":1");
+        }
+    }
+
+    /// WCAG, in the test rather than in the shipping code — the same arithmetic
+    /// `tools/measure-contrast.py` runs on a capture.
+    function contrast(a, b) {
+        const l1 = testCase.relativeLuminance(a);
+        const l2 = testCase.relativeLuminance(b);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+
+    function relativeLuminance(hex) {
+        const c = hues.channels(hex).map(function (v) {
+            const s = v / 255;
+            return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    }
 }

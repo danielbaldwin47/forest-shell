@@ -735,4 +735,58 @@ TestCase {
         compare(keys.keyCaps("K /").length, 1);
         compare(keys.keyCaps("+K+").length, 1);
     }
+
+    // --- which way a change travels ----------------------------------------------
+    //
+    // The surface slides the grid 8px in this direction. A sign that disagrees
+    // with the date is worse than no motion at all — it teaches the hand the
+    // opposite of what happened — so it is decided beside `shiftPeriod`, which
+    // is the only other place that knows what "next" means.
+
+    function test_a_forward_step_arrives_from_the_right() {
+        compare(keys.periodSign(1), 1);
+        compare(keys.periodSign(7), 1);
+    }
+
+    function test_a_backward_step_arrives_from_the_left() {
+        compare(keys.periodSign(-1), -1);
+        compare(keys.periodSign(-7), -1);
+    }
+
+    // No travel, rather than a coin toss: a step of nothing must be still.
+    function test_a_step_of_nothing_does_not_travel() {
+        compare(keys.periodSign(0), 0);
+        compare(keys.periodSign(NaN), 0);
+    }
+
+    function test_widening_the_scale_arrives_from_the_right() {
+        compare(keys.viewSign("day", "week"), 1);
+        compare(keys.viewSign("week", "month"), 1);
+        compare(keys.viewSign("day", "month"), 1);
+    }
+
+    function test_narrowing_the_scale_arrives_from_the_left() {
+        compare(keys.viewSign("month", "week"), -1);
+        compare(keys.viewSign("week", "day"), -1);
+    }
+
+    function test_switching_to_the_view_already_on_screen_is_still() {
+        compare(keys.viewSign("week", "week"), 0);
+    }
+
+    function test_an_unknown_view_is_still_rather_than_a_guess() {
+        compare(keys.viewSign("agenda", "week"), 0);
+        compare(keys.viewSign("week", ""), 0);
+        compare(keys.viewSign(undefined, undefined), 0);
+        compare(keys.scaleIndex("agenda"), -1);
+    }
+
+    // The ladder order is the one the switcher draws left to right, so a slide
+    // and the thumb under it always travel the same way.
+    function test_the_scale_ladder_is_the_switchers_order() {
+        compare(keys.scales, ["day", "week", "month"]);
+        compare(keys.scaleIndex("day"), 0);
+        compare(keys.scaleIndex("week"), 1);
+        compare(keys.scaleIndex("month"), 2);
+    }
 }

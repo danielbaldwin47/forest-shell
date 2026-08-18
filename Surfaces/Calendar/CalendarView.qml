@@ -60,6 +60,78 @@ FloatingWindow {
     /// The day the view is built around.
     property string anchorDate: ""
 
+    // --- which way the window is travelling --------------------------------------
+    //
+    // Two grids share one rectangle and cross-fade between them; `travelSign`
+    // is which side the incoming one arrives from. It is `+1` for a widening
+    // change (day → week → month) and `-1` for a narrowing one, and it is
+    // `KeyNavPolicy.viewSign`'s answer rather than this file's — the same policy
+    // that knows what "next week" means is the one that knows which way "next"
+    // points, and a slide that disagrees with the date is worse than no slide.
+    //
+    // It is a stored `int` and not a binding because the sign has to *survive*
+    // the change that caused it: by the time the fade is running, `view` is
+    // already the new one and the old one is gone.
+    property int travelSign: 0
+
+    /// The view we were in, kept only long enough to work out the direction out
+    /// of it.
+    property string travelFrom: window.view
+
+    onViewChanged: {
+        if (window.view === window.travelFrom)
+            return;
+        window.travelSign = window.keyNav.viewSign(window.travelFrom, window.view);
+        // Seam 2's handle on the whole of §10: a transition either fired or it
+        // did not, and a log line is the only way to tell from outside a
+        // compositor that cannot present a frame (`tools/nested-session.sh`).
+        Logger.log("calendar", "transition view " + window.travelFrom
+                   + "->" + window.view);
+        window.travelFrom = window.view;
+    }
+
+    /// The same slide, for a step *within* a scale — next week, last month.
+    ///
+    /// `periodPhase` runs 0 → 1 over the change and the grids read it as a
+    /// distance, so the whole thing is one animated number rather than a
+    /// storyboard. It rests at 1, which is what makes a capture safe: nothing
+    /// animates until a date actually changes, so the harness never grabs a
+    /// grid mid-flight.
+    ///
+    /// The sign is read off the *dates* rather than off the press, so a `goto`
+    /// arriving over IPC travels the same way a chevron click does.
+    property real periodPhase: 1
+    property string travelDate: window.anchorDate
+
+    onAnchorDateChanged: {
+        if (!window.travelDate || !window.anchorDate
+            || window.travelDate === window.anchorDate) {
+            window.travelDate = window.anchorDate;
+            return;
+        }
+        const sign = window.keyNav.periodSign(
+            window.keyNav.time.compare(window.anchorDate, window.travelDate));
+        window.travelDate = window.anchorDate;
+        if (sign === 0 || !Theme.animateTransforms)
+            return;
+        window.travelSign = sign;
+        periodSlide.restart();
+    }
+
+    SequentialAnimation {
+        id: periodSlide
+
+        PropertyAction { target: window; property: "periodPhase"; value: 0 }
+
+        NumberAnimation {
+            target: window
+            property: "periodPhase"
+            to: 1
+            duration: Theme.duration(CalendarTokens.motionView)
+            easing.type: Easing.OutCubic
+        }
+    }
+
     /// What the now-line should believe the time is, as `"2026-08-18T13:40"`,
     /// or `""` for the real clock.
     ///
@@ -684,6 +756,15 @@ FloatingWindow {
                                                    window.nowStamp,
                                                    window.upcomingPolicy.defaultLimit)
 
+                    /// **A heading with nothing under it is worse than no
+                    /// heading.** A calendar with nothing coming up drew
+                    /// `UPCOMING` over 200px of empty rail, which reads as a
+                    /// list that failed to load rather than as a diary with
+                    /// nothing in it. The whole section leaves together, and
+                    /// the grid's own empty hint is where "there is nothing
+                    /// here" gets said once.
+                    visible: upcoming.rows.length > 0
+
                     /// The heading carries the join on its own — see the
                     /// calendars list above for why the hairline that used to
                     /// sit here went. The row is 34 rather than 28 so the air
@@ -900,7 +981,35 @@ FloatingWindow {
             anchors.right: parent.right
             anchors.top: toolbar.bottom
             anchors.bottom: parent.bottom
-            visible: window.view !== "month"
+
+            /// The crossfade half of a view change. See `window.travelSign` for
+            /// the slide half and for why the sign is a policy's answer.
+            ///
+            /// `visible` follows the opacity rather than the view, so the grid
+            /// on its way out keeps painting until it has finished leaving —
+            /// binding `visible` to `window.view` would cut the fade off on its
+            /// first frame, which is how an earlier pass "had a transition" that
+            /// nothing could see.
+            readonly property bool shown: window.view !== "month"
+
+            opacity: grid.shown ? 1 : 0
+            visible: grid.opacity > 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Theme.duration(CalendarTokens.motionView)
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            transform: Translate {
+                x: Theme.animateTransforms
+                   ? ((1 - grid.opacity) * (grid.shown ? window.travelSign
+                                                       : -window.travelSign)
+                      + (1 - window.periodPhase) * window.travelSign)
+                     * CalendarTokens.motionSlide
+                   : 0
+            }
 
             dayCount: window.view === "day" ? 1 : 7
             anchorDate: window.anchorDate
@@ -928,7 +1037,27 @@ FloatingWindow {
             id: monthGrid
 
             anchors.fill: grid
-            visible: window.view === "month"
+
+            readonly property bool shown: window.view === "month"
+
+            opacity: monthGrid.shown ? 1 : 0
+            visible: monthGrid.opacity > 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Theme.duration(CalendarTokens.motionView)
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            transform: Translate {
+                x: Theme.animateTransforms
+                   ? ((1 - monthGrid.opacity) * (monthGrid.shown ? window.travelSign
+                                                                 : -window.travelSign)
+                      + (1 - window.periodPhase) * window.travelSign)
+                     * CalendarTokens.motionSlide
+                   : 0
+            }
 
             anchorDate: window.anchorDate
             firstDay: window.firstDay
@@ -1004,6 +1133,7 @@ FloatingWindow {
                 contacts: CalendarStore.contacts
                 use24: window.use24
                 flipped: editorLoader.placement.flipped
+                caretY: editorLoader.placement.caretY
 
                 // One way down and nothing back. These two are a *pose* — the
                 // state a fresh panel opens in — not a mirror of what the

@@ -126,6 +126,30 @@ Item {
     readonly property var bandEvents: view.layoutPolicy.bandEvents(view.events)
     readonly property var gridDayEvents: view.layoutPolicy.gridEvents(view.events)
 
+    /// Nothing at all in the days on screen — no chip, no all-day bar.
+    ///
+    /// A grid with nothing in it is the one state where the surface has to say
+    /// something out loud, because an empty week and a week that failed to load
+    /// draw the same picture: 24 ruled rows and no other mark. The hint below
+    /// makes them different, and it is only ever asked for on the *visible*
+    /// range, not on the store — a calendar with 400 events in September is
+    /// still an empty first week of August.
+    readonly property bool isEmpty: {
+        if (view.bandLanes.length > 0)
+            return false;
+        for (let i = 0; i < view.columns.length; i++) {
+            const day = view.layoutPolicy.eventPolicy.forDay(view.gridDayEvents,
+                                                             view.columns[i].iso);
+            if (day.length > 0)
+                return false;
+        }
+        return true;
+    }
+
+    /// What the pointer says over each part of the grid. Pure and tested next
+    /// door; this file only reads the answer.
+    property CursorPolicy cursors: CursorPolicy {}
+
     /// The all-day band, packed into lanes. `allDayLanes` clips to a week, so a
     /// shorter run drops the columns past its own right edge here rather than
     /// asking the policy to learn a second width.
@@ -780,10 +804,16 @@ Item {
             text: "ALL DAY"
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
-            color: Theme.textSecondary
+            // Exactly the hour labels' class — `pt(11)`, `textMuted`, regular.
+            // It names its row the way `9 AM` names its rule, and a gutter that
+            // labels two kinds of row in two different sizes and two different
+            // values is a gutter with two voices in it. It was `capsSize` in
+            // `textSecondary`, which made the one label with no number in it the
+            // loudest thing in the column.
+            color: Theme.textMuted
             font.family: Theme.fontUi
-            font.pointSize: Theme.pt(Theme.capsSize)
-            font.weight: Theme.weightMedium
+            font.pointSize: Theme.pt(11)
+            font.weight: Theme.weightRegular
         }
 
         Repeater {
@@ -1104,7 +1134,28 @@ Item {
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton
                 preventStealing: true
-                cursorShape: Qt.PointingHandCursor
+
+                /// **A crosshair, not a hand.** A hand promises that a press
+                /// opens the thing under it, and there is nothing under it — a
+                /// press here *draws* a new event. `CursorPolicy` owns the
+                /// mapping, and the whole window reads it from there so the
+                /// grid, the chip and its edges cannot drift apart again.
+                //
+                // pointer-exempt: this is the one surface in the shell whose
+                // press does not *activate* anything — it draws. #185's rule
+                // exists so a clickable thing never looks unclickable, and a
+                // crosshair is a stronger affordance here than the hand, not a
+                // missing one; `tests/tst_cursorpolicy.qml` pins the choice.
+                cursorShape: Qt.CrossCursor
+
+                /// Seam 2's only handle on a cursor. The nested compositor
+                /// cannot present a frame, so nothing here can be photographed;
+                /// what it can do is say what it asked for, once per change.
+                onContainsMouseChanged: {
+                    if (createHover.containsMouse)
+                        Logger.log("calendar",
+                                   "cursor " + view.cursors.name("grid"));
+                }
 
                 onPressed: mouse => view.beginDrag("create", mouse.x + view.gutterW,
                                                    mouse.y, null)
@@ -1134,21 +1185,74 @@ Item {
                 width: Math.max(0, view.columnWidthFor(Math.max(0, createHint.col))
                                 - view.colInset * 2)
                 y: Math.round(view.grid.minutesToY(createHint.startMin, view.hourRow))
-                height: Math.round(view.grid.minutesToY(30, view.hourRow))
-                radius: Theme.radiusSm
-                color: Qt.alpha(Theme.surfaceOverlay, 0.55)
-                border.width: 1
-                border.color: Theme.borderStrong
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "+"
-                    color: Theme.textSecondary
-                    font.family: Theme.fontUi
-                    font.pointSize: Theme.pt(13.5)
-                    font.weight: Theme.weightMedium
+                /// **One snap, not half an hour.** The hint used to be a 30-min
+                /// box, which drew a slot twice the size of the one a press
+                /// actually starts — the pointer said "this much" and the drag
+                /// gave that much again. A `snapMin` slot is 14px at
+                /// `hourRow` 56, which is the same 14px `TimeGridPolicy.snap`
+                /// rounds to, so the outline under the pointer *is* the unit.
+                height: Math.round(view.grid.minutesToY(CalendarTokens.snapMin,
+                                                        view.hourRow))
+                radius: Theme.radiusSm - 2
+
+                /// And faint. It follows the pointer down 96 rows of grid, so
+                /// anything with weight to it turns a scan of the week into a
+                /// flicker; at 0.30 over the wash it is a shape the eye finds
+                /// where it is already looking and nowhere else.
+                color: Qt.alpha(Theme.surfaceOverlay, 0.30)
+                border.width: 1
+                border.color: Qt.alpha(Theme.borderStrong, 0.7)
+            }
+
+            /// **The drop slot.** A wash down the whole of the column the
+            /// proposal has landed in, plus a hairline at each end of the slot
+            /// itself, drawn in the dragged event's own hue.
+            ///
+            /// The ghost alone answers "how long" and "at what minute", and it
+            /// answered "which day" badly: a chip dragged across a week is
+            /// under the pointer, the pointer is over a column boundary as
+            /// often as not, and the two columns either side of it look
+            /// identical. Washing the target column says which one will take it
+            /// before the finger lifts — the same job the today wash does for
+            /// the date, in the same grammar, in the hue of the thing being
+            /// moved so it is plainly *this* event's destination and not a
+            /// selection.
+            ///
+            /// Under the ghost in z, so it never dulls the box the drag is
+            /// aimed with, and above the grid rules so it reads as a slot
+            /// rather than as a change of paper.
+            Rectangle {
+                id: dropSlot
+
+                readonly property int col: Math.max(0, view.proposal.column)
+                readonly property int hue: view.dragEventId
+                    ? CalendarTokens.hues.forEvent(view.eventById(view.dragEventId))
+                    : 0
+
+                visible: view.dragShown
+                z: 2
+                x: view.columnX(dropSlot.col)
+                width: view.columnWidthFor(dropSlot.col)
+                y: 0
+                height: content.height
+                color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.09)
+
+                /// The two ends of the slot, full column width, so the minute
+                /// the proposal starts and ends on is readable across the day
+                /// rather than only along the ghost's own edge.
+                Rectangle {
+                    y: Math.round(view.proposal.y)
+                    width: parent.width
+                    height: 1
+                    color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.45)
+                }
+
+                Rectangle {
+                    y: Math.round(view.proposal.y + view.proposal.h) - 1
+                    width: parent.width
+                    height: 1
+                    color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.45)
                 }
             }
 
@@ -1282,6 +1386,38 @@ Item {
                         }
                     }
                 }
+            }
+
+            /// **The empty week says so.** One quiet line, centred in the
+            /// grid, naming both ways to make an event.
+            ///
+            /// An empty grid and a grid that failed to load draw the same
+            /// picture — 24 ruled rows — and the reader has no way to tell
+            /// which they are looking at. This is the difference, and it is the
+            /// *hint* rather than an illustration or a button: it says what to
+            /// do with the surface already in front of them (drag), and names
+            /// the key that does it without one (`C`), so the empty state
+            /// teaches the shortcut the full state never has room to.
+            ///
+            /// `textMuted` and nothing else — no panel, no border, no icon. It
+            /// is an aside on a working grid, not a screen of its own, and it
+            /// disappears the instant the week has anything in it.
+            ///
+            /// The month view gets none of this on purpose: a month cell is
+            /// captioned by its own date numeral, so an empty month already
+            /// looks like a month with nothing in it rather than like a failure.
+            Text {
+                id: emptyHint
+
+                visible: view.isEmpty && !view.dragPolicy.active
+                z: 3
+                x: view.gutterW
+                    + (content.width - view.gutterW - emptyHint.width) / 2
+                y: body.contentY + (body.height - emptyHint.height) / 2
+                text: "Drag to create an event · C"
+                color: Theme.textMuted
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(12.5)
             }
 
             /// The proposal, drawn. Above every chip because it is the thing
@@ -1471,6 +1607,7 @@ Item {
             hue: CalendarTokens.hues.forEvent(view.eventById(view.quickCreateId))
             use24: view.use24
             flipped: quickCreate.placement.flipped
+            caretY: quickCreate.placement.caretY
 
             onRenamed: title => CalendarStore.renameEvent(view.quickCreateId, title)
             onRecoloured: colour => CalendarStore.recolourEvent(view.quickCreateId, colour)

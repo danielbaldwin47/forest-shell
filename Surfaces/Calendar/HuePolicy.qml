@@ -184,4 +184,64 @@ QtObject {
         }
         return out;
     }
+
+    // --- how strong a hue reads as a chip body ---------------------------------
+
+    /// The alpha a hue is laid over `Theme.surface` at to become a chip's fill.
+    ///
+    /// This is the one number that decides how heavy every chip in the window
+    /// looks, so it lives here — pure, tested, and read by `CalendarTokens`
+    /// rather than restated by it. An earlier pass wrote the eight fills out as
+    /// hex in three places' worth of tables and they drifted: the week's tint
+    /// and the month's were solved separately and no longer agreed, which is
+    /// exactly the failure a single source exists to stop.
+    ///
+    /// 0.16 in dark and 0.12 in light are the design spec's, and they are not
+    /// arbitrary: at those alphas the eight bars land on the spec's own fill
+    /// table to the byte, and every ink stays ≥7:1 on its fill in both modes —
+    /// well past the 4.5 AA asks and past the 6 this surface solves at, because
+    /// a chip prints pt(11) type whose antialiased edges measure below the
+    /// computed ratio.
+    ///
+    /// What carries the chip's *edge* at these alphas is not the fill: it is
+    /// the 3px bar in the hue and the 1px hue hairline around it
+    /// (`CalendarTokens.chipBorder`). A fill strong enough to be its own edge is
+    /// a fill that has stopped being a tint, which is the reference this surface
+    /// is measured against.
+    readonly property real tintAlphaDark: 0.16
+    readonly property real tintAlphaLight: 0.12
+
+    function tintAlpha(dark: bool): real {
+        return dark ? policy.tintAlphaDark : policy.tintAlphaLight;
+    }
+
+    /// `#rrggbb` for `hue` laid over `base` at `alpha`. Hex in, hex out, so the
+    /// arithmetic is checkable offscreen without a `color` type or a Theme.
+    function tint(hue: string, base: string, alpha: real): string {
+        const h = policy.channels(hue);
+        const b = policy.channels(base);
+        if (!h || !b)
+            return policy.hex(b || [0, 0, 0]);
+        const a = Math.max(0, Math.min(1, alpha));
+        return policy.hex([0, 1, 2].map(i => b[i] + (h[i] - b[i]) * a));
+    }
+
+    /// `#rrggbb` → `[r, g, b]`, or `null` for anything that is not one. Short
+    /// form `#rgb` is accepted because a hand-written token may use it.
+    function channels(value: string): var {
+        const text = String(value || "").trim().replace(/^#/, "");
+        if (text.length === 3)
+            return [0, 1, 2].map(i => parseInt(text[i] + text[i], 16));
+        if (text.length !== 6)
+            return null;
+        const out = [0, 2, 4].map(i => parseInt(text.substr(i, 2), 16));
+        return out.some(v => !isFinite(v)) ? null : out;
+    }
+
+    function hex(rgb: var): string {
+        return "#" + rgb.map(v => {
+            const n = Math.max(0, Math.min(255, Math.round(v)));
+            return (n < 16 ? "0" : "") + n.toString(16);
+        }).join("");
+    }
 }

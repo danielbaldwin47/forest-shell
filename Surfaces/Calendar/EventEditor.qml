@@ -49,6 +49,11 @@ Item {
     /// out of the anchored edge.
     property bool flipped: false
 
+    /// Where the caret points, in this panel's own coordinates. See
+    /// `QuickCreatePopover.caretY` — same decision, same policy, so the two
+    /// panels point at their chip the same way.
+    property real caretY: 0
+
     /// A posed query for the picker, and whether its list is showing. Both
     /// exist for tools/capture-harness.sh: a photograph of a closed picker says
     /// nothing about whether searching works.
@@ -150,7 +155,7 @@ Item {
         border.color: Theme.borderSubtle
 
         transformOrigin: editor.flipped ? Item.TopRight : Item.TopLeft
-        scale: Theme.animateTransforms ? 0.96 : 1
+        scale: Theme.animateTransforms ? CalendarTokens.popoverScaleFrom : 1
         opacity: Theme.animateTransforms ? 0 : 1
         Component.onCompleted: {
             card.scale = 1;
@@ -159,16 +164,40 @@ Item {
         Behavior on scale {
             enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.duration(Theme.motionFast)
+                duration: Theme.duration(CalendarTokens.motionPopover)
                 easing.type: Easing.OutCubic
             }
         }
         Behavior on opacity {
             enabled: Theme.animateTransforms
             NumberAnimation {
-                duration: Theme.duration(Theme.motionFast)
+                duration: Theme.duration(CalendarTokens.motionPopover)
                 easing.type: Easing.OutCubic
             }
+        }
+
+        /// The caret, pointing back at the chip this editor is about. Same
+        /// 10px square turned 45° the quick-create panel uses, and the same 1px
+        /// plate opening the seam where it meets the card.
+        Rectangle {
+            id: caret
+
+            width: 10
+            height: 10
+            x: editor.flipped ? card.width - width / 2 : -width / 2
+            y: Math.max(6, Math.min(card.height - 16, editor.caretY - height / 2))
+            rotation: 45
+            color: card.color
+            border.width: 1
+            border.color: card.border.color
+        }
+
+        Rectangle {
+            x: editor.flipped ? card.width - caret.width + 1 : 0
+            y: caret.y - 4
+            width: caret.width - 1
+            height: caret.height + 8
+            color: card.color
         }
 
         Column {
@@ -233,8 +262,24 @@ Item {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     height: 1
-                    color: titleField.activeFocus ? Theme.accentPrimary
-                                                  : Theme.borderSubtle
+                    visible: !titleField.activeFocus
+                    color: Theme.borderSubtle
+                }
+
+                /// The focus ring — see `QuickCreatePopover` for the argument.
+                /// This panel has two focusable fields rather than one, which
+                /// makes it stronger here: Tab moves between them, and a ring
+                /// says which one has the keys at a glance where two accent
+                /// underlines a hundred pixels apart do not.
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -Theme.space2
+                    anchors.bottomMargin: -Theme.space1
+                    visible: titleField.activeFocus
+                    radius: Theme.radiusSm
+                    color: Qt.alpha(Theme.accentPrimary, 0.06)
+                    border.width: 2
+                    border.color: Theme.accentPrimary
                 }
             }
 

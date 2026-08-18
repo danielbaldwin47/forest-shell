@@ -108,4 +108,45 @@ TestCase {
         compare(at.x, 8);
         compare(at.y, 8);
     }
+
+    // --- the caret ----------------------------------------------------------------
+    //
+    // The panel sits *beside* its chip with a gap between them, and a gap says
+    // nothing about which of the six chips in that column the panel is about.
+    // The caret does, so where it points is a decision and not a decoration.
+
+    function test_the_caret_points_at_the_middle_of_the_chip() {
+        // A 60-tall chip at y=200 in a panel placed at its own top: the middle
+        // is 30 below the panel's top edge.
+        const at = policy.popoverAnchor({ "x": 100, "y": 200, "width": 120, "height": 60 },
+                                        320, 200, 1000, 800, 8, 8);
+        compare(at.y, 200);
+        compare(at.caretY, 30);
+    }
+
+    // A chip near the bottom pushes the panel up, and the caret has to follow
+    // the chip rather than the panel — otherwise it points at the wrong hour.
+    function test_the_caret_follows_the_chip_when_the_panel_slides_up() {
+        const at = policy.popoverAnchor({ "x": 100, "y": 700, "width": 120, "height": 40 },
+                                        320, 300, 1000, 800, 8, 8);
+        compare(at.y, 492);
+        compare(at.caretY, 228);
+    }
+
+    // And when the chip is so far off that the middle would land on the panel's
+    // rounded corner, the caret stops at the inset instead of hanging off it.
+    function test_the_caret_never_lands_on_a_corner() {
+        const high = policy.popoverAnchor({ "x": 100, "y": 0, "width": 120, "height": 20 },
+                                          320, 300, 1000, 800, 8, 8);
+        compare(high.caretY, 12);
+        const low = policy.popoverAnchor({ "x": 100, "y": 780, "width": 120, "height": 20 },
+                                         320, 300, 1000, 800, 8, 8);
+        compare(low.caretY, 288);
+    }
+
+    function test_an_anchor_with_no_height_still_gets_a_caret() {
+        const at = policy.popoverAnchor({ "x": 100, "y": 200, "width": 120 },
+                                        320, 200, 1000, 800, 8, 8);
+        compare(at.caretY, 12);
+    }
 }

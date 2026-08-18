@@ -299,6 +299,45 @@ QtObject {
         return "";
     }
 
+    /// Which way a change *travels*, so the surface can slide it that way.
+    ///
+    /// Motion on this window is never decoration: it says which direction the
+    /// calendar just moved in, and getting the sign wrong is worse than not
+    /// animating at all — a grid that slides left while the date goes forward
+    /// teaches the hand the opposite of the truth. So the sign is decided here,
+    /// beside `shiftPeriod`, which is the only other place that knows what
+    /// "next" means, and tested rather than eyeballed off a 140ms fade.
+    ///
+    /// `+1` is "the new thing arrives from the right"; `-1` from the left; `0`
+    /// is no travel at all, which is what a step of zero or an unknown view
+    /// has to give — an unknown direction must be *still*, not a coin toss.
+    function periodSign(delta: int): int {
+        const step = Math.round(delta);
+        if (!isFinite(step) || step === 0)
+            return 0;
+        return step > 0 ? 1 : -1;
+    }
+
+    /// Where a view sits on the scale ladder — day is narrowest, month widest.
+    /// `-1` for anything that is not one of the three.
+    function scaleIndex(view: string): int {
+        return policy.scales.indexOf(String(view || ""));
+    }
+
+    readonly property var scales: ["day", "week", "month"]
+
+    /// The travel sign for a *scale* change rather than a period one. Widening
+    /// (week → month) arrives from the right, narrowing from the left, and a
+    /// switch to the view already on screen does not travel. Same convention as
+    /// `periodSign`, so the surface has one rule to apply and not two.
+    function viewSign(fromView: string, toView: string): int {
+        const a = policy.scaleIndex(fromView);
+        const b = policy.scaleIndex(toView);
+        if (a < 0 || b < 0 || a === b)
+            return 0;
+        return b > a ? 1 : -1;
+    }
+
     /// The days a view has on screen, as `{from, to}` inclusive — the range
     /// `Up`/`Down` walk, and the one the surface hands to
     /// `EventPolicy.forRange`. `null` for a day that is not one.

@@ -331,8 +331,13 @@ Item {
     IconButton {
         id: createButton
 
+        // **24px clear of the switcher, not 12.** The two sat a `space3` apart
+        // and read as one four-tile cluster — a teal square that looked like a
+        // fourth segment of a control it has nothing to do with. `space6` (24)
+        // is the gap this bar already uses between unrelated groups, and it is
+        // the smallest one at which the capture stops grouping them.
         anchors.right: switcher.left
-        anchors.rightMargin: Theme.space3
+        anchors.rightMargin: Theme.space6
         anchors.verticalCenter: parent.verticalCenter
         glyph: "plus"
         glyphColor: CalendarTokens.createInk
@@ -416,6 +421,8 @@ Item {
             height: parent.height - switcher.inset * 2
             radius: Theme.radiusSm - 1
             color: CalendarTokens.switcherThumb
+            border.width: CalendarTokens.switcherEdge.a > 0 ? 1 : 0
+            border.color: CalendarTokens.switcherEdge
 
             Behavior on x {
                 enabled: Theme.animateTransforms
@@ -461,7 +468,7 @@ Item {
                         /// is 5.6:1: plainly readable, plainly quieter, and the
                         /// selected segment now differs in fill, value *and*
                         /// weight — three signals, none of them subtle.
-                        color: segment.active ? Theme.textPrimary : Theme.textMuted
+                        color: segment.active ? CalendarTokens.switcherInk : Theme.textMuted
                         font.family: Theme.fontUi
                         font.pointSize: Theme.pt(12.5)
                         font.weight: segment.active ? Theme.weightMedium : Theme.weightRegular

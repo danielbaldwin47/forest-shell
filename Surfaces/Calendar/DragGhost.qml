@@ -54,9 +54,11 @@ Item {
     /// is the number the drag exists to choose.
     readonly property bool roomy: ghost.height >= 34
 
-    /// And the line *under* the range needs the range's second line's worth on
-    /// top of that, or a wrapped range and a title would run out of the plate.
-    readonly property bool tall: ghost.height >= 56
+    /// And the line *under* the range needs its own row on top of that. It was
+    /// 56 while the range could take two lines; a single-line range gives the
+    /// second row back, so a 40px ghost — an hour and a half at `hourRow` 56 —
+    /// now says what it will do as well as when.
+    readonly property bool tall: ghost.height >= 40
 
     /// The lift: `0.92` and `1.02`, both the spec's, and both guarded by
     /// `Theme.animateTransforms` so `appearance.reducedEffects` drops the
@@ -111,20 +113,33 @@ Item {
             anchors.topMargin: ghost.roomy ? Theme.space1 : 1
             spacing: 0
 
-            /// The range **wraps rather than elides**, and that is the one
-            /// rule this box has. A week column is about 105px of text and a
-            /// range that crosses noon — "11:00 AM – 12:30 PM" — is wider than
-            /// that at any size worth reading, so the first capture of this
-            /// ghost printed "11:00 AM – 12:30 …". A ghost whose end time is
-            /// an ellipsis has failed at the only job it has. Vertical room is
-            /// the thing a drag ghost always has (its height *is* the
-            /// duration), so the second line is where the rest goes.
+            /// The range, **on one line and never elided**.
+            ///
+            /// This is the one rule the box has, and it has now been solved
+            /// twice. A week column is about 105px of text and a range that
+            /// crosses noon — `"11:00 AM – 12:30 PM"` — is wider than that at
+            /// any size worth reading, so the first capture printed
+            /// `"11:00 AM – 12:30 …"`. A ghost whose end time is an ellipsis
+            /// has failed at the only job it has.
+            ///
+            /// Wrapping it onto a second line fixed the ellipsis and cost the
+            /// thing the line is for: a two-line time is read as two facts, and
+            /// during a drag the eye is sampling it forty times a second while
+            /// tracking a box that is also moving. It has to be one glance.
+            ///
+            /// So the type shrinks instead. `Text.HorizontalFit` keeps the
+            /// range on one line down to `pt(9)` — enough for the widest range
+            /// this grammar produces in the narrowest week column — and the
+            /// number is whole at every width. A time half a point smaller for
+            /// the two hours a day that cross noon is a cost nobody can see;
+            /// a wrapped one is not.
             Text {
                 width: parent.width
                 text: ghost.rangeLabel
-                wrapMode: Text.WordWrap
-                maximumLineCount: ghost.roomy ? 2 : 1
+                maximumLineCount: 1
                 elide: Text.ElideRight
+                fontSizeMode: Text.HorizontalFit
+                minimumPointSize: Theme.pt(9)
                 lineHeight: 1.1
                 color: CalendarTokens.text(ghost.hue)
                 font.family: Theme.fontUi

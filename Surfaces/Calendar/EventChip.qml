@@ -79,6 +79,86 @@ Item {
 
     property EventLayoutPolicy layoutPolicy: EventLayoutPolicy {}
 
+    // --- settling ----------------------------------------------------------------
+    //
+    // A chip that has just been dragged does not jump to where the store put
+    // it: it eases there over `motionSettle`, position and size together, from
+    // wherever the ghost's last proposal left it.
+    //
+    // **The animation is armed rather than always on**, and that is the whole
+    // design. `x`, `y`, `width` and `height` are laid out by
+    // `EventLayoutPolicy` and move for a dozen reasons that are not a drag — a
+    // window resize, a neighbour appearing, the day view opening — and a chip
+    // that slid every time any of those happened would make the grid feel loose
+    // under a scroll. So the Behaviors below are live only in the window
+    // between a drag of *this* chip ending and its settle finishing, which is
+    // the one moment the motion carries information: it says the box you let go
+    // of and the slot it took are the same object.
+
+    /// True for one settle after a drag of this chip commits.
+    property bool settling: false
+
+    /// Whether a drag of this chip is what the `ghosted` flag falling refers
+    /// to. Without it every chip on the grid would settle each time any drag
+    /// anywhere ended.
+    property bool settleArmed: false
+
+    onGhostedChanged: {
+        if (chip.ghosted) {
+            chip.settleArmed = true;
+            chip.settling = false;
+            settleWindow.stop();
+        } else if (chip.settleArmed) {
+            chip.settleArmed = false;
+            chip.settling = true;
+            settleWindow.restart();
+        }
+    }
+
+    Timer {
+        id: settleWindow
+
+        interval: Theme.duration(CalendarTokens.motionSettle) + 60
+        onTriggered: chip.settling = false
+    }
+
+    Behavior on y {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on x {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on height {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on width {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    /// What the pointer says over each part of a chip. Pure and tested next
+    /// door (`tests/tst_cursorpolicy.qml`); this file only reads the answer and
+    /// logs it.
+    property CursorPolicy cursors: CursorPolicy {}
+
     readonly property bool hovered: pointer.containsMouse
 
     /// Everything the box's own size decides: which lines print, at what size,
@@ -530,6 +610,19 @@ Item {
         /// The hand, flat. A chip is clickable everywhere, and the two edges
         /// say otherwise by being covered — see the strips below.
         cursorShape: Qt.PointingHandCursor
+
+        /// Seam 2's reading of that. The nested compositor cannot present a
+        /// frame, so no harness will ever photograph a cursor here; what it can
+        /// do is compare the word the shell logged against the shape the
+        /// protocol carried, which is why `CursorPolicy` owns both. Logged on
+        /// the *change* only — a hover that crosses a chip is one line, not one
+        /// per mouse move.
+        onHoverZoneChanged: {
+            if (pointer.hoverZone === "")
+                return;
+            const zone = pointer.hoverZone === "body" ? "chip" : "chip-edge";
+            Logger.log("calendar", "cursor " + chip.cursors.name(zone));
+        }
 
         onPressed: mouse => {
             chip.dragZone = chip.dragPolicy.hitEdge(mouse.y, chip.height, chip.edgeZone);

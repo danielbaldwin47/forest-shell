@@ -216,6 +216,35 @@ Item {
                     // the argument for why the hairline that used to ride on
                     // top of this fill was fussiness rather than definition.
                     color: CalendarTokens.bandFill
+
+                    /// **The band slides.** Stepping a day in the day view
+                    /// moves it one cell along its row, and a capsule that
+                    /// teleports there is a second, unrelated capsule as far as
+                    /// the eye is concerned — the map stops being the thing
+                    /// that tracks the grid and becomes a thing that redraws.
+                    /// `motionView` and `InOutQuad`, the same pair the view
+                    /// switcher's thumb travels on, because they are the same
+                    /// gesture: one lit tile moving inside a row of them.
+                    ///
+                    /// It moves *within* a row only. A step that crosses into
+                    /// another week is one rect leaving and another arriving,
+                    /// and animating an x across a row break would drag the
+                    /// capsule sideways through days it never covered.
+                    Behavior on x {
+                        enabled: Theme.animateTransforms
+                        NumberAnimation {
+                            duration: Theme.duration(CalendarTokens.motionView)
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
+
+                    Behavior on width {
+                        enabled: Theme.animateTransforms
+                        NumberAnimation {
+                            duration: Theme.duration(CalendarTokens.motionView)
+                            easing.type: Easing.InOutQuad
+                        }
+                    }
                 }
 
                 Row {

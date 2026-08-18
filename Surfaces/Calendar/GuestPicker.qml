@@ -345,9 +345,29 @@ Item {
         /// whole height.
         Item {
             width: column.width
-            height: picker.resultsShown ? results.height + Theme.space1 : 0
+            height: picker.resultsShown ? results.height + Theme.space1 + 4 : 0
             visible: picker.resultsShown
-            clip: true
+
+            /// The elevation, the same two flat plates the panels use — and
+            /// **up, not down**. See `CalendarTokens.dropdownFill`: a list that
+            /// opens over its panel is above it, and the sunken plate this used
+            /// to be read as a hole cut in the card rather than as a menu on
+            /// top of it. No `clip` on the wrapper any more, because a clipped
+            /// shadow is no shadow.
+            Rectangle {
+                anchors.fill: results
+                anchors.margins: -5
+                radius: Theme.radiusSm + 5
+                color: CalendarTokens.shadowAmbient
+            }
+
+            Rectangle {
+                anchors.fill: results
+                anchors.margins: -1
+                anchors.bottomMargin: -2
+                radius: Theme.radiusSm + 1
+                color: CalendarTokens.shadowKey
+            }
 
             Rectangle {
                 id: results
@@ -355,9 +375,10 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
+                anchors.bottomMargin: 4
                 height: resultList.height + Theme.space1 * 2
                 radius: Theme.radiusSm
-                color: Theme.bgSunken
+                color: CalendarTokens.dropdownFill
                 border.width: 1
                 border.color: Theme.borderSubtle
 
@@ -396,9 +417,13 @@ Item {
                             anchors.leftMargin: Theme.space1
                             anchors.rightMargin: Theme.space1
                             radius: Theme.radiusSm
-                            color: resultRow.on ? Theme.surfaceOverlay
+                            // A step off `dropdownFill`, not off the panel's
+                            // plane: the list rose to `surfaceOverlay` in dark,
+                            // so a selected row painted `surfaceOverlay` on
+                            // `surfaceOverlay` is a row with no state at all.
+                            color: resultRow.on ? CalendarTokens.chromeHover
                                  : resultHover.containsMouse
-                                   ? Qt.alpha(Theme.surfaceOverlay, 0.5)
+                                   ? Qt.alpha(CalendarTokens.chromeHover, 0.5)
                                    : "transparent"
 
                             /// The same 2px anchor the command menu's selected

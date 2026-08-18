@@ -213,6 +213,40 @@ ipc open > /dev/null
 expect_since "$mark" 'calendar: window opened \(view week,' \
     'the window opens on the view it was left on'
 
+# --- 6b. the view change is a transition, not a swap --------------------------
+#
+# Seam 2 cannot see a frame — the nested compositor never presents one
+# (`tools/nested-session.sh`'s header) — so "did it animate" is unaskable here
+# and "did it decide to animate, and in which direction" is not. `CalendarView`
+# logs the crossing, `KeyNavPolicy.viewSign` decides which way it travels
+# (`tests/tst_keynavpolicy.qml` pins the sign), and between the two the motion
+# is verified without a photograph of it.
+#
+# The window has to be open for any of this: the view outlives it, the grids
+# that cross-fade do not.
+
+mark=$(log_lines)
+ipc view month > /dev/null
+expect_since "$mark" 'calendar: transition view week->month' \
+    'widening the scale is a logged transition and not a swap'
+
+mark=$(log_lines)
+ipc view day > /dev/null
+expect_since "$mark" 'calendar: transition view month->day' \
+    'and narrowing it names both ends the other way round'
+
+# The refutation is the half that matters: a "transition" that fires when
+# nothing changed is a transition nobody can trust to mean anything.
+mark=$(log_lines)
+ipc view day > /dev/null
+refute_since "$mark" 'calendar: transition view' \
+    'switching to the view already on screen transitions nothing'
+
+mark=$(log_lines)
+ipc view week > /dev/null
+expect_since "$mark" 'calendar: transition view day->week' \
+    'and back to week for everything below'
+
 # --- 7. goto and today -------------------------------------------------------
 
 mark=$(log_lines)
@@ -356,6 +390,7 @@ geom_field() {
 }
 
 mark=$(log_lines)
+pointer_mark="$mark"
 ipc open > /dev/null
 ipc view week > /dev/null
 ipc goto 2026-08-18 > /dev/null
@@ -464,6 +499,31 @@ else
             "calendar: move $drag_id 2026-08-19T09:00 -> 2026-08-20T09:00" \
             'dragging it one column right moves the day and keeps the minute'
     fi
+fi
+
+# --- 10d. the cursor ----------------------------------------------------------
+#
+# A cursor shape is not something a client draws, it is a request it sends
+# (`wp_cursor_shape_device_v1.set_shape`, #185) — and this seam cannot read one,
+# because the calendar is a `FloatingWindow` and `tools/cursor-harness.sh`'s
+# `WAYLAND_DEBUG` trick needs the whole nested session run under it. What it can
+# read is the shell's own word for the shape it asked for: `CursorPolicy` owns
+# the mapping from zone to word *and* to protocol number, `tests/tst_cursorpolicy
+# .qml` pins the pair, and the surfaces log the word as the pointer crosses.
+#
+# Nothing new is driven here. The three gestures above already put the pointer
+# on empty grid, on a chip's body and on a chip's bottom edge, so this reads the
+# lines those crossings left — which is also the point: if the pointer never
+# reached the thing, the cursor line is missing and this fails for the same
+# reason the drag would have.
+
+if [[ -n "${wed_x:-}" ]]; then
+    expect_since "$pointer_mark" 'calendar: cursor crosshair' \
+        'the empty grid asks for a crosshair — a press there draws, it does not open'
+    expect_since "$pointer_mark" 'calendar: cursor pointing-hand' \
+        "a chip's body asks for the hand"
+    expect_since "$pointer_mark" 'calendar: cursor ns-resize' \
+        "and a chip's bottom edge asks for the resize arrows"
 fi
 
 # --- 10c. the keyboard, key by key -------------------------------------------

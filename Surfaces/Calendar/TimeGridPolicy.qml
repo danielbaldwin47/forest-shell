@@ -109,6 +109,9 @@ QtObject {
     /// it reads, and two hour clocks in one surface is how a gutter and a chip
     /// come to disagree about noon.
     function hourLabel(hour: int, use24: bool): string {
+        // Wrapped before delegating — CalendarFormat.hourLabel assumes 0..23
+        // and a caller stepping the gutter past midnight hands it 24 or -1.
+        hour = ((hour % 24) + 24) % 24;
         return grid.format.hourLabel(hour, use24);
     }
 

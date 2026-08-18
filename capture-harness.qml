@@ -1331,7 +1331,7 @@ ShellRoot {
         const week = root.findByObjectName(page, "calendarWeekGrid");
         if (!week) {
             console.warn("capture: no calendarWeekGrid to pose the popover on");
-            return true;
+            return false;
         }
         // Already open, one whole retry ago: the panel scales and fades in from
         // `Component.onCompleted`, so a grab taken on the pass that opened it
@@ -1346,21 +1346,21 @@ ShellRoot {
         const id = CalendarStore.createEvent(pose.fromIso, pose.fromMin,
                                              pose.toMin - pose.fromMin, "");
         if (!id) {
-            // Said out loud and then given up on: retrying a store that refused
-            // the day would spend the whole budget making events.
+            // Said out loud rather than posed around: a popover the store
+            // refused to build is a failed capture, not a plain view.
             console.warn("capture: the store would not create the popover's event");
-            return true;
+            return false;
         }
         const event = CalendarStore.policy.byId(CalendarStore.events, id);
         if (!event) {
             console.warn("capture: created " + id + " and could not read it back");
-            return true;
+            return false;
         }
         week.openQuickCreate(id, pose.fromIso, event.start, event.end);
         if (week.quickCreateId.length === 0) {
             console.warn("capture: " + pose.fromIso + " is not a column on screen —"
                          + " the popover has nothing to anchor to");
-            return true;
+            return false;
         }
         return false;
     }
@@ -1376,6 +1376,17 @@ ShellRoot {
     /// The pose is handed in as properties rather than driven, which is what
     /// keeps this mode compositor-free: `nowOverride` in particular is what
     /// makes two runs the same picture.
+    ///
+    /// Posed on `CalendarWindow` and not on the view: the window is the
+    /// surface's only clock, so freezing it there is what keeps `ipc call
+    /// calendar today` agreeing with this picture instead of a second clock
+    /// on the view drifting from it.
+    Binding {
+        target: CalendarWindow
+        property: "nowOverride"
+        value: root.isCalendar ? root.calNow : ""
+    }
+
     Loader {
         id: calendarLoader
 
@@ -1383,11 +1394,11 @@ ShellRoot {
         sourceComponent: CalendarView {
             view: root.calView
             anchorDate: root.calDate
-            nowOverride: root.calNow
 
-            // The clock a real window is handed by `CalendarWindow`. It only
-            // shows through when `--cal-now` was left off, and then it is the
-            // wall clock the shell itself is reading — one clock either way.
+            // The clock a real window is handed by `CalendarWindow`, which is
+            // the surface's only clock (see the `Binding` below): under
+            // `--cal-now` it is the frozen stamp, otherwise the wall clock the
+            // shell itself is reading — one clock either way.
             shellStamp: CalendarWindow.nowStamp
 
             // The two keyboard overlays are posed as properties rather than

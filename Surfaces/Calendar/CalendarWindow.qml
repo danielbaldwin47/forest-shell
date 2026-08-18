@@ -13,6 +13,11 @@ pragma Singleton
 // I", and a window rebuilt from scratch has to come back to the same place — so
 // they are properties of the singleton, and the view binds to them.
 //
+// This singleton is also the surface's only clock (`nowStamp` below) — the
+// view only ever reads it secondhand as `shellStamp` — which is why `ipc call
+// calendar today` and a `tools/capture-harness.sh --cal-now` picture freeze
+// together rather than disagreeing about what day it is.
+//
 // The IPC target is `calendar`, lowercase, matching the surface name — the
 // convention the shell-switch contract fixes for every surface with an external
 // entry point.

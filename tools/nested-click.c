@@ -125,9 +125,20 @@ int main(int argc, char **argv) {
             fprintf(stderr, "nested-click: --hold-ms wants a count in milliseconds\n");
             return 2;
         }
-        hold_ms = atoi(argv[i + 1]);
-        if (hold_ms < 0)
-            hold_ms = 0;
+        {
+            char *end = NULL;
+            long parsed = strtol(argv[i + 1], &end, 10);
+            // `atoi` reads "60ms" as 60 and "--hold-ms bogus" as 0, both
+            // silently — the endptr check is what tells a real count apart
+            // from a typo that would otherwise run the drag anyway.
+            if (end == argv[i + 1] || *end != '\0') {
+                fprintf(stderr,
+                        "usage: nested-click [left|right|middle|<linux button code>]\n"
+                        "       nested-click <button> --drag x1 y1 x2 y2 w h [steps] [--hold-ms N]\n");
+                return 2;
+            }
+            hold_ms = parsed < 0 ? 0 : (int)parsed;
+        }
         break;
     }
 

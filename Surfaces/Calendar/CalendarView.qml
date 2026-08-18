@@ -132,15 +132,6 @@ FloatingWindow {
         }
     }
 
-    /// What the now-line should believe the time is, as `"2026-08-18T13:40"`,
-    /// or `""` for the real clock.
-    ///
-    /// This exists for tools/capture-harness.sh and it is not a debugging
-    /// nicety: a now-line drawn from the wall clock means no two captures of
-    /// this surface are ever the same picture, so a diff between two runs is
-    /// unreadable. `--cal-now` freezes it, exactly as `--lock-state` poses PAM.
-    property string nowOverride: ""
-
     /// The selected event's id, or `""`.
     property string selectedId: ""
 
@@ -393,17 +384,11 @@ FloatingWindow {
     /// The wall clock the now-line and the today-circle are drawn from,
     /// `"2026-08-18T13:40"`.
     ///
-    /// `nowOverride` wins outright when it is set. A picture whose now-line is
-    /// frozen at 13:40 on the 18th but whose today-circle sits on whatever day
-    /// the machine happens to be running is two clocks in one window, and the
-    /// harness would have posed half a surface.
-    ///
-    /// Otherwise it is `shellStamp`, handed down by whoever built the window —
-    /// `CalendarWindow.nowStamp`, which is the surface's one clock, so the
-    /// singleton's idea of today and this view's cannot drift apart.
-    readonly property string nowStamp: window.nowOverride.length > 0
-        ? window.nowOverride
-        : window.shellStamp
+    /// Always `shellStamp`, handed down by whoever built the window —
+    /// `CalendarWindow.nowStamp`, which is the surface's one clock (including
+    /// under `--cal-now`, which freezes it there), so the singleton's idea of
+    /// today and this view's cannot drift apart.
+    readonly property string nowStamp: window.shellStamp
 
     /// The clock the builder handed down. Assigned rather than read off the
     /// singleton directly, because a view is a plain component and importing

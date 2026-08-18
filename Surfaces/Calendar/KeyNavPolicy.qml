@@ -398,15 +398,6 @@ QtObject {
         return list[((idx + step) % n + n) % n];
     }
 
-    // --- the same table, for humans -------------------------------------------
-
-    /// Every binding as `{keys, label, group}`, in the order the shortcuts sheet
-    /// prints it. Generated fresh on each call, because a `Repeater` handed the
-    /// same array object back does not rebuild its delegates.
-    ///
-    /// Rows pair the alternatives that run the same verb (`J / ←`), which is
-    /// what keeps this list the length of the *keymap* rather than the length
-    /// of the key table.
     /// Whether the period on screen already contains today — what the Today
     /// button reads to know whether it has anywhere to go.
     ///
@@ -425,6 +416,15 @@ QtObject {
         return todayIso >= range.from && todayIso <= range.to;
     }
 
+    // --- the same table, for humans -------------------------------------------
+
+    /// Every binding as `{keys, label, group}`, in the order the shortcuts sheet
+    /// prints it. Generated fresh on each call, because a `Repeater` handed the
+    /// same array object back does not rebuild its delegates.
+    ///
+    /// Rows pair the alternatives that run the same verb (`J / ←`), which is
+    /// what keeps this list the length of the *keymap* rather than the length
+    /// of the key table.
     function shortcutsTable(): var {
         return [
             { "keys": "D", "label": "Day view", "group": "Views" },

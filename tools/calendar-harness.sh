@@ -548,16 +548,34 @@ else
         #
         # Wednesday is empty again — the event moved to Thursday — so this is a
         # create drag, and a cancelled create must leave no event behind at all.
-        cancel_id="evt-$(( ${drag_id#evt-} + 1 ))"
         mark=$(log_lines)
         NESTED_DRAG_HOLD_MS=1000 nested_drag "$wed_x" "$y_0900" "$wed_x" "$y_1030" &
         cancel_pid=$!
-        sleep 0.8
+        # A bounded poll on the log rather than a fixed sleep: Escape only needs
+        # to land once the drag has actually begun, and the travel time is not
+        # a promise.
+        for _ in $(seq 1 40); do
+            since "$mark" | grep -qaE 'calendar: drag begin create' && break
+            sleep 0.05
+        done
         nested_key escape
-        wait "$cancel_pid" || nested_note 'the held drag exited non-zero'
+        # And a bounded poll on the background drag's own exit, rather than an
+        # unbounded `wait` — a drag that never releases would otherwise hang
+        # the whole harness instead of failing the one check that noticed.
+        released=0
+        for _ in $(seq 1 60); do
+            kill -0 "$cancel_pid" 2>/dev/null || { released=1; break; }
+            sleep 0.05
+        done
+        if (( released )); then
+            wait "$cancel_pid" || nested_note 'the held drag exited non-zero'
+        else
+            kill -9 "$cancel_pid" 2>/dev/null
+            nested_fail 'drag never released'
+        fi
         expect_since "$mark" 'calendar: drag cancel' \
             'Escape in the middle of a drag cancels it'
-        refute_since "$mark" "calendar: create $cancel_id" \
+        refute_since "$mark" 'calendar: create ' \
             'and a cancelled create writes no event'
         refute_since "$mark" 'calendar: window closed' \
             'and the drag ate the key rather than closing the whole calendar'

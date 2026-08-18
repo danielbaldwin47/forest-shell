@@ -48,6 +48,7 @@ import QtQuick
 import Quickshell
 import qs.Core
 import qs.Services.Calendar
+import qs.Widgets
 
 FloatingWindow {
     id: window
@@ -84,6 +85,12 @@ FloatingWindow {
     signal todayRequested
     signal eventSelected(string id)
 
+    /// Make an event on `iso` starting `startMin` minutes after midnight — the
+    /// sidebar's `+`. The view works out *where* (`CreatePolicy`, because the
+    /// button has no y coordinate to read a time off) and the singleton owns
+    /// the store, for the same reason the other four leave as signals.
+    signal createRequested(string iso, int startMin)
+
     /// The wall clock the now-line and the today-circle are drawn from,
     /// `"2026-08-18T13:40"`.
     ///
@@ -118,6 +125,7 @@ FloatingWindow {
         TimeFormat.preference, Qt.locale().timeFormat(Locale.ShortFormat))
 
     property KeyNavPolicy keyNav: KeyNavPolicy {}
+    property CreatePolicy createPolicy: CreatePolicy {}
 
     title: "forest-shell — calendar"
     // Stated rather than assumed: the window exists only while it is open, so
@@ -171,10 +179,371 @@ FloatingWindow {
             width: CalendarTokens.sidebarW
             color: Theme.surface
 
-            // The mini-month, the calendar list and the "Add calendar" row land
-            // here in a later piece. Empty is the honest state for now: a
-            // sidebar drawn with placeholder rows would be a picture of
-            // something that does not exist.
+            /// The sidebar's own share of the chrome band, the same 52 tall as
+            /// the toolbar beside it and closed by the same hairline, so the
+            /// window opens with one bar across its whole width instead of a
+            /// toolbar that stops at a column of empty sidebar.
+            ///
+            /// That emptiness was the loudest thing about the first pass: an
+            /// application with nothing above its first heading reads as a
+            /// panel someone cropped out of a bigger window. What belongs there
+            /// is what the window *is* and the one thing it makes — a mark, a
+            /// name, and a create button — which is the same trio Notion puts
+            /// at the top of its own sidebar.
+            Item {
+                id: sidebarHeader
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: CalendarTokens.toolbarH
+
+                Icon {
+                    id: mark
+
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.space4
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "calendar-days"
+                    size: 17
+                    color: Theme.accentPrimary
+                }
+
+                /// The wordmark in the display face, matching the toolbar's
+                /// month title across the divider — the two of them on one
+                /// line is what makes the band read as one bar.
+                Text {
+                    id: wordmark
+
+                    anchors.left: mark.right
+                    anchors.leftMargin: Theme.space2
+                    y: CalendarTokens.titleBaseline - wordmark.baselineOffset
+                    text: "Calendar"
+                    color: Theme.textPrimary
+                    font.family: Theme.fontDisplay
+                    font.pointSize: Theme.pt(15)
+                    font.weight: Theme.weightDisplay
+                }
+
+                /// New event. It was a filled accent tile, on the argument that
+                /// the one thing the window makes deserves the one saturated
+                /// background — and the picture said otherwise: a 28px block of
+                /// `accentPrimary` was the loudest pixel in a 1180px window,
+                /// louder than today's column, today's disc in the map below it
+                /// and every event on the grid. In a calendar, saturation has
+                /// exactly one job, which is saying *here is now*; a control
+                /// that outshouts it is a control competing with the data.
+                ///
+                /// So it wears the chrome's own hairline-and-fill treatment,
+                /// the same box as the toolbar's chevrons and Today, and keeps
+                /// its rank in the *glyph* — teal strokes rather than a teal
+                /// field, which is a tenth of the area at the same hue.
+                Rectangle {
+                    id: createButton
+
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.space4 + 1
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: CalendarTokens.controlH
+                    height: CalendarTokens.controlH
+                    radius: Theme.radiusSm
+                    color: createPointer.containsMouse ? Theme.surfaceOverlay : Theme.surfaceRaised
+                    border.width: 1
+                    border.color: Theme.borderSubtle
+
+                    Behavior on color {
+                        enabled: Theme.animateTransforms
+                        ColorAnimation { duration: Theme.duration(Theme.motionFast) }
+                    }
+
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "plus"
+                        size: 16
+                        color: Theme.accentPrimary
+                    }
+
+                    MouseArea {
+                        id: createPointer
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: window.createRequested(
+                            window.anchorDate,
+                            window.createPolicy.startMinute(
+                                window.anchorDate, window.todayIso,
+                                window.keyNav.time.parseMinutes(window.nowStamp),
+                                CalendarTokens.snapMin, 60))
+                    }
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.borderSubtle
+                }
+            }
+
+            /// Everything under that band, inset by one `space4` on every
+            /// edge. `clip` because the calendar list is a fixed number of rows
+            /// against a window that can be dragged to 600px tall — a list that
+            /// spilled would draw over the compositor's own bottom edge rather
+            /// than stopping at the sidebar's.
+            Item {
+                id: sidebarBody
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: sidebarHeader.bottom
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.space4
+                anchors.rightMargin: Theme.space4 + 1
+                clip: true
+
+                MiniMonth {
+                    id: mini
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: mini.implicitHeight
+
+                    view: window.view
+                    anchorDate: window.anchorDate
+                    todayIso: window.todayIso
+                    firstDay: window.firstDay
+
+                    onDayRequested: iso => window.dateRequested(iso)
+                }
+
+                /// The hairline between the map and the legend. The sidebar
+                /// holds two unrelated lists and nothing but a gap would say
+                /// where one ends.
+                Rectangle {
+                    id: sidebarRule
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: mini.bottom
+                    anchors.topMargin: Theme.space4
+                    height: 1
+                    color: Theme.borderSubtle
+                }
+
+                /// The calendars. Static on purpose: there are no calendar
+                /// accounts to switch off yet, so every row is drawn checked
+                /// and nothing here takes a click. A row that toggled a filter
+                /// nothing reads would be worse than a row that plainly does
+                /// not move.
+                Column {
+                    id: calendarList
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: sidebarRule.bottom
+                    anchors.topMargin: Theme.space4
+
+                    /// Bounded against the footer rather than left to run.
+                    /// Eight rows plus the add row clear a 760px window with
+                    /// room to spare and do not clear the 560px minimum, and a
+                    /// `Column` has no opinion about that — it would simply
+                    /// draw through the account block and out of the panel.
+                    height: Math.min(calendarList.implicitHeight,
+                                     account.y - calendarList.y - Theme.space3)
+                    clip: true
+
+                    Item {
+                        width: calendarList.width
+                        height: 22
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "CALENDARS"
+                            color: Theme.textMuted
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(Theme.capsSize)
+                            font.weight: Theme.weightMedium
+                            font.letterSpacing: Theme.capsTrackingEm * Theme.pt(Theme.capsSize)
+                        }
+                    }
+
+                    Repeater {
+                        model: mini.policy.rows(CalendarTokens.hues)
+
+                        delegate: Item {
+                            id: calendarRow
+
+                            required property var modelData
+
+                            width: calendarList.width
+                            height: 32
+
+                            /// A filled, ticked box rather than the 10px dot
+                            /// the first pass drew. The dot said *this
+                            /// calendar is that colour*; the box says that and
+                            /// *it is switched on*, which is the second half
+                            /// of what the row is for — and 10px is too small
+                            /// to carry a tick.
+                            Rectangle {
+                                id: swatch
+
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 15
+                                height: 15
+                                radius: 4
+                                color: CalendarTokens.bar(calendarRow.modelData.index)
+
+                                Icon {
+                                    anchors.centerIn: parent
+                                    name: "check"
+                                    size: 11
+                                    color: Theme.bgBase
+                                }
+                            }
+
+                            Text {
+                                anchors.left: swatch.right
+                                anchors.leftMargin: Theme.space3
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: calendarRow.modelData.label
+                                color: Theme.textPrimary
+                                elide: Text.ElideRight
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(13)
+                                font.weight: Theme.weightRegular
+                            }
+                        }
+                    }
+
+                    /// The row that says what kind of list this is. It takes no
+                    /// click, for the same reason the rows above it take none —
+                    /// there is no calendar-account flow behind it yet — and it
+                    /// is drawn one value quieter than they are so that it
+                    /// reads as the list's edge rather than as a ninth
+                    /// calendar. Without it the eight rows simply stop, and a
+                    /// list of colours that simply stops is a legend; a list
+                    /// that ends in *Add calendar* is a set of things you own.
+                    Item {
+                        width: calendarList.width
+                        height: 32
+
+                        Item {
+                            id: addGlyph
+
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 15
+                            height: 15
+
+                            Icon {
+                                anchors.centerIn: parent
+                                name: "plus"
+                                size: 14
+                                color: Theme.textMuted
+                            }
+                        }
+
+                        Text {
+                            anchors.left: addGlyph.right
+                            anchors.leftMargin: Theme.space3
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Add calendar"
+                            color: Theme.textMuted
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(13)
+                            font.weight: Theme.weightRegular
+                        }
+                    }
+                }
+
+                /// Whose calendars these are, pinned to the floor of the
+                /// panel.
+                ///
+                /// The sidebar used to end with its last colour swatch, which
+                /// on a full-height window left roughly 380px of bare surface
+                /// under it — a third of the column saying nothing. Notion ends
+                /// this column with the account the calendars belong to, and
+                /// the reason is structural rather than decorative: a list of
+                /// eight calendars raises the question *whose*, and a panel
+                /// that never answers it reads as unfinished no matter how the
+                /// rows above are spaced.
+                ///
+                /// It answers honestly. There are no cloud accounts here — the
+                /// events live in one file on this machine — so the row says
+                /// that, and the count comes from the hue table rather than
+                /// from a number typed into a mock.
+                Item {
+                    id: account
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 52
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 1
+                        color: Theme.borderSubtle
+                    }
+
+                    Rectangle {
+                        id: accountMark
+
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 1
+                        width: 28
+                        height: 28
+                        radius: Theme.radiusSm
+                        color: Qt.alpha(Theme.accentPrimary, 0.14)
+
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "hard-drive"
+                            size: 15
+                            color: Theme.accentPrimary
+                        }
+                    }
+
+                    Column {
+                        anchors.left: accountMark.right
+                        anchors.leftMargin: Theme.space3
+                        anchors.right: parent.right
+                        anchors.verticalCenter: accountMark.verticalCenter
+                        spacing: 1
+
+                        Text {
+                            width: parent.width
+                            text: "This device"
+                            color: Theme.textPrimary
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(12.5)
+                            font.weight: Theme.weightMedium
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: CalendarTokens.hues.count + " calendars · local"
+                            color: Theme.textMuted
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(11)
+                            font.weight: Theme.weightRegular
+                        }
+                    }
+                }
+            }
 
             Rectangle {
                 anchors.right: parent.right

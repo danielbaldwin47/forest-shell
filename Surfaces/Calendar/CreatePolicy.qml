@@ -47,4 +47,62 @@ QtObject {
     /// when it opens, so a chip created on another day is inside the first
     /// screenful rather than above it.
     readonly property int dayStart: 9 * 60
+
+    // --- where the quick-create panel goes ------------------------------------
+    //
+    // The panel belongs *beside* the chip it was made from, because the chip is
+    // what the eye is on when the mouse comes up and a panel that covered it
+    // would hide the thing being named. "Beside" is a decision with three parts
+    // and every one of them is arithmetic, which is why it is here and not in
+    // the popover:
+    //
+    //   - **side.** To the right of the chip by default. A chip in Saturday has
+    //     no room on its right, so the panel flips to the left — and a grid
+    //     narrower than the panel plus both gaps has no room on either side, so
+    //     it gives up on "beside" and clamps, which is the only case where it
+    //     overlaps the chip.
+    //   - **top.** Aligned with the chip's own top edge, so the title field
+    //     lands on the line the event starts at. A short chip near the bottom
+    //     of the grid would push the panel off, so the top slides up just far
+    //     enough to fit.
+    //   - **margin.** Never flush against the view's edge: a panel whose shadow
+    //     is clipped by the window reads as a panel that is half off screen.
+    //
+    // Flipping and clamping are separate on purpose. Clamping alone would slide
+    // a panel over its own chip rather than putting it on the other side, and
+    // the resulting picture — panel on top of the event it describes — is the
+    // one Notion ships on a narrow window.
+
+    /// Top-left corner for a panel of `panelW` x `panelH` beside `anchor`
+    /// (`{x, y, width, height}`), inside a `boundsW` x `boundsH` box.
+    ///
+    /// `gap` is the air between chip and panel, `margin` the air the panel
+    /// keeps from the view's own edges. Both fall back rather than propagating
+    /// a zero, so a caller that has not measured yet still gets a placement
+    /// that is on screen.
+    function popoverAnchor(anchor: var, panelW: real, panelH: real,
+                           boundsW: real, boundsH: real,
+                           gap: real, margin: real): var {
+        const a = anchor || {};
+        const ax = isFinite(a.x) ? a.x : 0;
+        const ay = isFinite(a.y) ? a.y : 0;
+        const aw = a.width > 0 ? a.width : 0;
+        const g = gap >= 0 ? gap : 8;
+        const m = margin >= 0 ? margin : 8;
+
+        const right = ax + aw + g;
+        const left = ax - g - panelW;
+        // Preferred first, the flip second, the clamp last. `right` wins
+        // whenever the whole panel fits; `left` only when it fits *and* right
+        // did not, so a panel never crosses to the cramped side for the sake of
+        // a pixel.
+        let x = right;
+        if (right + panelW + m > boundsW)
+            x = left >= m ? left : right;
+        x = Math.max(m, Math.min(x, Math.max(m, boundsW - panelW - m)));
+
+        let y = ay;
+        y = Math.max(m, Math.min(y, Math.max(m, boundsH - panelH - m)));
+        return { "x": x, "y": y, "flipped": x < ax };
+    }
 }

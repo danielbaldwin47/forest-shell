@@ -114,6 +114,22 @@ Singleton {
     /// is also what makes a live stamp jitter as the minute rolls over.
     readonly property var tabularFigures: ({ "tnum": 1, "lnum": 1 })
 
+    // --- elevation ------------------------------------------------------------
+    //
+    // Two plates, not a blur. `MultiEffect` draws nothing on the offscreen
+    // scenegraph (measured in `Widgets/Icon.qml`), so a shadow built from one is
+    // a shadow that vanishes from half the pictures this surface is judged in —
+    // and an elevation nobody can capture is one nobody can argue about. Two
+    // flat translucent rectangles behind the card, one tight and one wide, are
+    // what a key light and an ambient one come to at this size, and they cost a
+    // rectangle each.
+    //
+    // Both are darker in the dark theme, which is the opposite of the instinct
+    // and the right way round: the light theme's page is already bright enough
+    // that a 10% plate reads, while a dark page swallows anything under 28%.
+    readonly property color shadowKey: Qt.rgba(0, 0, 0, Theme.dark ? 0.28 : 0.10)
+    readonly property color shadowAmbient: Qt.rgba(0, 0, 0, Theme.dark ? 0.36 : 0.14)
+
     // --- the column washes ----------------------------------------------------
 
     /// The weekend column's wash, and **the one place this file departs from

@@ -137,6 +137,20 @@ Singleton {
         Logger.log("calendar", "select " + id);
     }
 
+    /// One hour, on the day in view, at the minute the chrome worked out. The
+    /// new event is selected as well as made, because the reason to press a
+    /// create button is to edit the thing it creates — and because a chip that
+    /// appeared somewhere off the visible hours would otherwise be a button
+    /// that looked like it did nothing.
+    ///
+    /// Same call `ipc call calendar create` makes, so a click and a script land
+    /// on one code path and log one line.
+    function newEvent(iso: string, startMin: int): void {
+        const id = CalendarStore.createEvent(iso, startMin, 60, "");
+        if (id)
+            root.select(id);
+    }
+
     LazyLoader {
         id: loader
 
@@ -168,6 +182,7 @@ Singleton {
                 onDateRequested: iso => root.goToDay(iso)
                 onTodayRequested: root.goToday()
                 onEventSelected: id => root.select(id)
+                onCreateRequested: (iso, startMin) => root.newEvent(iso, startMin)
             }
         }
     }

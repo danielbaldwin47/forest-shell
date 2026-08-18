@@ -245,6 +245,22 @@ QtObject {
         });
     }
 
+    /// Pin an event's colour, or unpin it with `""`.
+    ///
+    /// Unpinning is worth having and is why this is not a one-liner in the
+    /// store: `colour` empty means *the hash decides*, which is a different
+    /// state from any of the eight names and the only way back to it once
+    /// somebody has picked one. `HuePolicy.indexFor` reads the same two cases
+    /// off the other end.
+    function recolour(events: var, id: string, colour: string): var {
+        const name = String(colour === undefined || colour === null ? "" : colour)
+                     .trim().toLowerCase();
+        return policy.replace(events, id, function (event) {
+            event.colour = name;
+            return event;
+        });
+    }
+
     /// Drop an event. Removing an id that is not there returns the list
     /// unchanged rather than failing: the caller may be a keybind pressed
     /// twice.

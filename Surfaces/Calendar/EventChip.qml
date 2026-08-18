@@ -527,16 +527,14 @@ Item {
     /// The time, in the form the width can carry: the whole range where it
     /// fits, the start alone where it does not, and an arrow where the event
     /// runs off an edge of the day.
-    readonly property string timeLabel: {
-        if (!chip.event)
-            return "";
-        const meridiem = chip.content.timeMeridiem;
-        if (chip.continuesAbove)
-            return "→ " + chip.format.startTime(chip.event.end, chip.use24, meridiem);
-        if (chip.continuesBelow || chip.content.timeForm === "start")
-            return chip.format.startTime(chip.event.start, chip.use24, meridiem);
-        return chip.format.timeRange(chip.event.start, chip.event.end, chip.use24);
-    }
+    readonly property string timeLabel: chip.event
+        ? chip.format.chipTimeLabel(chip.event.start, chip.event.end, chip.use24, {
+            "form": chip.content.timeForm,
+            "meridiem": chip.content.timeMeridiem,
+            "continuesAbove": chip.continuesAbove,
+            "continuesBelow": chip.continuesBelow
+        })
+        : ""
 
     TextMetrics {
         id: titleMetrics

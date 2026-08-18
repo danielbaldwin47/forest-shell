@@ -288,11 +288,12 @@ TestCase {
         compare(policy.remove(testCase.week(), "evt-99").length, 6);
     }
 
-    function test_remove_does_not_recycle_the_id() {
-        // The counter follows the highest id ever used in the list, so deleting
-        // the last event and making another does reuse the number — stated here
-        // because it is a choice, and a harness that asserted `evt-7` after a
-        // delete would be asserting this line.
+    function test_removing_the_highest_id_recycles_it() {
+        // The counter is the highest id *in the list* plus one, not a tally of
+        // every id ever handed out, so deleting the last event and making
+        // another does reuse the number — stated here because it is a choice,
+        // and a harness that asserted `evt-7` after a delete would be
+        // asserting this line.
         const list = policy.remove(testCase.week(), "evt-6");
         compare(policy.nextId(list), "evt-6");
     }

@@ -359,11 +359,7 @@ Item {
     /// so the policy never has to copy an event body around; this is the one
     /// place the id is turned back.
     function eventById(id: string): var {
-        const all = view.events || [];
-        for (let i = 0; i < all.length; i++)
-            if (all[i].id === id)
-                return all[i];
-        return null;
+        return view.policy.events.byId(view.events || [], id);
     }
 
     // --- the weekday header ----------------------------------------------------

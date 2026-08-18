@@ -53,6 +53,9 @@ QtObject {
 
     property CalendarTime time: CalendarTime {}
 
+    /// Where every string in this file is spelled — see `hourLabel`.
+    property CalendarFormat format: CalendarFormat {}
+
     // --- the vertical axis ----------------------------------------------------
 
     /// The hour height a call should use: its own argument when it was given
@@ -101,11 +104,12 @@ QtObject {
     /// One gutter label. `"01:00"` in 24-hour form; `"1 AM"` in 12-hour, with
     /// no minutes on it — the gutter marks whole hours, and ":00" on every line
     /// is thirteen characters of noise in a column that has to stay narrow.
+    ///
+    /// `CalendarFormat` spells it. This file owns where a label goes, not how
+    /// it reads, and two hour clocks in one surface is how a gutter and a chip
+    /// come to disagree about noon.
     function hourLabel(hour: int, use24: bool): string {
-        const h = ((Math.round(hour) % 24) + 24) % 24;
-        if (use24)
-            return grid.time.pad2(h) + ":00";
-        return (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? " AM" : " PM");
+        return grid.format.hourLabel(hour, use24);
     }
 
     /// The gutter, top to bottom: `[{hour, label, y}]` for **1..23**.
@@ -397,6 +401,25 @@ QtObject {
         if (viewportHeight === undefined || viewportHeight === null || !isFinite(viewportHeight))
             return Math.max(0, y);
         return Math.max(0, Math.min(y, grid.dayHeight(h) - viewportHeight));
+    }
+
+    /// Which minutes of the day a scrolled viewport is showing:
+    /// `{startMinutes, endMinutes}`, clamped into the day, or `null` for a
+    /// viewport with no height and a grid with no hour.
+    ///
+    /// The inverse of `visibleScrollY`, and the question anything that wants to
+    /// act on what is *on screen* asks — scrolling the now-line into view,
+    /// deciding whether an event needs to be scrolled to at all. Clamped
+    /// because a `Flickable` overshoots at both ends, and "the view is showing
+    /// minute -40" is a fact about a bounce rather than about the day.
+    function visibleRange(scrollY: real, viewportHeight: real, hourHeight): var {
+        const h = grid.hourPixels(hourHeight);
+        if (isNaN(h) || !isFinite(scrollY) || !isFinite(viewportHeight) || viewportHeight < 0)
+            return null;
+        return {
+            "startMinutes": grid.clampMinutes(grid.yToMinutes(scrollY, h)),
+            "endMinutes": grid.clampMinutes(grid.yToMinutes(scrollY + viewportHeight, h))
+        };
     }
 
     // --- events ---------------------------------------------------------------

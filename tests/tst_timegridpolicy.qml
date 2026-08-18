@@ -547,4 +547,38 @@ TestCase {
         compare(grid.columnWash(true, false, 2), "today");
     }
 
+    // --- what the viewport is showing -----------------------------------------
+
+    function test_the_visible_range_is_the_scroll_position_read_back() {
+        // 60px an hour, so a pixel is a minute: parked at 420 with 600px of
+        // viewport is 07:00 to 17:00.
+        const r = grid.visibleRange(420, 600, 60);
+        compare(r.startMinutes, 420);
+        compare(r.endMinutes, 1020);
+
+        // At 80px an hour the same 600px shows 7½ hours instead of ten.
+        const tall = grid.visibleRange(560, 600, 80);
+        compare(tall.startMinutes, 420);
+        compare(tall.endMinutes, 870);
+    }
+
+    function test_a_viewport_that_overshoots_still_reports_a_day() {
+        // A Flickable bounces past both ends; the day does not.
+        const top = grid.visibleRange(-40, 600, 60);
+        compare(top.startMinutes, 0);
+        compare(top.endMinutes, 560);
+
+        const bottom = grid.visibleRange(1200, 600, 60);
+        compare(bottom.startMinutes, 1200);
+        compare(bottom.endMinutes, 1440);
+    }
+
+    function test_a_range_of_a_viewport_that_has_no_size_yet() {
+        compare(grid.visibleRange(420, 600, 0), null);
+        compare(grid.visibleRange(420, -1, 60), null);
+        compare(grid.visibleRange(NaN, 600, 60), null);
+        // A zero-height viewport is a real answer: it shows one minute.
+        compare(grid.visibleRange(420, 0, 60).endMinutes, 420);
+    }
+
 }

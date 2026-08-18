@@ -436,4 +436,65 @@ TestCase {
         compare(format.dayHeader("2024-02-29").weekdayFull, "Thursday");
     }
 
+    // --- the two labels a surface used to spell for itself ---------------------
+
+    function test_a_chip_shows_the_range_it_has_room_for() {
+        const start = "2026-08-18T09:00";
+        const end = "2026-08-18T10:30";
+
+        // The whole range when nothing says otherwise.
+        compare(format.chipTimeLabel(start, end, true, {}),
+                format.timeRange(start, end, true));
+
+        // The start alone once the layout says the range will not fit.
+        compare(format.chipTimeLabel(start, end, true, { "form": "start" }), "09:00");
+        compare(format.chipTimeLabel(start, end, false, { "form": "start" }), "9:00");
+        compare(format.chipTimeLabel(start, end, false,
+                                     { "form": "start", "meridiem": true }), "9:00 AM");
+    }
+
+    function test_a_chip_running_off_the_top_shows_where_it_ends() {
+        const start = "2026-08-17T22:00";
+        const end = "2026-08-18T10:30";
+
+        // Continuing above, the start is on yesterday's column — the end is the
+        // only time of day this chip is actually about.
+        compare(format.chipTimeLabel(start, end, true, { "continuesAbove": true }),
+                "→ 10:30");
+        // Continuing below, the end is tomorrow's, so the start stands alone.
+        compare(format.chipTimeLabel(start, end, true, { "continuesBelow": true }),
+                "22:00");
+        // Both, which is a chip that is only middle: the top wins, because the
+        // end is what the reader cannot see anywhere else.
+        compare(format.chipTimeLabel(start, end, true,
+                                     { "continuesAbove": true, "continuesBelow": true }),
+                "→ 10:30");
+    }
+
+    function test_a_chip_with_no_event_behind_it_says_nothing() {
+        compare(format.chipTimeLabel("", "2026-08-18T10:30", true, {}), "");
+        compare(format.chipTimeLabel("", "", true, undefined), "");
+    }
+
+    function test_an_upcoming_row_drops_the_day_while_it_is_today() {
+        compare(format.upcomingWhen("2026-08-18T14:00", false, "2026-08-18", true),
+                "14:00");
+        compare(format.upcomingWhen("2026-08-18T14:00", false, "2026-08-18", false),
+                "2:00 PM");
+        // All day, where a time would be a lie.
+        compare(format.upcomingWhen("2026-08-18T00:00", true, "2026-08-18", true),
+                "All day");
+    }
+
+    function test_an_upcoming_row_names_the_day_once_it_is_not_today() {
+        compare(format.upcomingWhen("2026-08-19T09:15", false, "2026-08-18", true),
+                "Tomorrow · 09:15");
+        // Past the friendly names, the weekday carries it.
+        compare(format.upcomingWhen("2026-08-21T09:15", false, "2026-08-18", true),
+                "Friday · 09:15");
+        compare(format.upcomingWhen("2026-08-21T00:00", true, "2026-08-18", true),
+                "Friday · All day");
+        compare(format.upcomingWhen("", false, "2026-08-18", true), "");
+    }
+
 }

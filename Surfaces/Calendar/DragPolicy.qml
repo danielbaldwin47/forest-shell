@@ -65,6 +65,10 @@ QtObject {
 
     property CalendarTime time: CalendarTime {}
 
+    /// The one column arithmetic. A drag reads columns off the same edges the
+    /// grid draws them on, rather than dividing again for itself.
+    property TimeGridPolicy timeGrid: TimeGridPolicy {}
+
     /// The live proposal. Idle between drags rather than null, so a view can
     /// bind `visible: dragPolicy.proposal.active` without a guard.
     readonly property var idle: ({
@@ -140,16 +144,25 @@ QtObject {
 
     /// Which day column `x` falls in, clamped to the ends. `-1` only when
     /// there are no columns at all.
+    ///
+    /// The index itself is `TimeGridPolicy.columnForX`, which reconciles the
+    /// division against the drawn edges — a press on a column's own left edge
+    /// lands one column early without that (measured there: 3284 disagreements
+    /// over ~34k widths). A drag has different edge manners than the grid,
+    /// though: it may wander into the gutter or off the right of the window and
+    /// should keep proposing the end column rather than refusing, so `x` is
+    /// clamped into the grid first and the grid's `-1` only survives when there
+    /// are no columns to clamp into.
     function columnForX(x: real, ctx: var): int {
         const c = policy._norm(ctx);
         const n = c.columns.length;
         if (n === 0)
             return -1;
-        const span = c.gridWidth - c.gutterWidth;
-        if (!(span > 0))
+        if (!(c.gridWidth - c.gutterWidth > 0))
             return 0;
-        const idx = Math.floor((x - c.gutterWidth) / (span / n));
-        return Math.max(0, Math.min(n - 1, idx));
+        const inside = Math.min(Math.max(x, c.gutterWidth), c.gridWidth - 0.5);
+        const col = policy.timeGrid.columnForX(inside, c.gutterWidth, c.gridWidth, n);
+        return col < 0 ? 0 : col;
     }
 
     function _dayAt(x: real, ctx: var): string {

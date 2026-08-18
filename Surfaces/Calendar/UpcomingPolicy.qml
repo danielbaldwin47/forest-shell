@@ -36,9 +36,16 @@
 // stable order rather than in whatever order the store happened to hold them.
 pragma ComponentBehavior: Bound
 import QtQuick
+import "../../Services/Calendar"
 
 QtObject {
     id: policy
+
+    /// Where a stamp is taken apart. The day of `"2026-08-18T09:00"` is
+    /// `CalendarTime.dayOf`'s answer everywhere in this surface — a policy that
+    /// sliced ten characters for itself would be a second definition of what a
+    /// day is, and it would be the one nobody updated.
+    property CalendarTime time: CalendarTime {}
 
     /// The default the sidebar asks for. Three rows is what fits between the
     /// calendars list and the footer at the shortest window this surface
@@ -57,12 +64,12 @@ QtObject {
         if (!events || !nowStamp)
             return [];
 
-        const nowDay = nowStamp.slice(0, 10);
+        const nowDay = policy.time.dayOf(nowStamp);
         const upcoming = events.filter(function (event) {
             if (!event || !event.start)
                 return false;
             return event.allDay
-                ? event.start.slice(0, 10) >= nowDay
+                ? policy.time.dayOf(event.start) >= nowDay
                 : event.start >= nowStamp;
         });
 
@@ -84,6 +91,6 @@ QtObject {
     function isSameDay(event: var, nowStamp: string): bool {
         if (!event || !event.start || !nowStamp)
             return false;
-        return event.start.slice(0, 10) === nowStamp.slice(0, 10);
+        return policy.time.dayOf(event.start) === policy.time.dayOf(nowStamp);
     }
 }

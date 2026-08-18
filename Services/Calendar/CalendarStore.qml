@@ -65,6 +65,7 @@ Singleton {
     readonly property int version: 1
 
     property EventPolicy policy: EventPolicy {}
+    property GuestPolicy guestPolicy: GuestPolicy {}
 
     /// What we last wrote, and a cooldown around it: `watchChanges` hands our
     /// own write straight back, and re-reading it would re-sort a list that is
@@ -102,11 +103,11 @@ Singleton {
         root.contacts = kept;
     }
 
+    /// The contact record behind an id, or null. `GuestPolicy` owns the lookup
+    /// — this file holds no arithmetic, and a second search here is a second
+    /// answer to what "the same contact" means.
     function contactById(id: string): var {
-        for (const contact of root.contacts)
-            if (contact.id === id)
-                return contact;
-        return null;
+        return root.guestPolicy.contactFor(id, root.contacts);
     }
 
     // --- writing --------------------------------------------------------------

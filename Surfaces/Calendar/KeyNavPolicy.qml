@@ -407,6 +407,24 @@ QtObject {
     /// Rows pair the alternatives that run the same verb (`J / ←`), which is
     /// what keeps this list the length of the *keymap* rather than the length
     /// of the key table.
+    /// Whether the period on screen already contains today — what the Today
+    /// button reads to know whether it has anywhere to go.
+    ///
+    /// Whole-period rather than same-day, because in a week view "today" is the
+    /// week you are in: a live Today button on a week that already shows today
+    /// is the dead button that control exists to avoid. It is `visibleRange`'s
+    /// own answer rather than a second reading of what a period is — the button
+    /// and the arrow keys agree about where the month ends by construction.
+    function todayInView(view: string, anchorIso: string, todayIso: string,
+                         firstDay: int): bool {
+        if (!todayIso || !anchorIso)
+            return false;
+        const range = policy.visibleRange(view, anchorIso, firstDay);
+        if (!range)
+            return false;
+        return todayIso >= range.from && todayIso <= range.to;
+    }
+
     function shortcutsTable(): var {
         return [
             { "keys": "D", "label": "Day view", "group": "Views" },

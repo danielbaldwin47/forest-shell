@@ -154,7 +154,9 @@
 # The calendar knobs pose that surface. `--cal-view` is `day`, `week` or
 # `month`; `--cal-date` is the day the view is built around; `--cal-state` names
 # an overlay to pose: `drag-create`, `drag-move` and `resize` pose a gesture on
-# the week grid, and `command` and `shortcuts` open the two keyboard overlays
+# the week grid, `popover` is the frame after `drag-create` — the quick-create
+# panel on the event that drag made — `guests` opens the event editor with its
+# picker down, and `command` and `shortcuts` open the two keyboard overlays
 # (the menu with a query already typed, because a picture of an empty field says
 # nothing about whether filtering works). Its events and contacts come from
 # tools/fixtures/calendar-*.json, copied into the scratch XDG dirs, so the
@@ -302,19 +304,19 @@ esac
 [[ "$CAL_NOW" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]] || {
     echo "--cal-now wants YYYY-MM-DDTHH:MM, got: $CAL_NOW" >&2; exit 2; }
 
-# `--cal-state` is checked the same way, and against two lists rather than one.
-# The three drag poses are built (`capture-harness.qml`'s `calendarPoses`, which
-# hands `WeekView.posedDrag` a day and a minute at each end); the rest are named
-# so a later piece appends rather than restructures, and are refused **by name**
-# until they are. A state that silently rendered the plain view is the exact
-# failure the comment above describes.
+# `--cal-state` is checked by name, and an unknown one is refused rather than
+# rendered: a state that silently drew the plain view is the exact failure the
+# comment above describes, and it looks like a pass.
+#
+# Every state below is posed in `capture-harness.qml`. The three drags come from
+# `calendarPoses`, which hands `WeekView.posedDrag` a day and a minute at each
+# end; `popover` reuses the `drag-create` coordinates and opens the quick-create
+# panel on the event they make, which is the frame *after* that drag; the rest
+# are plain properties on the view.
 case "$CAL_STATE" in
     "") ;;
-    drag-create|drag-move|resize) ;;
+    drag-create|drag-move|resize|popover) ;;
     command|shortcuts|guests) ;;
-    popover)
-        echo "--cal-state $CAL_STATE is not posed yet — no calendar state" \
-             "renders differently from the plain view" >&2; exit 2 ;;
     *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
 esac
 
@@ -322,12 +324,15 @@ esac
 # and the month grid has no such thing, so `--cal-view month --cal-state resize`
 # would photograph a month with nothing posed on it and look like a pass.
 #
+# The popover is refused with them: it is anchored to a chip rectangle the week
+# grid computes, and the month grid has no such thing to hand it.
+#
 # The two overlay poses are not drags and are refused nowhere: the command menu
 # and the shortcuts sheet are modal over whichever grid is behind them, and a
 # month behind the menu is a legitimate — and worth photographing — picture.
 if [[ "$CAL_VIEW" == "month" ]]; then
     case "$CAL_STATE" in
-        drag-create|drag-move|resize|guests)
+        drag-create|drag-move|resize|guests|popover)
             echo "--cal-state $CAL_STATE is a week/day pose — the month view has no drag surface" >&2
             echo "(the guests pose anchors its editor on a chip in the week grid)" >&2
             exit 2 ;;

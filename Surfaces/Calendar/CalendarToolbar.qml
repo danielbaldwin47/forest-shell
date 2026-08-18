@@ -97,6 +97,11 @@ Item {
 
     property CalendarFormat format: CalendarFormat {}
 
+    /// Where "does this period contain today" is decided. Default-instantiated
+    /// like `format` above: both are pure objects, and a toolbar built without
+    /// one should still know whether its Today button is live.
+    property KeyNavPolicy keyNav: KeyNavPolicy {}
+
     /// The verbs. `CalendarWindow` owns what they do — this file owns only
     /// where you press to ask for them.
     signal viewRequested(string name)
@@ -110,22 +115,11 @@ Item {
     /// not the day this control should reorder itself.
     readonly property var segments: ["day", "week", "month"]
 
-    /// Whether the current period already contains today. Whole-period rather
-    /// than same-day, because in a week view "today" is the week you are in —
-    /// a live Today button on the week that already shows today is the dead
-    /// button this control exists to avoid.
-    readonly property bool showsToday: {
-        if (!toolbar.todayIso || !toolbar.anchorDate)
-            return false;
-        if (toolbar.view === "day")
-            return toolbar.anchorDate === toolbar.todayIso;
-        if (toolbar.view === "week") {
-            const time = toolbar.format.time;
-            return time.weekStart(toolbar.anchorDate, toolbar.firstDay)
-                === time.weekStart(toolbar.todayIso, toolbar.firstDay);
-        }
-        return toolbar.anchorDate.slice(0, 7) === toolbar.todayIso.slice(0, 7);
-    }
+    /// Whether the current period already contains today — the decision behind
+    /// the Today button's resting state. `KeyNavPolicy` owns it (and is tested
+    /// on it); this file owns only what the answer looks like.
+    readonly property bool showsToday: toolbar.keyNav.todayInView(
+        toolbar.view, toolbar.anchorDate, toolbar.todayIso, toolbar.firstDay)
 
     readonly property var titleParts:
         toolbar.format.titleParts(toolbar.view, toolbar.anchorDate, toolbar.firstDay)

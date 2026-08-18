@@ -43,7 +43,15 @@
 // teleport rather than a gesture.
 //
 //     usage: nested-click [left|right|middle|<linux button code>]
-//            nested-click <button> --drag x1 y1 x2 y2 w h [steps]
+//            nested-click <button> --drag x1 y1 x2 y2 w h [steps] [--hold-ms N]
+//
+// `--hold-ms` is how long the button stays down at the destination before it is
+// released — 60ms by default, which is only a beat for the surface to read the
+// last motion. A caller that wants to do something *during* the drag asks for
+// more: a drag is atomic from the shell's point of view, so cancelling one from
+// the keyboard means sending the key while this process is still holding the
+// button, and the hold is the window that makes that a wait rather than a race
+// (tools/calendar-harness.sh's Escape-cancels-a-drag check).
 //
 // `w` and `h` are the extents the coordinates are stated against — the
 // *output's* size, which the caller reads from the compositor rather than
@@ -106,6 +114,22 @@ int main(int argc, char **argv) {
     int dragging = 0;
     uint32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0, extent_w = 0, extent_h = 0;
     int steps = 12;
+    int hold_ms = 60;
+
+    // Scanned rather than positional, so the optional `steps` before it stays
+    // optional and every existing caller keeps its own argument order.
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--hold-ms") != 0)
+            continue;
+        if (i + 1 >= argc) {
+            fprintf(stderr, "nested-click: --hold-ms wants a count in milliseconds\n");
+            return 2;
+        }
+        hold_ms = atoi(argv[i + 1]);
+        if (hold_ms < 0)
+            hold_ms = 0;
+        break;
+    }
 
     if (argc > 2 && strcmp(argv[2], "--drag") == 0) {
         if (argc < 9) {
@@ -119,7 +143,9 @@ int main(int argc, char **argv) {
         y2 = (uint32_t)strtoul(argv[6], NULL, 10);
         extent_w = (uint32_t)strtoul(argv[7], NULL, 10);
         extent_h = (uint32_t)strtoul(argv[8], NULL, 10);
-        if (argc > 9)
+        // `--hold-ms` may sit where `steps` would: a flag read as a step count
+        // is `atoi("--hold-ms")` = 0, which is one teleport instead of twelve.
+        if (argc > 9 && strncmp(argv[9], "--", 2) != 0)
             steps = atoi(argv[9]);
         if (steps < 1)
             steps = 1;
@@ -198,7 +224,8 @@ int main(int argc, char **argv) {
         // A beat with the button still down at the destination: a surface that
         // commits on release reads the last position it was told about, and a
         // release in the same breath as the final motion can beat it there.
-        settle(60);
+        // `--hold-ms` widens that beat into a window a caller can act inside.
+        settle(hold_ms);
     }
 
     zwlr_virtual_pointer_v1_button(pointer, now_ms(), button,

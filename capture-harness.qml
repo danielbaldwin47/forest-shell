@@ -59,6 +59,7 @@ import qs.Surfaces.Calendar
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
 import qs.Surfaces.Screenshot
+import qs.Services.Calendar
 import qs.Services.Launcher
 import qs.Services.Notifications
 import qs.Services.System
@@ -1313,6 +1314,57 @@ ShellRoot {
         week.posedDrag = pose;
     }
 
+    /// The quick-create panel, on an event this function makes — the picture at
+    /// the *end* of a drag-create rather than during one, which is the moment
+    /// the panel exists for.
+    ///
+    /// It is the `drag-create` pose's own coordinates, so the two states are
+    /// two frames of one gesture: the same Wednesday afternoon slot, drawn
+    /// mid-drag by `posedDrag` and named-and-panelled by this.
+    ///
+    /// A predicate rather than a one-shot, because the panel is anchored to a
+    /// chip rectangle and there is no chip rectangle until the grid has a
+    /// width: `openQuickCreate` refuses a column it cannot find, silently and
+    /// correctly, and at `onLoaded` it cannot find one. Returning false makes
+    /// the grab wait and try again instead of photographing the plain week.
+    function poseCalendarPopover(page: var): bool {
+        const week = root.findByObjectName(page, "calendarWeekGrid");
+        if (!week) {
+            console.warn("capture: no calendarWeekGrid to pose the popover on");
+            return true;
+        }
+        // Already open, one whole retry ago: the panel scales and fades in from
+        // `Component.onCompleted`, so a grab taken on the pass that opened it
+        // photographs a shadow with nothing inside (measured). The wait is the
+        // animation's, and `false` below is what buys it.
+        if (week.quickCreateId.length > 0)
+            return true;
+        if (week.width <= 0)
+            return false;
+
+        const pose = root.calendarPoses["drag-create"];
+        const id = CalendarStore.createEvent(pose.fromIso, pose.fromMin,
+                                             pose.toMin - pose.fromMin, "");
+        if (!id) {
+            // Said out loud and then given up on: retrying a store that refused
+            // the day would spend the whole budget making events.
+            console.warn("capture: the store would not create the popover's event");
+            return true;
+        }
+        const event = CalendarStore.policy.byId(CalendarStore.events, id);
+        if (!event) {
+            console.warn("capture: created " + id + " and could not read it back");
+            return true;
+        }
+        week.openQuickCreate(id, pose.fromIso, event.start, event.end);
+        if (week.quickCreateId.length === 0) {
+            console.warn("capture: " + pose.fromIso + " is not a column on screen —"
+                         + " the popover has nothing to anchor to");
+            return true;
+        }
+        return false;
+    }
+
     /// The calendar window (#calendar), on the same terms as the settings one
     /// above and for the same reason: `CalendarView` is a `FloatingWindow`, so
     /// it is built as itself and its content is then moved onto
@@ -1332,6 +1384,11 @@ ShellRoot {
             view: root.calView
             anchorDate: root.calDate
             nowOverride: root.calNow
+
+            // The clock a real window is handed by `CalendarWindow`. It only
+            // shows through when `--cal-now` was left off, and then it is the
+            // wall clock the shell itself is reading — one clock either way.
+            shellStamp: CalendarWindow.nowStamp
 
             // The two keyboard overlays are posed as properties rather than
             // driven with a key, for the same reason the drag is posed rather
@@ -1384,6 +1441,8 @@ ShellRoot {
             page.anchors.fill = calendarBacking;
 
             root.poseCalendarDrag(page);
+            if (root.calState === "popover")
+                root.sceneReady = () => root.poseCalendarPopover(page);
 
             root.sceneDescription = "view=" + root.calView + "+date=" + root.calDate
                                   + "+now=" + root.calNow

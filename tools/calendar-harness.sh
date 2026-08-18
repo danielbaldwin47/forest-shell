@@ -31,6 +31,9 @@
 #      window
 #  13. a real drag on a chip's bottom edge resizes it; one on its body moves it
 #      into the next day, keeping the minute — and both survive into events.json
+#  14. the bottom edge dragged above its own start stops at the 15-minute floor,
+#      and Escape sent into the middle of a held drag cancels it without writing
+#      an event and without closing the window
 #
 # The shell under test runs against a scratch XDG_CONFIG_HOME *and*
 # XDG_DATA_HOME, seeded from tools/fixtures/calendar-*.json. Both, because the
@@ -53,6 +56,20 @@ for arg in "$@"; do
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
+
+## nested-session.sh counts failures; this counts passes too, by taking its
+## `nested_pass` over — every check in this file goes through the helpers below
+## and they all end there, so one shadowed function counts all of them.
+##
+## The count is what makes a *shrunken* run visible. Several blocks here can only
+## run if the ones before them found something to aim at, and a run that skipped
+## them printed the same "all calendar checks passed" as a full one. The expected
+## total at the bottom is the check on the checks.
+calendar_pass_count=0
+nested_pass() {
+    calendar_pass_count=$((calendar_pass_count + 1))
+    printf '  \033[32mPASS\033[0m  %s\n' "$1"
+}
 
 ipc() { nested_ipc call calendar "$@"; }
 
@@ -498,6 +515,52 @@ else
         expect_since "$mark" \
             "calendar: move $drag_id 2026-08-19T09:00 -> 2026-08-20T09:00" \
             'dragging it one column right moves the day and keeps the minute'
+
+        # --- the resize floor -------------------------------------------------
+        #
+        # The bottom edge dragged *up* past its own start. `EventPolicy.resize`
+        # floors at `minMinutes`, so the answer is 15m and not 0m and not a
+        # negative one — the floor is the claim, and it is the only one of the
+        # four gestures whose result is not where the pointer let go.
+        #
+        # The chip is on Thursday now, 09:00–11:00, so this aims 3px above the
+        # 11:00 edge and lands on 09:00.
+        mark=$(log_lines)
+        nested_drag "$thu_x" "$(( y_1100 - 3 ))" "$thu_x" "$y_0900"
+        expect_since "$mark" "calendar: drag begin resizeBottom $drag_id" \
+            'a press on the moved chip'"'"'s bottom edge begins a resize'
+        expect_since "$mark" "calendar: resize $drag_id 120m -> 15m" \
+            'dragging the bottom edge above the start stops at the 15-minute floor'
+
+        # --- cancel -----------------------------------------------------------
+        #
+        # Escape *during* a drag, which is the one gesture a single `nested_drag`
+        # cannot express: it presses, travels and releases in one call. So the
+        # drag is held at its destination (`NESTED_DRAG_HOLD_MS`, which
+        # tools/nested-click.c grew for this) and run in the background, and the
+        # key is sent into the middle of it. The hold is a second and the key
+        # goes at 0.8s, comfortably after the travel ends and long before the
+        # release — a wait rather than a race.
+        #
+        # Exactly one Escape, and this is why: once the drag is cancelled the
+        # window's own Escape handler is live again, and a second would close the
+        # calendar out from under everything below.
+        #
+        # Wednesday is empty again — the event moved to Thursday — so this is a
+        # create drag, and a cancelled create must leave no event behind at all.
+        cancel_id="evt-$(( ${drag_id#evt-} + 1 ))"
+        mark=$(log_lines)
+        NESTED_DRAG_HOLD_MS=1000 nested_drag "$wed_x" "$y_0900" "$wed_x" "$y_1030" &
+        cancel_pid=$!
+        sleep 0.8
+        nested_key escape
+        wait "$cancel_pid" || nested_note 'the held drag exited non-zero'
+        expect_since "$mark" 'calendar: drag cancel' \
+            'Escape in the middle of a drag cancels it'
+        refute_since "$mark" "calendar: create $cancel_id" \
+            'and a cancelled create writes no event'
+        refute_since "$mark" 'calendar: window closed' \
+            'and the drag ate the key rather than closing the whole calendar'
     fi
 fi
 
@@ -524,6 +587,11 @@ if [[ -n "${wed_x:-}" ]]; then
         "a chip's body asks for the hand"
     expect_since "$pointer_mark" 'calendar: cursor ns-resize' \
         "and a chip's bottom edge asks for the resize arrows"
+else
+    # Said rather than skipped. The pointer checks read the lines the gestures
+    # above left, so no gestures means no lines — and a silent skip here is a
+    # short run that prints the same "all checks passed" as a full one.
+    nested_fail 'no pointer gestures ran, so nothing crossed the grid to read a cursor from'
 fi
 
 # --- 10c. the keyboard, key by key -------------------------------------------
@@ -871,12 +939,57 @@ file_says 'Design sync' 'the title it was given goes to the file too'
 file_says '"mira"' 'the guest it was given goes to the file too'
 file_stops_saying '"id": "evt-1",' 'the deleted event is gone from events.json'
 
-# The three gestures, in the file rather than in the log. The log says the store
-# acted; this says the pointer's work is what a later run would read back.
+## One named event's own field, rather than a string that is somewhere in the
+## file. `file_says '"start": "2026-08-20T09:00"'` is the trap this exists to
+## avoid: that stamp was already in the fixture, on a different event, so the
+## check passed before the drag ever ran and would have kept passing if the
+## pointer had done nothing at all.
+##
+## Polls for the reason `file_says` does — the write is a restarting 250ms
+## debounce — and parses the file rather than grepping it, because "this event
+## has this start" is a question about one JSON object and not about the text.
+event_field_says() {
+    local id="$1" field="$2" want="$3" what="$4"
+    for _ in $(seq 1 50); do
+        if python3 - "$EVENTS" "$id" "$field" "$want" <<'PY'
+import json
+import sys
+
+path, ident, field, want = sys.argv[1:5]
+try:
+    with open(path) as handle:
+        events = json.load(handle).get("events", [])
+except (OSError, ValueError):
+    sys.exit(1)
+for event in events:
+    if isinstance(event, dict) and event.get("id") == ident:
+        sys.exit(0 if event.get(field) == want else 1)
+sys.exit(1)
+PY
+        then
+            nested_pass "$what"
+            return 0
+        fi
+        sleep 0.1
+    done
+    nested_fail "$what — no event $id with a $field of \"$want\" in $EVENTS"
+    return 1
+}
+
+# The four gestures, in the file rather than in the log. The log says the store
+# acted; this says the pointer's work is what a later run would read back — the
+# id and the field together, so the fixture cannot answer for the drag.
 if [[ -n "${drag_id:-}" ]]; then
-    file_says "\"id\": \"$drag_id\"" 'the dragged-out event reaches events.json'
-    file_says '"start": "2026-08-20T09:00"' 'holding the day the move put it on'
-    file_says '"end": "2026-08-20T11:00"' 'and the length the resize gave it'
+    event_field_says "$drag_id" start '2026-08-20T09:00' \
+        'the dragged-out event is in events.json, on the day the move put it'
+    event_field_says "$drag_id" end '2026-08-20T09:15' \
+        'and at the length the floored resize left it'
+    event_field_says "$drag_id" title 'New event' \
+        'under the default title the dismissed panel kept for it'
+else
+    # Said rather than skipped, for the reason the cursor block gives: three
+    # checks that quietly did not run look exactly like three that passed.
+    nested_fail 'no drag ran, so events.json was never asked about one'
 fi
 file_says '"id": "evt-11"' 'the fixture events it never touched are still there'
 
@@ -952,9 +1065,23 @@ fi
 # It is a `nested_click` plus one `expect_since`. It cannot be a screenshot:
 # this seam never presents.
 
+# How many checks a whole run makes. Stated, so a run that quietly made fewer
+# fails instead of congratulating itself — several blocks above only run when the
+# ones before them found something to aim at, and "all calendar checks passed" is
+# a sentence a half-run could print. Bump it deliberately when a check is added.
+CALENDAR_EXPECTED=98
+
 printf '\n'
+printf 'calendar: %s passed, %s failed, expected %s\n' \
+    "$calendar_pass_count" "$nested_fail_count" "$CALENDAR_EXPECTED"
 if (( nested_fail_count )); then
     printf '%s check(s) failed — shell log: %s\n' "$nested_fail_count" "$NESTED_SHELL_LOG"
+    exit 1
+fi
+if (( calendar_pass_count != CALENDAR_EXPECTED )); then
+    printf 'the run made %s checks and not %s — a check was skipped, or added without bumping CALENDAR_EXPECTED\n' \
+        "$calendar_pass_count" "$CALENDAR_EXPECTED"
+    printf 'shell log: %s\n' "$NESTED_SHELL_LOG"
     exit 1
 fi
 printf 'all calendar checks passed\n'

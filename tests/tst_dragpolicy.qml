@@ -68,6 +68,25 @@ TestCase {
         compare(drag.columnForX(2000, testCase.ctx), 6);  // dragged off the right
     }
 
+    /// A press exactly on a column's drawn left edge belongs to that column.
+    ///
+    /// 800px of grid behind an 80px gutter is 720 / 7 = 102.857px a column,
+    /// which is the ordinary case rather than a contrived one: the edges are
+    /// rounded to whole pixels, so dividing the raw width again disagrees with
+    /// where the column was actually drawn. x = 491 is column 4's own left
+    /// edge and floor division answers 3 there — an event created a day early
+    /// from a grid that looks right.
+    function test_a_press_on_a_column_edge_lands_in_that_column() {
+        const ctx = {
+            "hourHeight": 60, "gutterWidth": 80, "gridWidth": 800,
+            "columns": testCase.week, "snap": 15, "minMinutes": 15, "threshold": 4
+        };
+        compare(drag.columnForX(491, ctx), 4);
+        const edges = [80, 183, 286, 389, 491, 594, 697];
+        for (let i = 0; i < edges.length; i++)
+            compare(drag.columnForX(edges[i], ctx), i, "edge x=" + edges[i]);
+    }
+
     // --- create ---------------------------------------------------------------
 
     function test_a_create_drag_of_100px_is_105_minutes() {

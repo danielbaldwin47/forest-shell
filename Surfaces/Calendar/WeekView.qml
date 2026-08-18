@@ -78,6 +78,7 @@ Item {
     property var contacts: CalendarStore.contacts
 
     property TimeGridPolicy grid: TimeGridPolicy {}
+    property EventPolicy eventPolicy: EventPolicy {}
     property GuestPolicy guestPolicy: GuestPolicy {}
     property EventLayoutPolicy layoutPolicy: EventLayoutPolicy {}
     property CalendarFormat format: CalendarFormat {}
@@ -191,15 +192,9 @@ Item {
     /// when the clock is outside the run — the line then draws nothing rather
     /// than parking at the top of Monday.
     readonly property real nowY: view.grid.nowLineY(view.nowStamp, view.hourRow)
-    readonly property int nowColumn: {
-        if (view.nowY < 0)
-            return -1;
-        const day = view.nowStamp.split("T")[0];
-        for (let i = 0; i < view.columns.length; i++)
-            if (view.columns[i].iso === day)
-                return i;
-        return -1;
-    }
+    readonly property int nowColumn: view.nowY < 0
+        ? -1
+        : view.columnIndexOf(view.eventPolicy.time.dayOf(view.nowStamp))
     /// The three column questions, all answered from `TimeGridPolicy`'s whole-
     /// pixel edges rather than from `columnW`. Multiplying a fractional width
     /// out per column drifted 148/150/148/149 across a week — the same design
@@ -276,11 +271,10 @@ Item {
         return out;
     }
 
+    /// The event behind an id, or null. `EventPolicy` owns the lookup — the
+    /// list's own order and identity rules are its business, not this file's.
     function eventById(id: string): var {
-        for (let i = 0; i < view.events.length; i++)
-            if (view.events[i].id === id)
-                return view.events[i];
-        return null;
+        return view.eventPolicy.byId(view.events, id);
     }
 
     function columnIndexOf(iso: string): int {

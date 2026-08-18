@@ -524,6 +524,23 @@ TestCase {
         // Which settings tab you had open is not part of your setup (#54).
         verify(store.leafAt(state.spec, "settings.lastTab") !== null);
         compare(store.leafAt(settings.spec, "settings"), null);
+
+        // Neither is which calendar view you had open.
+        verify(store.leafAt(state.spec, "calendar.lastView") !== null);
+        compare(store.leafAt(settings.spec, "calendar"), null);
+    }
+
+    function test_the_calendar_remembers_a_view_it_can_actually_open() {
+        compare(state.calendarViews, ["day", "week", "month"]);
+
+        // A hand-edited view this surface cannot draw falls back rather than
+        // opening the window onto nothing.
+        const view = state.spec.calendar.lastView;
+        compare(view.def, "week");
+        compare(view.coerce("day"), "day");
+        compare(view.coerce("month"), "month");
+        compare(view.coerce("agenda"), undefined);
+        compare(view.coerce(""), undefined);
     }
 
     function test_state_leaves_are_specified_like_settings_leaves() {

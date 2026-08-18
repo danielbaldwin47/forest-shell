@@ -469,8 +469,14 @@ nested_click() {
 ## The opening warp is `hyprctl dispatch movecursor`, exactly as `nested_click`
 ## does it and for the same reason: it is a compositor-side event the surface
 ## under it has to be told about before a button lands on it.
+## `NESTED_DRAG_HOLD_MS` is how long the button stays down at the destination
+## before the release. Default 60ms, which is the beat a surface needs to read
+## the last motion; a caller that wants to send a *key* into the middle of a drag
+## sets it to a second or so and does the sending while this runs in the
+## background — the hold is what turns that from a race into a wait.
 nested_drag() {
     local x1="$1" y1="$2" x2="$3" y2="$4" steps="${5:-12}" button="${6:-left}"
+    local hold="${NESTED_DRAG_HOLD_MS:-60}"
     nested_click_tool || return 1
 
     local output extents w h
@@ -484,7 +490,7 @@ nested_drag() {
     nested_hyprctl dispatch movecursor "$x1" "$y1" > /dev/null || return 1
     sleep 0.2
     nested_env "$NESTED_CLICK_BIN" "$button" --drag "$x1" "$y1" "$x2" "$y2" \
-        "$w" "$h" "$steps" || return 1
+        "$w" "$h" "$steps" --hold-ms "$hold" || return 1
 }
 
 ## A toplevel's rect as `<x> <y> <w> <h>`, found by a substring of its title, or

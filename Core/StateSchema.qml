@@ -25,6 +25,11 @@ QtObject {
     readonly property string versionKey: "stateVersion"
     readonly property int version: 2
 
+    /// The calendar's three views, in the order the toolbar draws them. Stated
+    /// here so a hand-edited state file naming a fourth one falls back to the
+    /// default rather than opening a window onto nothing.
+    readonly property var calendarViews: ["day", "week", "month"]
+
     readonly property var spec: ({
         // Situational, not setup — the one toggle that is state (#21). Owned by
         // the notification service (#42).
@@ -60,6 +65,14 @@ QtObject {
             // order lives in one place, and it is not this file. An id from a
             // build that had a tab this one does not falls back the same way.
             lastTab: { def: "", coerce: c.string }
+        },
+
+        calendar: {
+            // The calendar window reopens on the view it was left on. Unlike
+            // the `lastTab` keys above this one names its default outright —
+            // there is no "first view" to fall back to, and `week` is the view
+            // the surface opens on when nothing has chosen yet.
+            lastView: { def: "week", coerce: c.oneOf(schema.calendarViews) }
         },
 
         claude: {

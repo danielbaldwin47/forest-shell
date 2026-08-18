@@ -584,6 +584,32 @@ TestCase {
         compare(keys.visibleRange("fortnight", testCase.anchor, 1), null);
     }
 
+    /// The Today button's resting state. The 18th is a Tuesday; the week around
+    /// it runs the 17th–23rd Monday-first, so a Thursday anchor still contains
+    /// a Tuesday today in the week view and does not in the day view.
+    function test_today_in_view_is_the_whole_period_not_the_day() {
+        compare(keys.todayInView("day", "2026-08-20", "2026-08-18", 1), false);
+        compare(keys.todayInView("day", "2026-08-18", "2026-08-18", 1), true);
+
+        compare(keys.todayInView("week", "2026-08-20", "2026-08-18", 1), true);
+        // The Monday-first week ends on the 23rd, so the 24th is next week's.
+        compare(keys.todayInView("week", "2026-08-24", "2026-08-18", 1), false);
+        // Sunday-first, the 16th is in the anchor's week and Monday-first it is
+        // not — the same question answered by the locale.
+        compare(keys.todayInView("week", "2026-08-18", "2026-08-16", 0), true);
+        compare(keys.todayInView("week", "2026-08-18", "2026-08-16", 1), false);
+
+        compare(keys.todayInView("month", "2026-08-01", "2026-08-31", 1), true);
+        compare(keys.todayInView("month", "2026-08-01", "2026-09-01", 1), false);
+    }
+
+    function test_a_today_button_with_nothing_to_compare_rests() {
+        compare(keys.todayInView("week", "2026-08-18", "", 1), false);
+        compare(keys.todayInView("week", "", "2026-08-18", 1), false);
+        compare(keys.todayInView("fortnight", "2026-08-18", "2026-08-18", 1), false);
+        compare(keys.todayInView("week", "not-a-day", "2026-08-18", 1), false);
+    }
+
     // --- the sheet's two columns ---------------------------------------------
 
     function test_every_shortcut_reaches_exactly_one_column() {

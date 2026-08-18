@@ -398,19 +398,19 @@ FloatingWindow {
     /// the machine happens to be running is two clocks in one window, and the
     /// harness would have posed half a surface.
     ///
-    /// Otherwise it is `Core/Time.qml`, which ticks once a minute for the whole
-    /// shell — the now-line moves 0.93px a minute, so a per-minute tick is
-    /// exactly the resolution it can show.
-    readonly property string nowStamp: {
-        if (window.nowOverride.length > 0)
-            return window.nowOverride;
-        const now = Time.now;
-        return window.keyNav.time.formatStamp(
-            window.keyNav.time.dayIso(now.getFullYear(), now.getMonth() + 1, now.getDate()),
-            now.getHours() * 60 + now.getMinutes());
-    }
+    /// Otherwise it is `shellStamp`, handed down by whoever built the window —
+    /// `CalendarWindow.nowStamp`, which is the surface's one clock, so the
+    /// singleton's idea of today and this view's cannot drift apart.
+    readonly property string nowStamp: window.nowOverride.length > 0
+        ? window.nowOverride
+        : window.shellStamp
 
-    readonly property string todayIso: window.nowStamp.split("T")[0]
+    /// The clock the builder handed down. Assigned rather than read off the
+    /// singleton directly, because a view is a plain component and importing
+    /// the module it lives in to reach its own owner is a circle.
+    property string shellStamp: ""
+
+    readonly property string todayIso: window.keyNav.time.dayOf(window.nowStamp)
 
     /// The locale's first weekday, `Locale.Sunday === 0` — the same source
     /// `Surfaces/Drawers/Cards/CalendarCard.qml` reads, so the shell's two
@@ -428,23 +428,13 @@ FloatingWindow {
     property UpcomingPolicy upcomingPolicy: UpcomingPolicy {}
     property CalendarFormat railFormat: CalendarFormat {}
 
-    /// When one of the sidebar's upcoming rows happens, in as few words as the
-    /// rail has room for: a time alone while the event is today, a weekday in
-    /// front of it once it is not, and the word `All day` where a time would be
-    /// a lie. `UpcomingPolicy` decides *which* events; this decides only how
-    /// the answer is spelled, which is what `CalendarFormat` is for.
+    /// When one of the sidebar's upcoming rows happens. `CalendarFormat` spells
+    /// it; this only unpacks the event the rail is holding.
     function upcomingWhen(event: var): string {
-        if (!event || !event.start)
+        if (!event)
             return "";
-        const iso = event.start.slice(0, 10);
-        const when = event.allDay
-            ? "All day"
-            : window.railFormat.stampTime(event.start, window.use24);
-        if (window.upcomingPolicy.isSameDay(event, window.nowStamp))
-            return when;
-        const named = window.railFormat.relativeDay(iso, window.todayIso);
-        const day = named || window.railFormat.dayHeader(iso).weekdayFull;
-        return day + " · " + when;
+        return window.railFormat.upcomingWhen(event.start, event.allDay === true,
+                                              window.todayIso, window.use24);
     }
 
     title: "forest-shell — calendar"
@@ -1067,6 +1057,20 @@ FloatingWindow {
             use24: window.use24
 
             onEventActivated: id => window.openRequested(id)
+
+            // "+N more" is a day too full to draw, so the answer is the day
+            // view on that day rather than a popover of the overflow: the
+            // surface already has a view whose whole job is one day, and a
+            // second place to read a day's events is a second layout to keep
+            // honest. Logged with its own reason, because a `goto` from here
+            // and one from the mini-month are the same line otherwise.
+            onMoreActivated: iso => {
+                if (!iso)
+                    return;
+                Logger.log("calendar", "goto " + iso + " (more)");
+                window.dateRequested(iso);
+                window.viewRequested("day");
+            }
         }
 
         // --- the overlays -----------------------------------------------------

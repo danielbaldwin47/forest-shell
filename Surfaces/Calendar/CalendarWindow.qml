@@ -17,6 +17,11 @@ pragma Singleton
 // convention the shell-switch contract fixes for every surface with an external
 // entry point.
 //
+// It is deliberately not on `SurfaceBus` either, for the reason
+// `Core/SurfaceBusPolicy.qml` gives for leaving `settings` off: that table is
+// for surfaces the rest of the shell cannot reach, and this one is a QML
+// singleton everything inside the shell already holds (`CalendarWindow.toggle()`).
+//
 // There is deliberately no IPC `show`, which is #77 and is a Quickshell CLI
 // collision rather than a preference: `show` is also a subcommand of `ipc`
 // itself, so every form of `qs ipc call calendar show` is parsed as `qs ipc
@@ -42,8 +47,11 @@ Singleton {
     readonly property bool shown: loader.active
 
     /// `day`, `week` or `month`. Survives the window being closed, so reopening
-    /// comes back to what was on screen.
-    property string view: "week"
+    /// comes back to what was on screen — and survives the shell being
+    /// restarted, because `ShellState` holds it (`calendar.lastView`, the same
+    /// shape `settings.lastTab` uses). Which view you had open is not part of
+    /// your setup, so it is state and not config (#21).
+    property string view: ShellState.values.calendar.lastView
 
     /// The day the view is built around: the day itself in the day view, the
     /// week containing it in the week view, its month in the month view.
@@ -65,15 +73,41 @@ Singleton {
 
     property CalendarTime time: CalendarTime {}
 
-    /// Today, as a local wall-clock day.
+    /// What the calendar believes the time is, as `"2026-08-18T13:40"`. **The
+    /// surface's one clock**: the view's now-line, the day the toolbar calls
+    /// today and the day a fresh window anchors on all come off this line, so
+    /// they cannot disagree about what day it is.
     ///
     /// The one place in the calendar a `Date` is allowed, and it is allowed
     /// because the question really is "what does the machine's clock say now" —
     /// which is exactly what CalendarTime refuses to answer and exactly what a
     /// clock is for. Everything downstream of this line is string arithmetic.
+    ///
+    /// `Core/Time.qml` ticks once a minute for the whole shell, which is the
+    /// resolution the now-line can show (it moves 0.93px a minute).
+    /// `nowOverride` wins outright when it is set — see below.
+    readonly property string nowStamp: {
+        if (root.nowOverride.length > 0)
+            return root.nowOverride;
+        const now = Time.now;
+        return root.time.formatStamp(
+            root.time.dayIso(now.getFullYear(), now.getMonth() + 1, now.getDate()),
+            now.getHours() * 60 + now.getMinutes());
+    }
+
+    /// The frozen clock `tools/capture-harness.sh --cal-now` poses, or `""` for
+    /// the real one. It lives here rather than on the view for the reason
+    /// `nowStamp` gives: a picture whose now-line is frozen while the toolbar
+    /// still calls the wall-clock day "today" is two clocks in one frame.
+    property string nowOverride: ""
+
+    /// Today, as a local wall-clock day.
+    ///
+    /// A binding rather than a snapshot, so a window nobody has navigated is
+    /// still anchored on today after midnight; navigating assigns `anchorDate`
+    /// and takes the binding away, which is what makes that safe.
     function todayIso(): string {
-        const now = new Date();
-        return root.time.dayIso(now.getFullYear(), now.getMonth() + 1, now.getDate());
+        return root.time.dayOf(root.nowStamp);
     }
 
     function show(): void {
@@ -121,6 +155,10 @@ Singleton {
             return;
         }
         root.view = name;
+        // Assigned, not bound: the binding on `view` is the *initial* value out
+        // of the state file, and switching view replaces it. This write is what
+        // makes the choice survive a restart.
+        ShellState.set("calendar.lastView", name);
         // The panel is anchored to a chip, and every one of these moves the
         // chip — off the screen, in the month view's case. A panel left
         // hanging over a grid that no longer holds its event is a picture of a
@@ -209,6 +247,11 @@ Singleton {
                 anchorDate: root.anchorDate
                 selectedId: root.selectedId
                 editorId: root.editorId
+
+                // The clock, for the same reason and in the same direction:
+                // one stamp behind the now-line up here and the day this
+                // singleton calls today.
+                shellStamp: root.nowStamp
 
                 // Closed by something that is not one of the functions above:
                 // the compositor's own close button, or Escape inside the

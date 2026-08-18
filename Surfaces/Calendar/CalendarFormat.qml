@@ -379,6 +379,33 @@ QtObject {
         return (s.hour % 12 || 12) + (s.minute ? ":" + format.time.pad2(s.minute) : "") + (s.hour < 12 ? "a" : "p");
     }
 
+    /// The time on a grid chip, in the form the chip's width can carry: the
+    /// whole range where it fits, the start alone where it does not, and an
+    /// arrow where the event runs off an edge of the day.
+    ///
+    /// `opts` is what the chip already knows about itself —
+    /// `{ form, meridiem, continuesAbove, continuesBelow }`, the first two
+    /// straight out of `EventLayoutPolicy.chipContent`. The *choice* between the
+    /// three spellings is here rather than in `EventChip` for the reason every
+    /// other function in this file is: it is a decision about strings, and a
+    /// decision that lives in a Quickshell-importing surface is a decision no
+    /// test can reach.
+    ///
+    /// An event continuing above shows its **end**: the start is on yesterday's
+    /// column, so repeating it here would be the one time of day this chip
+    /// certainly does not begin.
+    function chipTimeLabel(startStamp: string, endStamp: string, use24: bool,
+                           opts: var): string {
+        const o = opts || {};
+        if (!startStamp)
+            return "";
+        if (o.continuesAbove)
+            return "→ " + format.startTime(endStamp, use24, o.meridiem === true);
+        if (o.continuesBelow || o.form === "start")
+            return format.startTime(startStamp, use24, o.meridiem === true);
+        return format.timeRange(startStamp, endStamp, use24);
+    }
+
     // --- relative -------------------------------------------------------------
 
     /// `"Today"`, `"Tomorrow"`, `"Yesterday"` — or `null` for every other day,
@@ -398,5 +425,27 @@ QtObject {
         if (delta === -1)
             return "Yesterday";
         return null;
+    }
+
+    /// When one of the sidebar's upcoming rows happens, in as few words as the
+    /// rail has room for: a time alone while the event is today, a day in front
+    /// of it once it is not, and the words `All day` where a time would be a
+    /// lie.
+    ///
+    /// The day is `relativeDay`'s name where there is one and the weekday
+    /// otherwise, which is what keeps a three-row list from repeating a date
+    /// nobody is reading. `UpcomingPolicy` decides *which* events appear; this
+    /// decides only how the answer is spelled.
+    function upcomingWhen(startStamp: string, allDay: bool, todayIso: string,
+                          use24: bool): string {
+        if (!startStamp)
+            return "";
+        const iso = format.time.dayOf(startStamp);
+        const when = allDay ? "All day" : format.stampTime(startStamp, use24);
+        if (iso === todayIso)
+            return when;
+        const named = format.relativeDay(iso, todayIso);
+        const day = named || format.dayHeader(iso).weekdayFull;
+        return day + " · " + when;
     }
 }

@@ -366,4 +366,68 @@ QtObject {
             synthetic: true
         };
     }
+
+    /// The picker's rows for one keystroke: everybody `search` found, and — when
+    /// the query is an address nobody in the list owns — an `Invite …` row after
+    /// them.
+    ///
+    /// **One list rather than two.** The arrow keys walk *rows*, so a picker
+    /// that kept the invite row somewhere else would need the surface to know
+    /// that the last index means something different from the ones before it —
+    /// which is the arithmetic that belongs here, not there. The invite is last
+    /// because it is the fallback: somebody typing an address that turns out to
+    /// be a colleague should land on the colleague.
+    ///
+    /// Every row carries what a row draws — initials, a colour, the one line to
+    /// print — so the surface reads fields rather than deciding anything.
+    function offer(contacts: var, query: string, exclude: var): var {
+        const found = search(contacts, query, exclude);
+        const rows = [];
+        for (let i = 0; i < found.length; i++) {
+            const c = found[i];
+            rows.push({
+                id: c.id,
+                name: c.name,
+                email: (typeof c.email === "string") ? c.email : "",
+                colour: (typeof c.colour === "string" && c.colour !== "")
+                        ? c.colour : policy.colourFor(c.id, null),
+                initials: policy.initials(c.name),
+                label: c.name,
+                invite: false
+            });
+        }
+        const stranger = parseFreeText(query, contacts);
+        const skip = Array.isArray(exclude) ? exclude : [];
+        if (stranger && skip.indexOf(stranger.id) < 0) {
+            rows.push({
+                id: stranger.id,
+                name: stranger.name,
+                email: stranger.email,
+                colour: stranger.colour,
+                initials: policy.initials(stranger.name),
+                // Named as the verb it is. "mira@example.org" on its own would
+                // read as a contact the search found, and the whole point of
+                // the row is that it is somebody the list has never heard of.
+                label: "Invite " + stranger.email,
+                invite: true
+            });
+        }
+        return rows;
+    }
+
+    /// Where Up/Down lands, given where the highlight is now.
+    ///
+    /// **It wraps.** A list this short is walked past its end constantly, and a
+    /// highlight that stops dead at the bottom costs a person the whole list's
+    /// height in keystrokes to get back to the top. An empty list has no row to
+    /// be on, which is index 0 — the same answer as "the first one", so the
+    /// surface needs no `if` for the empty case either.
+    function moveSelection(index: var, count: var, delta: var): int {
+        const n = (typeof count === "number" && count > 0) ? Math.floor(count) : 0;
+        if (n === 0)
+            return 0;
+        const i = (typeof index === "number" && isFinite(index)) ? Math.floor(index) : 0;
+        const d = (typeof delta === "number" && isFinite(delta)) ? Math.floor(delta) : 0;
+        return (((i + d) % n) + n) % n;
+    }
 }

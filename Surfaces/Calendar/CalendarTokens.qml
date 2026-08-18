@@ -337,6 +337,21 @@ Singleton {
         return tokens.fill(index);
     }
 
+    /// The point size for initials inside a disc `d` across.
+    ///
+    /// Two glyphs, so the type has to clear roughly 0.42 of the disc before the
+    /// pair reads as letters rather than as texture — measured on the chip,
+    /// where 8.5pt inside 18px came back unreadable and 9.5 did not. Hence the
+    /// floor: below about 20px the ratio would ask for less type than any disc
+    /// can carry, so the floor wins and the disc simply gets fuller.
+    ///
+    /// Half-point steps, because `Theme.pt` scales whatever it is handed and a
+    /// third of a point of difference between two avatar sizes is noise nobody
+    /// asked for.
+    function monogramPt(d: real): real {
+        return Math.max(9.5, Math.round(d * 0.42 * 2) / 2);
+    }
+
     /// A chip under the pointer, lifted 12% toward the overlay — the same
     /// gesture every other hoverable surface in the shell makes, done in the
     /// chip's own hue rather than replacing it.

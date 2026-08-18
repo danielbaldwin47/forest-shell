@@ -53,6 +53,12 @@ Singleton {
     /// the same reason the two above are.
     property string selectedId: ""
 
+    /// The event whose editor panel is up, or `""`. Up here for the third time
+    /// for the third instance of the same reason: `ipc call calendar openEvent`
+    /// reopens the window onto a panel, which it could not do if the panel
+    /// belonged to a view that had been torn down.
+    property string editorId: ""
+
     /// The views this surface knows. Stated once so an unknown name can be
     /// refused with a list rather than silently ignored.
     readonly property var views: ["day", "week", "month"]
@@ -92,6 +98,7 @@ Singleton {
     /// Closes the window. `reason` is for the log and travels with whatever
     /// closed it: `"escape"`, `"compositor"`, `"ipc"`, `"toggle"`.
     function close(reason: string): void {
+        root.closeEditor("window closed");
         if (root.shown)
             Logger.log("calendar", "window closed (" + (reason ? reason : "request") + ")");
         loader.active = false;
@@ -114,6 +121,11 @@ Singleton {
             return;
         }
         root.view = name;
+        // The panel is anchored to a chip, and every one of these moves the
+        // chip — off the screen, in the month view's case. A panel left
+        // hanging over a grid that no longer holds its event is a picture of a
+        // bug, so a period change puts it away.
+        root.closeEditor("view");
         Logger.log("calendar", "view " + name);
     }
 
@@ -124,11 +136,13 @@ Singleton {
             return;
         }
         root.anchorDate = iso;
+        root.closeEditor("goto");
         Logger.log("calendar", "goto " + iso);
     }
 
     function goToday(): void {
         root.anchorDate = root.todayIso();
+        root.closeEditor("today");
         Logger.log("calendar", "today " + root.anchorDate);
     }
 
@@ -137,18 +151,35 @@ Singleton {
         Logger.log("calendar", "select " + id);
     }
 
-    /// Open an event — Enter on a selection, a double click, or `ipc call
+    /// Open an event — Enter on a selection, a click on its chip, or `ipc call
     /// calendar openEvent`. Selecting it is part of opening it: an editor for
     /// an event the grid does not show as chosen is two answers to "which one".
     ///
-    /// The editor itself is not built yet; the line is, because seam 2 asserts
-    /// on lines and a verb that logs nothing is a verb with no seam (#81).
+    /// Two lines and not one. `open` is the verb arriving; `editor open` is the
+    /// panel actually being up, which is a separate claim — an id nothing in
+    /// the file matches would log the first and not the second, and seam 2 can
+    /// tell those apart only because they are two lines (#81).
     function openEvent(id: string): void {
         if (!id)
             return;
         if (root.selectedId !== id)
             root.select(id);
         Logger.log("calendar", "open " + id);
+        if (!CalendarStore.policy.byId(CalendarStore.events, id)) {
+            Logger.log("calendar", "no event " + id + " to open");
+            return;
+        }
+        root.editorId = id;
+        Logger.log("calendar", "editor open " + id);
+    }
+
+    /// Put the panel away. Silent when there was none, so a stray Escape does
+    /// not write a line about a panel nobody had open.
+    function closeEditor(reason: string): void {
+        if (!root.editorId)
+            return;
+        Logger.log("calendar", "editor closed (" + reason + ")");
+        root.editorId = "";
     }
 
     /// One hour, on the day in view, at the minute the chrome worked out. The
@@ -177,6 +208,7 @@ Singleton {
                 view: root.view
                 anchorDate: root.anchorDate
                 selectedId: root.selectedId
+                editorId: root.editorId
 
                 // Closed by something that is not one of the functions above:
                 // the compositor's own close button, or Escape inside the
@@ -203,7 +235,12 @@ Singleton {
                 // the capture harness, with no singleton and no log to write
                 // to — signals out, the same as every other verb.
                 onOpenRequested: id => root.openEvent(id)
-                onDeleteRequested: id => CalendarStore.deleteEvent(id)
+                onEditorDismissed: reason => root.closeEditor(reason)
+                onDeleteRequested: id => {
+                    if (root.editorId === id)
+                        root.closeEditor("deleted");
+                    CalendarStore.deleteEvent(id);
+                }
                 onOverlayToggled: (name, open) =>
                     Logger.log("calendar", name + (open ? " open" : " closed"))
             }

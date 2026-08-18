@@ -85,6 +85,24 @@ FloatingWindow {
 
     readonly property bool overlayOpen: window.commandOpen || window.shortcutsOpen
 
+    /// The event whose editor is up, or `""`. Owned by `CalendarWindow` for the
+    /// same reason `selectedId` is — a panel that closed with the window would
+    /// be a panel `ipc call calendar openEvent` could not reopen onto.
+    property string editorId: ""
+
+    readonly property bool editorOpen: window.editorId !== ""
+
+    /// The guest picker's field and dropdown, posed from outside for
+    /// tools/capture-harness.sh. A photograph of a closed picker says nothing
+    /// about whether searching works, which is the whole claim worth taking a
+    /// picture of.
+    property string editorQuery: ""
+    property bool editorListOpen: false
+
+    /// The editor asked to go away, and why. Out as a signal for the same
+    /// reason every other verb is: the singleton owns what is open.
+    signal editorDismissed(string reason)
+
     /// The window wants to go away, and why: `"compositor"` for the close
     /// button or a window-manager kill, `"escape"` for the key. Whoever opened
     /// the window owns tearing it down; this only reports it, and the reason is
@@ -139,6 +157,11 @@ FloatingWindow {
     function closeOverlays(): void {
         window.commandOpen = false;
         window.shortcutsOpen = false;
+        // The editor counts as an overlay here even though it is not modal:
+        // it is anchored to a chip, and every command that closes overlays
+        // also moves the grid the chip is on.
+        if (window.editorOpen)
+            window.editorDismissed("overlay");
     }
 
     /// A new hour-long event on the day in view, at the slot `CreatePolicy`
@@ -184,8 +207,13 @@ FloatingWindow {
         "selectedId": window.selectedId,
         "selectedTitle": window.selectedTitle,
         "visibleEventIds": window.visibleEventIds,
-        "overlayOpen": window.overlayOpen,
-        "typing": window.commandOpen
+        // The editor is not modal, but Escape has to reach it before it
+        // reaches the window: a person dismissing an event panel is not asking
+        // for the calendar to close behind it.
+        "overlayOpen": window.overlayOpen || window.editorOpen,
+        // And its fields hold a caret, so bare letters are text rather than
+        // shortcuts for exactly as long as it is up.
+        "typing": window.commandOpen || window.editorOpen
     })
 
     /// The selected event's title, for the command menu's "Delete “…”" row.
@@ -791,7 +819,12 @@ FloatingWindow {
             selectedId: window.selectedId
             use24: window.use24
 
-            onEventActivated: id => window.eventSelected(id)
+            // A click on a chip opens it. `openRequested` selects on the way
+            // through (`CalendarWindow.openEvent`), so this is the same one
+            // gesture Enter is rather than a select that needs a second click
+            // to become an open — which is what the reference does and what a
+            // calendar with an editor should do.
+            onEventActivated: id => window.openRequested(id)
         }
 
         /// The month grid, in the same rectangle as the week one and swapped by
@@ -812,7 +845,7 @@ FloatingWindow {
             selectedId: window.selectedId
             use24: window.use24
 
-            onEventActivated: id => window.eventSelected(id)
+            onEventActivated: id => window.openRequested(id)
         }
 
         // --- the overlays -----------------------------------------------------
@@ -825,6 +858,87 @@ FloatingWindow {
         // `Loader`s and not `visible`, because both are keyboard surfaces:
         // building one is what gives it the caret, and destroying it is what
         // gives the caret back rather than leaving a hidden field holding it.
+
+        /// The event editor, anchored to the chip it belongs to.
+        ///
+        /// Hosted here rather than in `WeekView` — which is where the
+        /// quick-create panel lives — because this one opens over the month
+        /// grid too, and over a day the week grid is not showing at all
+        /// (`ipc call calendar openEvent` can name any event in the file). The
+        /// grid still owns the chip's rectangle; it just hands it out through
+        /// `chipAnchor` rather than being the thing that places the panel.
+        ///
+        /// The anchor is worked out when the editor opens and not on every
+        /// frame after: `chipAnchor` reads the grid's scroll offset inside a
+        /// function, so this binding does not depend on it. That is the
+        /// behaviour worth having anyway — a panel that slid up the window
+        /// while the grid scrolled under it would be a panel nobody could
+        /// finish typing into.
+        readonly property rect editorAnchor: {
+            if (!window.editorOpen)
+                return Qt.rect(0, 0, 0, 0);
+            if (grid.visible) {
+                const chip = grid.chipAnchor(window.editorId);
+                if (chip.width > 0) {
+                    const at = grid.mapToItem(page, chip.x, chip.y);
+                    return Qt.rect(at.x, at.y, chip.width, chip.height);
+                }
+            }
+            // The month view, or an event on a day the grid is not showing.
+            // Anchored on the grid's own top-left, so the panel still lands
+            // over the calendar rather than in the window's corner.
+            const origin = grid.mapToItem(page, 0, 0);
+            return Qt.rect(origin.x + Theme.space4, origin.y + Theme.space4, 0, 0);
+        }
+
+        Loader {
+            id: editorLoader
+
+            readonly property var placement: window.createPolicy.popoverAnchor(
+                page.editorAnchor,
+                editorLoader.width > 0 ? editorLoader.width : 360,
+                editorLoader.height, page.width, page.height,
+                Theme.space3, Theme.space3)
+
+            active: window.editorOpen
+            z: 40
+            x: editorLoader.placement.x
+            y: editorLoader.placement.y
+
+            sourceComponent: EventEditor {
+                event: CalendarStore.policy.byId(CalendarStore.events, window.editorId)
+                hue: CalendarTokens.hues.forEvent(
+                    CalendarStore.policy.byId(CalendarStore.events, window.editorId))
+                contacts: CalendarStore.contacts
+                use24: window.use24
+                flipped: editorLoader.placement.flipped
+
+                // One way down and nothing back. These two are a *pose* — the
+                // state a fresh panel opens in — not a mirror of what the
+                // field currently holds. Written back, they would outlive the
+                // panel: the next event's picker would open holding the last
+                // one's query, which is exactly what happened when they were
+                // bound both ways (measured at seam 2 — a rebuilt panel
+                // searched for "mimi").
+                guestQuery: window.editorQuery
+                guestListOpen: window.editorListOpen
+
+                onRenamed: title => CalendarStore.renameEvent(window.editorId, title)
+                onRecoloured: colour => CalendarStore.recolourEvent(window.editorId, colour)
+                onGuestAdded: contactId => CalendarStore.addGuest(window.editorId, contactId)
+                onGuestRemoved: contactId => CalendarStore.removeGuest(window.editorId, contactId)
+                // Out as the window's own signal, so a delete from the panel
+                // and a delete from the command menu are one code path.
+                onDeleted: window.deleteRequested(window.editorId)
+                // Back into the one keymap. The panel does not know what a
+                // chord means; `KeyNavPolicy` does, and it accepts the event
+                // only for the chords it claims — so the ones it does not are
+                // still the text field's.
+                onChordPressed: keyEvent => window.handleKey(keyEvent)
+
+                onDismissed: reason => window.editorDismissed(reason)
+            }
+        }
 
         Loader {
             id: commandLoader

@@ -8,6 +8,7 @@
     { "id": "opal",  "name": "Opal Nakamura",  "email": "opal@example.org",  "colour": "#7dcfff" },
     { "id": "cass",  "name": "Cass Delacroix", "email": "cass@example.org",  "colour": "#f7768e" },
     { "id": "birch", "name": "Birch Odili",    "email": "birch@example.org", "colour": "#73daca" },
-    { "id": "wren",  "name": "Wren Sadiq",     "email": "wren@example.org",  "colour": "#ff9e64" }
+    { "id": "wren",  "name": "Wren Sadiq",     "email": "wren@example.org",  "colour": "#ff9e64" },
+    { "id": "amina", "name": "Amina Sultan",   "email": "amina@example.org", "colour": "#b4a0e0" }
   ]
 }

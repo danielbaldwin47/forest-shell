@@ -231,6 +231,15 @@ Singleton {
         const before = root.policy.byId(root.events, id);
         if (!before)
             return false;
+        // Asked for twice — from the picker and from a script, or from two
+        // scripts. Not a failure, and not a second guest either. It gets a line
+        // because silence here is indistinguishable from an add that never
+        // arrived: a harness driving the same verb twice has to be able to tell
+        // "already invited" from "the call did nothing at all".
+        if (Array.isArray(before.guests) && before.guests.indexOf(contactId) >= 0) {
+            Logger.log("calendar", "guest add " + id + " " + contactId + " (already)");
+            return false;
+        }
         const next = root.policy.addGuest(root.events, id, contactId);
         const after = root.policy.byId(next, id);
         if (!after || after.guests.length === before.guests.length)

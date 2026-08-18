@@ -311,8 +311,8 @@ esac
 case "$CAL_STATE" in
     "") ;;
     drag-create|drag-move|resize) ;;
-    command|shortcuts) ;;
-    guests|popover)
+    command|shortcuts|guests) ;;
+    popover)
         echo "--cal-state $CAL_STATE is not posed yet — no calendar state" \
              "renders differently from the plain view" >&2; exit 2 ;;
     *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
@@ -327,8 +327,9 @@ esac
 # month behind the menu is a legitimate — and worth photographing — picture.
 if [[ "$CAL_VIEW" == "month" ]]; then
     case "$CAL_STATE" in
-        drag-create|drag-move|resize)
+        drag-create|drag-move|resize|guests)
             echo "--cal-state $CAL_STATE is a week/day pose — the month view has no drag surface" >&2
+            echo "(the guests pose anchors its editor on a chip in the week grid)" >&2
             exit 2 ;;
     esac
 fi

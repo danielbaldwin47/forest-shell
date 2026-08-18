@@ -1344,6 +1344,22 @@ ShellRoot {
             commandOpen: root.calState === "command"
             commandQuery: root.calState === "command" ? "to" : ""
             shortcutsOpen: root.calState === "shortcuts"
+
+            // The guests pose, on the same terms and for the same reason: the
+            // editor is opened on a *named* fixture event — the Tuesday 10:00
+            // "Design review", which already has two guests on it so the panel
+            // shows both halves of the control at once — and the picker is
+            // posed **with a query typed and its list down**. An editor
+            // photographed with an empty field would say nothing about whether
+            // searching, ranking or the invite row work.
+            //
+            // `"a"` and not `"mi"`: one letter matches almost everybody, so
+            // the picture carries a full dropdown with the prefix match on top
+            // (Amina) and the word-prefix one under it (Alvarez), which is the
+            // ranking rule made visible.
+            editorId: root.calState === "guests" ? "evt-3" : ""
+            editorQuery: root.calState === "guests" ? "a" : ""
+            editorListOpen: root.calState === "guests"
         }
 
         onLoaded: {

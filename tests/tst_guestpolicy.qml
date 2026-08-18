@@ -453,4 +453,71 @@ TestCase {
         compare(orphan.soloName, "ghost");
     }
 
+    // --- what the picker offers, and where the arrows go ---------------------
+
+    function test_the_offer_is_the_search_with_a_row_a_surface_can_draw() {
+        const rows = guests.offer(contacts, "mi", []);
+        compare(rows.length, 1);
+        compare(rows[0].id, "mira");
+        compare(rows[0].label, "Mira Okonkwo");
+        compare(rows[0].initials, "MO");
+        compare(rows[0].colour, "#7aa2f7");
+        compare(rows[0].invite, false);
+    }
+
+    function test_prefix_outranks_substring_in_the_offer() {
+        // "mi" starts Mira's name and sits inside Amina's, so Mira is first —
+        // the ranking the picker exists to show.
+        const wider = contacts.concat([
+            { id: "amina", name: "Amina Sultan", email: "amina@example.org", colour: "#b4a0e0" }
+        ]);
+        const rows = guests.offer(wider, "mi", []);
+        compare(rows.length, 2);
+        compare(rows[0].id, "mira");
+        compare(rows[1].id, "amina");
+    }
+
+    function test_an_address_nobody_owns_is_offered_as_an_invite_last() {
+        const rows = guests.offer(contacts, "fern@example.org", []);
+        compare(rows.length, 1);
+        compare(rows[0].id, "fern@example.org");
+        compare(rows[0].label, "Invite fern@example.org");
+        compare(rows[0].invite, true);
+        compare(rows[0].initials, "F");
+    }
+
+    function test_an_address_the_list_already_has_is_not_an_invite() {
+        const rows = guests.offer(contacts, "mira@example.org", []);
+        compare(rows.length, 1);
+        compare(rows[0].id, "mira");
+        compare(rows[0].invite, false);
+    }
+
+    function test_the_offer_drops_people_already_invited() {
+        compare(guests.offer(contacts, "mi", ["mira"]).length, 0);
+        // Including a stranger who was invited a keystroke ago, so a picker
+        // whose field still holds the address does not offer them twice.
+        compare(guests.offer(contacts, "fern@example.org",
+                             ["fern@example.org"]).length, 0);
+    }
+
+    function test_an_empty_query_offers_everybody_it_can() {
+        compare(guests.offer(contacts, "", []).length, contacts.length);
+        compare(guests.offer(null, "", []).length, 0);
+    }
+
+    function test_the_highlight_wraps_at_both_ends() {
+        compare(guests.moveSelection(0, 3, 1), 1);
+        compare(guests.moveSelection(2, 3, 1), 0);
+        compare(guests.moveSelection(0, 3, -1), 2);
+        compare(guests.moveSelection(1, 3, -1), 0);
+    }
+
+    function test_a_highlight_with_no_rows_is_the_first_row() {
+        compare(guests.moveSelection(4, 0, 1), 0);
+        compare(guests.moveSelection(0, 0, -1), 0);
+        compare(guests.moveSelection(null, 3, null), 0);
+        compare(guests.moveSelection(9, 3, 0), 0);
+    }
+
 }

@@ -316,27 +316,19 @@ Item {
                 Repeater {
                     model: (guestRow.visible && chip.guests) ? chip.guests.shown : []
 
-                    delegate: Rectangle {
+                    // 18 across, and `CalendarTokens.monogramPt` floors the
+                    // type at 9.5 for it: two glyphs at 8.5 are 9px of type
+                    // inside an 18px disc — the disc reads and the letters do
+                    // not, which is the worst of both.
+                    delegate: AvatarChip {
                         id: avatar
 
                         required property var modelData
 
-                        width: 18
-                        height: 18
-                        radius: Theme.radiusFull
-                        color: CalendarTokens.monogramFill(chip.hue)
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: avatar.modelData.initials
-                            color: CalendarTokens.monogramInk(chip.hue)
-                            font.family: Theme.fontUi
-                            // 9.5 and not 8.5. Two glyphs at 8.5 are 9px of
-                            // type inside an 18px disc — the disc reads and the
-                            // letters do not, which is the worst of both.
-                            font.pointSize: Theme.pt(9.5)
-                            font.weight: Theme.weightMedium
-                        }
+                        size: 18
+                        initials: avatar.modelData.initials
+                        fill: CalendarTokens.monogramFill(chip.hue)
+                        ink: CalendarTokens.monogramInk(chip.hue)
                     }
                 }
 

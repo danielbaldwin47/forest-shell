@@ -30,6 +30,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
+import qs.Services.Calendar
 
 Item {
     id: popover
@@ -53,6 +54,8 @@ Item {
 
     signal renamed(string title)
     signal recoloured(string colour)
+    signal guestAdded(string contactId)
+    signal guestRemoved(string contactId)
     signal discarded
     signal dismissed(string reason)
 
@@ -255,30 +258,27 @@ Item {
                 }
             }
 
-            /// Guests. The field is here and the picker is not: the piece that
-            /// wires it is the next one, and a panel that grew a row later
-            /// would be a panel whose height nobody had judged. It reads as an
-            /// empty field, which is what it is.
-            Item {
+            /// Guests — the real picker, the same one the event editor holds.
+            /// A quick-create panel that could only *say* "Add guests" was a
+            /// field that did nothing when it was typed into, which is worse
+            /// than not being there.
+            ///
+            /// Its results list pushes the buttons below it down rather than
+            /// floating over them: the panel's height is what
+            /// `CreatePolicy.popoverAnchor` clamps against, so a list that grew
+            /// outside that height would be a list hanging off the window.
+            GuestPicker {
+                id: guestPicker
+
                 width: parent.width
-                height: 24
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "Add guests"
-                    color: Theme.textMuted
-                    font.family: Theme.fontUi
-                    font.pointSize: Theme.pt(12.5)
-                }
+                eventId: popover.eventId
+                contacts: CalendarStore.contacts
+                guestIds: popover.event && popover.event.guests
+                          ? popover.event.guests : []
 
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 1
-                    color: Qt.alpha(Theme.borderSubtle, 0.6)
-                }
+                onAdded: contactId => popover.guestAdded(contactId)
+                onRemoved: contactId => popover.guestRemoved(contactId)
             }
 
             /// Discard on the left, Save on the right — destructive away from

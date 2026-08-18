@@ -280,9 +280,16 @@ ipc guestAdd "$NEXT_ID" mira > /dev/null
 expect_since "$mark" "calendar: guest add $NEXT_ID mira" \
     'guestAdd invites someone to an event that exists'
 
+# Twice is not twice. The store says so out loud rather than going quiet: a
+# silent second call is indistinguishable from a call that never arrived, and
+# the `(already)` suffix is what lets this check assert the party did not grow
+# *and* that the verb was heard.
 mark=$(log_lines)
 ipc guestAdd "$NEXT_ID" mira > /dev/null
-refute_since "$mark" 'calendar: guest add' 'inviting the same person twice logs nothing'
+expect_since "$mark" "calendar: guest add $NEXT_ID mira \\(already\\)" \
+    'inviting the same person twice says so and adds nobody'
+refute_since "$mark" "calendar: guest add $NEXT_ID mira$" \
+    'and does not log a second plain add'
 
 mark=$(log_lines)
 ipc deleteEvent evt-1 > /dev/null
@@ -632,6 +639,135 @@ mark=$(log_lines)
 key_until escape "$mark" 'calendar: window closed \(escape\)' \
     'a second Escape, with nothing over the grid, closes the window'
 
+# --- 10c. the guest picker ----------------------------------------------------
+#
+# The one claim here that no other seam can make: that a *keystroke* reaches the
+# picker's field, that the field searches, and that Enter turns the highlighted
+# row into a guest on the event. The ranking itself is arithmetic and is tested
+# at the first seam (`tests/tst_guestpolicy.qml`); the picture is seam 3's
+# (`--cal-state guests`). What is left is the wiring between a key and a store.
+#
+# `evt-11` and not one of the busy Tuesday's events, for one reason: it has no
+# guests. The picker excludes people who are already invited, so an event that
+# already had Mira on it would answer the query below with one row fewer and the
+# count in the log line would be measuring the fixture rather than the search.
+#
+# The window was closed by the Escape check above, so `openEvent` reopens it —
+# which is a claim worth having anyway: the panel is owned by the singleton and
+# not by the view, so naming an event is enough to get a window *and* a panel.
+mark=$(log_lines)
+ipc open > /dev/null
+expect_since "$mark" 'calendar: window opened' 'the window comes back for the picker'
+
+# The keyboard is warmed up *before* the panel exists, not after. A newly mapped
+# toplevel does not hold the compositor's keyboard focus for the first moment of
+# its life, and the one key this section cannot poll on is Tab — it moves a
+# caret and logs nothing, so a Tab that arrived early is indistinguishable from
+# one that never arrived. `Ctrl+K` is the same keyboard and does log, so it is
+# what establishes that keys are landing; the panel is opened afterwards and
+# takes the caret itself.
+mark=$(log_lines)
+key_mod_until "$mark" 'calendar: command menu open' \
+    'the reopened window is taking keys at all' 'CTRL:k'
+mark=$(log_lines)
+nested_key escape
+expect_since "$mark" 'calendar: command menu closed' 'and the menu goes away again'
+
+mark=$(log_lines)
+ipc goto 2026-08-23 > /dev/null
+ipc openEvent evt-11 > /dev/null
+expect_since "$mark" 'calendar: open evt-11' 'openEvent selects and opens the event'
+expect_since "$mark" 'calendar: editor open evt-11' 'and the editor panel comes up on it'
+
+# Tab and not a letter. The editor spells its focus order out
+# (`KeyNavigation.tab: guestPicker.fieldItem`) precisely so that "focus the
+# guests field" is one key with one answer rather than whatever the scene
+# graph's own traversal happens to be — and so this harness does not need a
+# shortcut invented for it. A bare `g` was the alternative and was rejected:
+# with a caret in the title field it is a letter, not a command.
+#
+# "mi" finds two people and *ranks* them: Mira by the front of her name, Amina
+# by the middle of hers. Two results is the whole point of the query — one would
+# not tell a search apart from a list that ignores what is typed into it.
+#
+# Typed inside a retry loop, and the retry starts by rebuilding the panel rather
+# than by clearing the field. The first keystroke after a focus change is the
+# one the compositor drops (measured here: `m` went missing and the field
+# searched for `i`), and a half-typed query cannot be corrected blind — a second
+# `m` on a field holding `i` is `im`, not `mi`. `goto` closes the panel and
+# `openEvent` opens a fresh one, so every attempt starts from an empty field and
+# the assertion below is on the query, not on the typing.
+guest_search='calendar: guest search "mi" 2 results'
+guest_typed=1
+for _ in $(seq 1 6); do
+    mark=$(log_lines)
+    ipc goto 2026-08-23 > /dev/null
+    ipc openEvent evt-11 > /dev/null
+    sleep 0.4
+    nested_key tab
+    sleep 0.3
+    for letter in m i; do
+        nested_key "$letter"
+        sleep 0.25
+    done
+    sleep 0.3
+    if since "$mark" | grep -qaE "$guest_search"; then
+        guest_typed=0
+        break
+    fi
+done
+if (( guest_typed == 0 )); then
+    nested_pass 'typing in the guests field searches the contacts as it goes'
+else
+    nested_fail "typing in the guests field never logged /$guest_search/"
+fi
+
+mark=$(log_lines)
+nested_key return
+expect_since "$mark" 'calendar: guest add evt-11 mira' \
+    'Enter invites the highlighted row — the prefix match, not the substring one'
+
+# And the same person again, over IPC this time, which is the path the picker
+# itself cannot take (it hides everybody already invited). One line, no second
+# guest.
+mark=$(log_lines)
+ipc guestAdd evt-11 mira > /dev/null
+expect_since "$mark" 'calendar: guest add evt-11 mira \(already\)' \
+    'a duplicate arriving over IPC is refused out loud'
+
+# The store said it happened; this says a later run would read it back. Polled,
+# because the write is debounced by 250 ms and restarts on every edit — the same
+# argument section 11 makes below, made here because the shell is still up.
+guest_landed=1
+for _ in $(seq 1 50); do
+    if python3 - "$EVENTS" <<'PYEOF'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+event = next((e for e in data.get("events", []) if e.get("id") == "evt-11"), None)
+sys.exit(0 if event and "mira" in event.get("guests", []) else 1)
+PYEOF
+    then
+        guest_landed=0
+        break
+    fi
+    sleep 0.1
+done
+if (( guest_landed == 0 )); then
+    nested_pass 'the guest the keyboard added reaches events.json'
+else
+    nested_fail "evt-11 in $EVENTS never gained the guest the picker added"
+fi
+
+# Put the panel away, so the window is back to a bare grid for the checks that
+# follow — an editor left open would hold the caret and eat the next Escape.
+mark=$(log_lines)
+nested_key escape
+expect_since "$mark" 'calendar: editor closed' 'Escape closes the panel'
+refute_since "$mark" 'calendar: window closed' 'and leaves the window under it standing'
+
 # --- 11. the file, after the shell has gone ----------------------------------
 #
 # Last, and every one of them waits rather than looks: the write is debounced by
@@ -746,9 +882,12 @@ fi
 # Create, move and resize are driven for real in section 10b above. What is
 # still IPC-only:
 #
-#   TODO (piece i, guests): open an event, type into the guest picker, click a
-#       result, assert `calendar: guest add evt-N <contact>`. The contacts
-#       fixture is already seeded above for exactly this.
+#   TODO (guests, the pointer half): section 10c drives the picker from the
+#       keyboard, which is the half that proves the field searches. A *click*
+#       on a result row is still unexercised — and per #187 a click is not the
+#       same seam as a key, so it is worth its own check once the panel's
+#       geometry is readable from outside the way `WeekView.geometryLine`
+#       makes the grid's.
 #
 # It is a `nested_click` plus one `expect_since`. It cannot be a screenshot:
 # this seam never presents.

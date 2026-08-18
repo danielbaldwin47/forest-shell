@@ -418,6 +418,33 @@ Item {
         Logger.log("calendar", "quick-create open " + id);
     }
 
+    /// Where a chip is, in this grid's own coordinates, so something outside
+    /// the grid can anchor a panel to it. A zero-width rect means "not on
+    /// screen" — the event is on another day, or scrolled past — and whoever
+    /// asked is expected to fall back rather than to place a panel on 0,0.
+    ///
+    /// It exists because the event editor is hosted at the *window*: it opens
+    /// over the month grid too, and a panel that only the week grid could place
+    /// would be a panel the month view had to grow its own copy of. The chip
+    /// rectangle is still a thing only this file knows — column x, column
+    /// width, scroll offset, the band's height — so this hands out the answer
+    /// rather than the four numbers behind it.
+    function chipAnchor(id: string): rect {
+        const event = view.eventById(id);
+        if (!event)
+            return Qt.rect(0, 0, 0, 0);
+        const dayIso = view.grid.time.dayOf(event.start);
+        const col = view.columnIndexOf(dayIso);
+        const box = view.grid.eventRect(event.start, event.end, dayIso, view.hourRow);
+        if (col < 0 || !box)
+            return Qt.rect(0, 0, 0, 0);
+        return Qt.rect(
+            view.columnX(col) + view.colInset,
+            box.y - body.contentY + body.y,
+            Math.max(0, view.columnWidthFor(col) - view.colInset * 2),
+            Math.max(CalendarTokens.chipMinH, box.h));
+    }
+
     function closeQuickCreate(reason: string): void {
         if (!view.quickCreateId)
             return;
@@ -1432,6 +1459,8 @@ Item {
 
             onRenamed: title => CalendarStore.renameEvent(view.quickCreateId, title)
             onRecoloured: colour => CalendarStore.recolourEvent(view.quickCreateId, colour)
+            onGuestAdded: contactId => CalendarStore.addGuest(view.quickCreateId, contactId)
+            onGuestRemoved: contactId => CalendarStore.removeGuest(view.quickCreateId, contactId)
             onDiscarded: CalendarStore.deleteEvent(view.quickCreateId)
             onDismissed: reason => view.closeQuickCreate(reason)
         }

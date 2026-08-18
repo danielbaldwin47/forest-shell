@@ -84,7 +84,21 @@ Singleton {
     /// The sidebar, and the toolbar over the grid. Both are chrome rather than
     /// grid, and both are here so the one window that lays them out does not
     /// carry the only copy of the number.
-    readonly property int sidebarW: 248
+    ///
+    /// **The sidebar's width is arithmetic, not taste.** It was 248, which does
+    /// not divide by seven, so the mini-month — the widest block in the column
+    /// and the thing every other left edge is squared against — was centred on
+    /// a 5px remainder and started 3px right of the labels hung from the same
+    /// inset. Three left edges in one column, which is what a reader counts
+    /// before they can say why the column looks slipped.
+    ///
+    /// So the column is sized to hold the map exactly: seven `miniDayW` cells,
+    /// one `sidebarPad` either side, and the hairline that closes the panel.
+    /// Every left edge in the sidebar is then `sidebarPad` by construction and
+    /// the map's two facing margins are equal without anything being centred.
+    readonly property int miniDayW: 30
+    readonly property int sidebarPad: 19
+    readonly property int sidebarW: 7 * tokens.miniDayW + tokens.sidebarPad * 2 + 1
     readonly property int toolbarH: 52
 
     /// The chrome controls along the toolbar: chevrons, Today, and each
@@ -113,6 +127,48 @@ Singleton {
     /// by a pixel and a half per row reads as a column that is not aligned. It
     /// is also what makes a live stamp jitter as the minute rolls over.
     readonly property var tabularFigures: ({ "tnum": 1, "lnum": 1 })
+
+    // --- the two planes -------------------------------------------------------
+
+    /// The chrome: the sidebar down the left and the toolbar across the top,
+    /// one L-shaped plane around `Theme.bgBase`, which is the canvas the grid
+    /// is drawn on.
+    ///
+    /// **This is the window's structure, and for four rounds hairlines were
+    /// carrying all of it.** The sidebar was `Theme.surface` (`#141b17`) beside
+    /// a `bgBase` canvas (`#0b100d`) under a `bgBase` toolbar — measured off
+    /// the capture, three zones inside 4% of each other, so the only thing
+    /// saying *panel here, page there* was a 1px rule. A window whose zones can
+    /// only be told apart by their borders does not read as a sidebar next to a
+    /// canvas; it reads as one flat plane with lines ruled on it.
+    ///
+    /// So the chrome takes a step the eye can measure without a side-by-side:
+    /// `surfaceRaised` is 8 points of L* over the canvas where `surface` was 4,
+    /// and the direction is the one every dark interface uses — the document is
+    /// the deepest thing on screen and the furniture floats over it. In light
+    /// the direction inverts, because paper is already near the ceiling: the
+    /// chrome sinks past `bgSunken` toward `borderStrong`'s slate, which is the
+    /// same 8-10 points measured downward.
+    ///
+    /// The canvas itself is deliberately untouched by this. Every chip fill in
+    /// the table below is solved for ≥2.2:1 against `bgBase`, so moving the
+    /// page would move forty-eight colours with it; moving the furniture moves
+    /// two rectangles.
+    readonly property color chromeGround: Theme.dark
+        ? Theme.surfaceRaised
+        : Qt.tint(Theme.bgSunken, Qt.alpha(Theme.borderStrong, 0.20))
+
+    /// A row or a button under the pointer *on that plane*.
+    ///
+    /// `Theme.surfaceOverlay` is the shell's hover and it stops working here
+    /// the moment the chrome lifts: overlay is one step above `surfaceRaised`,
+    /// which the chrome now is, so every hover in the sidebar and the toolbar
+    /// became a wash nobody can see. A hover is a difference from its own
+    /// ground, so it is stated as one rather than borrowed from a ladder whose
+    /// rungs this plane has already climbed.
+    readonly property color chromeHover: Theme.dark
+        ? Qt.tint(Theme.surfaceOverlay, Qt.alpha(Theme.textPrimary, 0.07))
+        : Qt.darker(tokens.chromeGround, 1.06)
 
     // --- elevation ------------------------------------------------------------
     //
@@ -147,84 +203,69 @@ Singleton {
     /// The weekend column's wash, and **the one place this file departs from
     /// DESIGN-SPEC.md's literal value.**
     ///
-    /// The spec says `Theme.bgSunken` at 0.5. In light mode that is right and
-    /// it is what is used: `bgSunken` sits a 1.12:1 step under `bgBase`, so
-    /// half of it is a wash you can see without looking at it, which is the
-    /// whole job — the week's shape has to be readable peripherally.
+    /// The spec says `Theme.bgSunken` at 0.5, and in light mode that is exactly
+    /// right: `bgSunken` sits a 1.12:1 step under paper, so half of it is a
+    /// wash you can see without looking at it.
     ///
-    /// In dark mode the same recipe is invisible, and measurably so: `bgBase`
-    /// is `#0b100d` and `bgSunken` is `#070a08`, a 1.04:1 step, and half of it
-    /// is 1.02:1. It was drawn, captured and could not be told from a weekday.
-    /// You cannot sink below a canvas that is already nearly black, so the dark
-    /// wash *lifts* instead — `Theme.surface`, the panel colour, at low alpha.
-    /// Same intent, opposite direction, because the direction was never the
-    /// point.
-    /// The measured value moved once more. `Theme.surface` at 0.45 over
-    /// `bgBase` is 1.05:1 — captured, and still indistinguishable from a
-    /// weekday at arm's length. The wash lifts to `surfaceOverlay` (`#243029`)
-    /// at 0.55, which is 1.28:1: the same step light mode gets from `bgSunken`,
-    /// and the first value at which Sat/Sun read as a pair without the columns
-    /// looking disabled.
-    /// And once more, for the same reason and off the same measurement. 0.55
-    /// is 1.28:1 and reads as a pair *when you look for it*; the note that came
-    /// back off the picture was that Saturday and Sunday were indistinguishable
-    /// from a weekday, which is what a wash you have to look for means. 0.8 is
-    /// 1.44:1 — still under the 1.6:1 at which a column starts reading as
-    /// disabled rather than as quiet, and the first value that lands without
-    /// being hunted for.
+    /// In dark mode you cannot sink below a canvas that is already `#0b100d`,
+    /// so the dark wash *lifts* — but only barely, and that limit is the
+    /// correction this pass makes. Four rounds of measurement chased visibility
+    /// upward (`surface` 0.45 → `surfaceOverlay` 0.55 → 0.8) and each step
+    /// bought the weekend legibility by making the *canvas* lighter than the
+    /// `Theme.surface` sidebar beside it. That inverts the surface hierarchy of
+    /// the whole shell: a panel is raised above a canvas, and a grid whose
+    /// quietest columns outrank the panel reads as two windows, not one.
     ///
-    /// The header carries a second, independent cue at the same time: a weekend
-    /// numeral is `textSecondary` where a weekday's is `textPrimary`. Two weak
-    /// signals that agree beat one strong one, and neither has to shout.
+    /// So the ceiling is the chrome: **no wash on this grid may be lighter than
+    /// `chromeGround`.** That ceiling used to be `Theme.surface` and it sat 4
+    /// points of L* over the canvas, which left the washes fighting for two of
+    /// them; now that the chrome has stepped up to 13.6 there are eight points
+    /// of room under it, and the weekend can take a share of them. `surface` at
+    /// 0.55 composites to L* 7.7 against a weekday's 5.3 — a lift you can see
+    /// without hunting for it and still plainly below the panel beside it, with
+    /// the header's second cue (a weekend numeral is `textSecondary` where a
+    /// weekday's is `textPrimary`) agreeing with it.
     readonly property color weekendWash: Theme.dark
-        ? Qt.alpha(Theme.surfaceOverlay, 0.8)
-        : Qt.alpha(Theme.bgSunken, 0.9)
+        ? Qt.alpha(Theme.surface, 0.55)
+        : Qt.alpha(Theme.bgSunken, 0.5)
 
     /// Today's column. A hue against a neutral rather than a lightness against
     /// a lightness, so one alpha works in both modes.
-    /// 0.11 and not 0.05, because the weekend wash moved: measured off the
-    /// capture, today at 0.05 was *dimmer* than a Saturday, which inverts the
-    /// two signals. Today has to be at least as loud as the column it may
-    /// itself be.
-    /// 0.17 now, and it moves whenever the weekend wash does, because the one
-    /// thing that must stay true is the *order*: today is louder than a
-    /// weekend, a weekend is louder than a weekday. Measured off the capture at
-    /// 0.11 against the stronger weekend wash, today came out 1.19:1 where
-    /// Saturday was 1.28 — today reading as the quietest column on the grid,
-    /// which is the signal exactly backwards.
-    /// 0.24 now, and this time the measurement is of the *pair* rather than of
-    /// either wash against the page. At 0.17 today came out rgb(28,45,44) and a
-    /// weekend rgb(31,41,36): two different hues at 1.05:1 of each other, which
-    /// is two colours doing one job — today was being carried entirely by the
-    /// teal pill in its header, and the wash under it was decoration. 0.24 puts
-    /// today at 1.23:1 over a weekend and 1.59:1 over a weekday, so the order
-    /// the two signals are supposed to state — today loudest, weekend next,
-    /// weekday quietest — is now a step you can see rather than one you can
-    /// only compute.
-    /// 0.30 now, and the measurement that moved it is a *value* one rather than
-    /// a colour one. At 0.24 today came out rgb(35,58,57) against a weekend's
-    /// rgb(31,42,36) — 1.23:1, which two hues can carry and one greyscale cannot:
-    /// desaturate the capture and today and Saturday are the same wash, so a
-    /// value-blind reader is left with the header pill alone. 0.30 is 1.42:1 over
-    /// a weekend and 1.83:1 over a weekday, which survives the desaturation. The
-    /// light alpha stays lower because there both washes move the same direction
-    /// — down, off paper — and 0.30 of a dark teal on paper is a selection, not a
-    /// wash.
-    readonly property color todayWash:
-        Qt.alpha(Theme.accentPrimary, Theme.dark ? 0.30 : 0.20)
+    ///
+    /// **0.10, which is the number the room allows rather than the number the
+    /// weekend forced.** Each earlier rise (0.11 → 0.17 → 0.24 → 0.30) was
+    /// answering a weekend wash that was itself too loud, and 0.30 of teal
+    /// landed at rgb(41,68,68) — lighter than the sidebar and saturated enough
+    /// to compete with the chips over it. The retreat to the spec's 0.05 fixed
+    /// the order and cost the column its visibility, because the ceiling then
+    /// was `Theme.surface`, four points of L* over the page.
+    ///
+    /// With the chrome lifted to `chromeGround` the ladder has somewhere to
+    /// stand: today composites to L* 11.5 over a weekend's 7.7 and a weekday's
+    /// 5.3, all three under the chrome's 13.6. Today keeps the hue, which is
+    /// what makes it findable at a glance; the *marker* for today is the filled
+    /// disc in the column header, and a wash's job is to point at that rather
+    /// than to replace it.
+    readonly property color todayWash: Qt.alpha(Theme.accentPrimary, 0.10)
 
     /// The mini-month's band — the run of days the grid beside it is showing.
     ///
     /// The spec said `surfaceOverlay`, and measured on the sidebar's own ground
-    /// that is #1E2B26 on #141B17: a step of about 1.2:1, which at arm's length
+    /// that is #243029 on #1c2621: a step of about 1.14:1, which at arm's length
     /// disappears entirely and leaves "which week am I in" carried by the 20px
     /// today dot alone. It is the same mistake the today column wash made
     /// before it moved to `todayWash`, and it takes the same fix — tint the
     /// ground toward the accent rather than lifting it toward grey, so the band
     /// gains hue as well as value and survives a desaturated read.
     ///
-    /// The hairline is what stops it reading as a lit *cell* row: a filled
-    /// stadium with a defined edge is a selection, an undrawn one is a smudge.
+    /// **One value, not a fill plus a stroke of nearly the same value.** The
+    /// band carried both for a round, on the argument that an edge is what
+    /// stops a wash reading as a smudge. At 0.45 fill under a 0.90 hairline of
+    /// the *same* hue the edge was a sixteenth of the capsule's area doing a
+    /// job the fill could do by being one step louder — visible only as
+    /// fussiness, a stadium drawn twice. So the stroke is gone and the fill
+    /// carries it at 0.55, which is the same total ink with one edge instead of
+    /// two.
     ///
     /// **The hue is `borderStrong`, not the accent, and that is the second
     /// correction.** Tinting toward `accentPrimary` fixed the visibility and
@@ -236,9 +277,54 @@ Singleton {
     /// wash was chosen for, while leaving saturation to mean exactly one thing
     /// in this grid: today.
     readonly property color bandFill:
-        Qt.alpha(Theme.borderStrong, Theme.dark ? 0.45 : 0.22)
-    readonly property color bandBorder:
-        Qt.alpha(Theme.borderStrong, Theme.dark ? 0.90 : 0.55)
+        Qt.alpha(Theme.borderStrong, Theme.dark ? 0.55 : 0.28)
+
+    // --- the toolbar's three ranks ---------------------------------------------
+
+    /// The selected segment of the view switcher.
+    ///
+    /// The switcher is the one control in this bar that answers a *question*
+    /// (which scale am I in) rather than offering an action, and it answers it
+    /// by lifting one tile. That only works if the tile is plainly the lightest
+    /// thing in the bar: at `surfaceOverlay` it was two steps over the resting
+    /// buttons beside it, close enough that a glance read the whole switcher as
+    /// unselected — three labels in a box.
+    ///
+    /// So the thumb is taken past every other surface in the window rather than
+    /// borrowed from the ladder: `surfaceOverlay` carried 14% of the way to
+    /// `textPrimary` lands at about #3f4a43 in dark, five steps clear of the
+    /// `bgSunken` track under it and two clear of `chromeGround`, which is the
+    /// plane the whole bar rests on. In light the roles are already the right
+    /// way round, so the thumb is simply `surfaceRaised` (white) in a sunken
+    /// track.
+    readonly property color switcherThumb: Theme.dark
+        ? Qt.tint(Theme.surfaceOverlay, Qt.alpha(Theme.textPrimary, 0.14))
+        : Theme.surfaceRaised
+
+    /// The create button's field and the glyph on it — the one coloured fill
+    /// in the chrome.
+    ///
+    /// It was `accentPrimary`, and measured off the capture that made it the
+    /// loudest object in the window: 900px² of `#6fbec4` in a bar that holds
+    /// nothing else saturated, while the chevrons beside it — pressed ten times
+    /// as often and undone by each other — had no drawn box at all. Weight
+    /// should follow how often a hand reaches for a thing, and that ordering
+    /// was upside down at both ends.
+    ///
+    /// `accentDeep` is the same teal at the bottom of its range: still the only
+    /// coloured field in the chrome and still the only control here that
+    /// *makes* something, no longer brighter than the day it points at. Light
+    /// mode reaches the same ink from the other side — its `accentPrimary` is
+    /// that deep teal, and its `accentDeep` is a pale wash no glyph survives.
+    readonly property color createFill: Theme.dark ? Theme.accentDeep : Theme.accentPrimary
+    readonly property color createInk: Theme.dark ? Theme.textPrimary : Theme.bgBase
+
+    /// Hover for that field: brighter than its rest state, which is a direction
+    /// rather than a value — the deep teal sits on opposite sides of its ground
+    /// in the two modes.
+    readonly property color accentHover: Theme.dark
+        ? Qt.lighter(tokens.createFill, 1.25)
+        : Qt.darker(tokens.createFill, 1.12)
 
     // --- the hues -------------------------------------------------------------
 

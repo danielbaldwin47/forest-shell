@@ -52,26 +52,37 @@ Item {
     readonly property var grid: mini.policy.month.grid(mini.displayIso, mini.firstDay, mini.todayIso)
     readonly property var letters: mini.policy.initials(mini.firstDay)
 
-    /// A whole number of pixels per column: 248 of sidebar less two `space4`
-    /// pads does not divide by seven, and a fractional column width puts the
-    /// band's rounded end half a pixel inside the last cell on some rows and
-    /// outside it on others.
+    /// A whole number of pixels per column. The sidebar is now sized to hold
+    /// exactly seven of `CalendarTokens.miniDayW` between its two pads, so this
+    /// divides — but the floor stays, because a fractional column width puts
+    /// the band's rounded end half a pixel inside the last cell on some rows
+    /// and outside it on others, and a map that is handed an odd width should
+    /// misplace a pixel at the edge rather than at every joint.
     readonly property int dayW: Math.floor(mini.width / 7)
-    readonly property int dayH: 30
+    readonly property int dayH: CalendarTokens.miniDayW
 
-    /// The remainder is split between the two edges rather than dumped on the
-    /// right, and that is a correction. Left-aligning the grid put its first
-    /// day circle 19px from the sidebar's edge and its last 25px from the
-    /// divider, because two shortfalls stack on the right: the fractional
-    /// column remainder, plus the 2px the circle is inset inside its own cell.
-    /// A block whose two margins differ by a quarter reads as slipped, and the
-    /// mini-month is the largest block in this column — it is what the eye
-    /// squares the sidebar against.
+    /// How tall the heading band is, and where inside it the month name's
+    /// baseline sits (`-1` centres it). Both are the caller's, because the
+    /// sidebar spends its own chrome band on this heading so that it lands on
+    /// the toolbar title's baseline across the divider.
+    property int headingH: 28
+    property real headingBaseline: -1
+
+    /// **Zero at the width the sidebar hands it, and that is the point.**
     ///
-    /// What the left rail actually costs is `gridX` pixels of disagreement
-    /// with the labels hung from the body's left edge — 3 at this width, less
-    /// than the 2px the circles are already inset by, and invisible where a
-    /// 6px asymmetry between two facing margins is not.
+    /// This used to centre a 5px remainder, which bought equal facing margins
+    /// at the price of a third left edge in the column: the grid started
+    /// `gridX` px right of the `CALENDARS` and `UPCOMING` labels hung from the
+    /// body's own inset, and the week band — the largest coloured shape in the
+    /// sidebar — started there with it. Two edges 3px apart read as one edge
+    /// drawn badly.
+    ///
+    /// The fix is upstream, in `CalendarTokens.sidebarW`: the column is sized
+    /// to hold seven whole cells between two pads, so the remainder is zero and
+    /// the map, the labels and the band all begin at `sidebarPad`. The
+    /// expression stays because it is what keeps that true at any width — a
+    /// sidebar someone widens later centres its remainder instead of dumping it
+    /// on the right.
     readonly property int gridW: mini.dayW * 7
     readonly property int gridX: Math.round((mini.width - mini.gridW) / 2)
 
@@ -85,12 +96,20 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: 28
+        height: mini.headingH
 
+        /// Centred by default, and pinned to a baseline when the caller gives
+        /// one. The sidebar hands it the toolbar title's baseline: the two
+        /// headings sit either side of a hairline divider, and two lines of
+        /// type at the same size half a leading apart read as a mistake in a
+        /// way that a 4px difference in *fill* height never does.
         Text {
+            id: headingText
+
             anchors.left: parent.left
             anchors.leftMargin: mini.gridX
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenter: mini.headingBaseline < 0 ? parent.verticalCenter : undefined
+            y: mini.headingBaseline < 0 ? 0 : mini.headingBaseline - headingText.baselineOffset
             text: mini.policy.format.miniMonthTitle(mini.displayIso)
             color: Theme.textPrimary
             font.family: Theme.fontUi
@@ -101,7 +120,7 @@ Item {
         Row {
             anchors.right: parent.right
             anchors.rightMargin: mini.gridX
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenter: headingText.verticalCenter
             spacing: Theme.space1
 
             Stepper {
@@ -193,9 +212,10 @@ Item {
                            : 0
                     height: mini.dayH
                     radius: Theme.radiusFull
+                    // One value, no stroke — `CalendarTokens.bandFill` carries
+                    // the argument for why the hairline that used to ride on
+                    // top of this fill was fussiness rather than definition.
                     color: CalendarTokens.bandFill
-                    border.width: 1
-                    border.color: CalendarTokens.bandBorder
                 }
 
                 Row {
@@ -225,14 +245,28 @@ Item {
                             width: mini.dayW
                             height: mini.dayH
 
+                            /// **24 — between the 26 that outranked the grid's
+                            /// own today mark and the 20 that strangled the
+                            /// numeral.** The mini-month's today is the
+                            /// *secondary* mark: the grid beside it draws today
+                            /// as a 22px disc in a 200px cell, so a 26px disc in
+                            /// a 30px cell had the weaker marker as the louder
+                            /// object. 20 fixed the order and broke the disc: a
+                            /// two-digit numeral at 13pt is ~15px wide, which
+                            /// left 2–3px of ring either side — a circle drawn
+                            /// tight against its own contents reads as a
+                            /// mistake, not as a mark. 24 gives the numeral
+                            /// ~4.5px of rim all round, and still sits under the
+                            /// grid's 22px disc in a cell six times its area.
                             Rectangle {
                                 anchors.centerIn: parent
-                                width: 26
-                                height: 26
+                                width: 24
+                                height: 24
                                 radius: Theme.radiusFull
                                 color: cell.modelData.isToday
                                        ? Theme.accentPrimary
-                                       : (dayPointer.containsMouse ? Theme.surfaceRaised : "transparent")
+                                       : (dayPointer.containsMouse
+                                          ? CalendarTokens.chromeHover : "transparent")
                                 border.width: cell.anchored ? 1 : 0
                                 border.color: Theme.borderStrong
                             }
@@ -240,16 +274,16 @@ Item {
                             /// **Out-of-month days are dimmed by colour, never
                             /// by opacity.** `textMuted` at 0.45 — which is
                             /// what the spec asked for — composites to
-                            /// rgb(67,79,73) on this panel's rgb(20,27,23):
-                            /// **2.05:1**, which is not a quiet numeral but an
+                            /// rgb(72,85,78) on this panel's rgb(28,38,33):
+                            /// **2.0:1**, which is not a quiet numeral but an
                             /// absent one. The rows either side of the month
                             /// went blank, and a mini-month whose first and
                             /// last rows are empty stops reading as a
                             /// continuous strip of days.
                             ///
-                            /// At full strength `textMuted` is 5.1:1 against
+                            /// At full strength `textMuted` is 4.6:1 against
                             /// the same panel where an in-month numeral is
-                            /// 8.5:1 — 16 points of L* between them, so the
+                            /// 7.5:1 — 15 points of L* between them, so the
                             /// step is still plainly a step, and both ends of
                             /// it are legible. De-emphasis is a difference the
                             /// eye can measure; dissolving into the ground is
@@ -285,17 +319,25 @@ Item {
         }
     }
 
-    /// A 24x24 stepper — the toolbar's chevron button at a smaller size, and
-    /// wearing the same fill and hairline.
+    /// A 24x24 stepper: a bare glyph with a hit area and a hover wash, one size
+    /// and one value below the toolbar's chevrons.
     ///
-    /// It was a bare glyph on transparent, on the argument that a pair of boxes
-    /// inside a heading would out-shout the month name they belong to. The
-    /// picture disagreed: every other control in this window — the chevrons,
-    /// Today, the create button one band above these — is a bordered box, so
-    /// two undressed glyphs read as decoration rather than as the only pair of
-    /// buttons on the panel, and there is nothing to aim at until the pointer
-    /// is already on them. Shrinking the box from 30 to 24 is the deference the
-    /// heading needed; removing it was deference to the point of hiding.
+    /// **This pair and the toolbar's must not be twins, and for a round they
+    /// were.** Both were bordered boxes with the same two glyphs, 300px apart
+    /// on the same bar, and nothing in either said which one moved the grid —
+    /// the more consequential of the two questions this window asks. The cue
+    /// cannot be position alone, because a mini-month's steppers sit above its
+    /// own grid exactly as the toolbar's sit beside its own title.
+    ///
+    /// So it is size and value: the toolbar's are 30px glyphs at
+    /// `textSecondary` beside a 20pt month title; these are 24px glyphs at
+    /// `textMuted` beside a 14pt one. Two ranks of the same gesture, which is
+    /// what they are — one moves what you are working in, the other moves what
+    /// you are looking up.
+    ///
+    /// The middle pass here was a box, on the argument that an undressed glyph
+    /// gives the pointer nothing to aim at. The hover wash is that target, and
+    /// it costs nothing when the pointer is elsewhere.
     component Stepper: Rectangle {
         id: stepper
 
@@ -306,9 +348,7 @@ Item {
         width: 24
         height: 24
         radius: Theme.radiusSm
-        color: stepPointer.containsMouse ? Theme.surfaceOverlay : Theme.surfaceRaised
-        border.width: 1
-        border.color: Theme.borderSubtle
+        color: stepPointer.containsMouse ? CalendarTokens.chromeHover : "transparent"
 
         Behavior on color {
             enabled: Theme.animateTransforms
@@ -319,7 +359,7 @@ Item {
             anchors.centerIn: parent
             name: stepper.glyph
             size: 14
-            color: Theme.textSecondary
+            color: stepPointer.containsMouse ? Theme.textSecondary : Theme.textMuted
         }
 
         MouseArea {

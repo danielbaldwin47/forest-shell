@@ -353,6 +353,27 @@ FloatingWindow {
 
     property KeyNavPolicy keyNav: KeyNavPolicy {}
     property CreatePolicy createPolicy: CreatePolicy {}
+    property UpcomingPolicy upcomingPolicy: UpcomingPolicy {}
+    property CalendarFormat railFormat: CalendarFormat {}
+
+    /// When one of the sidebar's upcoming rows happens, in as few words as the
+    /// rail has room for: a time alone while the event is today, a weekday in
+    /// front of it once it is not, and the word `All day` where a time would be
+    /// a lie. `UpcomingPolicy` decides *which* events; this decides only how
+    /// the answer is spelled, which is what `CalendarFormat` is for.
+    function upcomingWhen(event: var): string {
+        if (!event || !event.start)
+            return "";
+        const iso = event.start.slice(0, 10);
+        const when = event.allDay
+            ? "All day"
+            : window.railFormat.stampTime(event.start, window.use24);
+        if (window.upcomingPolicy.isSameDay(event, window.nowStamp))
+            return when;
+        const named = window.railFormat.relativeDay(iso, window.todayIso);
+        const day = named || window.railFormat.dayHeader(iso).weekdayFull;
+        return day + " · " + when;
+    }
 
     title: "forest-shell — calendar"
     // Stated rather than assumed: the window exists only while it is open, so
@@ -403,19 +424,29 @@ FloatingWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: CalendarTokens.sidebarW
-            color: Theme.surface
+            // The chrome plane. `CalendarTokens.chromeGround` carries the
+            // measurement: `Theme.surface` beside a `bgBase` canvas was a 4%
+            // step, which is a hairline doing the work of a zone.
+            color: CalendarTokens.chromeGround
 
             /// The sidebar's own share of the chrome band, the same 52 tall as
             /// the toolbar beside it and closed by the same hairline, so the
             /// window opens with one bar across its whole width instead of a
             /// toolbar that stops at a column of empty sidebar.
             ///
-            /// That emptiness was the loudest thing about the first pass: an
-            /// application with nothing above its first heading reads as a
-            /// panel someone cropped out of a bigger window. What belongs there
-            /// is what the window *is* and the one thing it makes — a mark, a
-            /// name, and a create button — which is the same trio Notion puts
-            /// at the top of its own sidebar.
+            /// **What fills it is the mini-month's own heading**, hung from the
+            /// toolbar title's baseline so the two headings read as one line of
+            /// type across the divider. An earlier pass spent the band on a
+            /// mark, a wordmark and a create button — the trio Notion puts
+            /// there — and paid for it twice: the window's one *creating*
+            /// control sat in the column that holds its two *filtering* lists,
+            /// and the month name it displaced landed 30px below the title
+            /// beside it, close enough to be measured against it and never
+            /// close enough to match. The create button is on the toolbar now;
+            /// a window this small does not need to be told its own name.
+            ///
+            /// This item is the hairline alone — the heading is drawn by
+            /// `mini` below, which owns the month it names.
             Item {
                 id: sidebarHeader
 
@@ -424,81 +455,6 @@ FloatingWindow {
                 anchors.top: parent.top
                 height: CalendarTokens.toolbarH
 
-                Icon {
-                    id: mark
-
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.space4
-                    anchors.verticalCenter: parent.verticalCenter
-                    name: "calendar-days"
-                    size: 17
-                    color: Theme.accentPrimary
-                }
-
-                /// The wordmark in the display face, matching the toolbar's
-                /// month title across the divider — the two of them on one
-                /// line is what makes the band read as one bar.
-                Text {
-                    id: wordmark
-
-                    anchors.left: mark.right
-                    anchors.leftMargin: Theme.space2
-                    y: CalendarTokens.titleBaseline - wordmark.baselineOffset
-                    text: "Calendar"
-                    color: Theme.textPrimary
-                    font.family: Theme.fontDisplay
-                    font.pointSize: Theme.pt(15)
-                    font.weight: Theme.weightDisplay
-                }
-
-                /// New event. It was a filled accent tile, on the argument that
-                /// the one thing the window makes deserves the one saturated
-                /// background — and the picture said otherwise: a 28px block of
-                /// `accentPrimary` was the loudest pixel in a 1180px window,
-                /// louder than today's column, today's disc in the map below it
-                /// and every event on the grid. In a calendar, saturation has
-                /// exactly one job, which is saying *here is now*; a control
-                /// that outshouts it is a control competing with the data.
-                ///
-                /// So it wears the chrome's own hairline-and-fill treatment,
-                /// the same box as the toolbar's chevrons and Today, and keeps
-                /// its rank in the *glyph* — teal strokes rather than a teal
-                /// field, which is a tenth of the area at the same hue.
-                Rectangle {
-                    id: createButton
-
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.space4 + 1
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: CalendarTokens.controlH
-                    height: CalendarTokens.controlH
-                    radius: Theme.radiusSm
-                    color: createPointer.containsMouse ? Theme.surfaceOverlay : Theme.surfaceRaised
-                    border.width: 1
-                    border.color: Theme.borderSubtle
-
-                    Behavior on color {
-                        enabled: Theme.animateTransforms
-                        ColorAnimation { duration: Theme.duration(Theme.motionFast) }
-                    }
-
-                    Icon {
-                        anchors.centerIn: parent
-                        name: "plus"
-                        size: 16
-                        color: Theme.accentPrimary
-                    }
-
-                    MouseArea {
-                        id: createPointer
-
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: window.createHere()
-                    }
-                }
-
                 Rectangle {
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -506,6 +462,31 @@ FloatingWindow {
                     height: 1
                     color: Theme.borderSubtle
                 }
+            }
+
+            /// The map, spanning the chrome band: its heading sits *in* the
+            /// band, its grid starts `space2` under the hairline. Outside
+            /// `sidebarBody` because that item's whole job is the inset margin
+            /// under the band, and this one is the thing that crosses it.
+            MiniMonth {
+                id: mini
+
+                anchors.left: parent.left
+                anchors.leftMargin: CalendarTokens.sidebarPad
+                anchors.right: parent.right
+                anchors.rightMargin: CalendarTokens.sidebarPad + 1
+                anchors.top: parent.top
+                height: mini.implicitHeight
+
+                headingH: CalendarTokens.toolbarH + Theme.space2
+                headingBaseline: CalendarTokens.titleBaseline
+
+                view: window.view
+                anchorDate: window.anchorDate
+                todayIso: window.todayIso
+                firstDay: window.firstDay
+
+                onDayRequested: iso => window.dateRequested(iso)
             }
 
             /// Everything under that band, inset by one `space4` on every
@@ -518,54 +499,61 @@ FloatingWindow {
 
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: sidebarHeader.bottom
+                anchors.top: mini.bottom
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.space4
-                anchors.rightMargin: Theme.space4 + 1
+                // The horizontal inset is the map's, so that every left edge in
+                // this column is one edge; the vertical one is its own, because
+                // `sidebarPad` is arithmetic about seven cells and has nothing
+                // to say about how much air a list wants above it — and three
+                // extra pixels at each end is one calendar row off the bottom.
+                anchors.leftMargin: CalendarTokens.sidebarPad
+                anchors.rightMargin: CalendarTokens.sidebarPad + 1
+                anchors.topMargin: Theme.space4
+                anchors.bottomMargin: Theme.space4
                 clip: true
 
-                MiniMonth {
-                    id: mini
-
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    height: mini.implicitHeight
-
-                    view: window.view
-                    anchorDate: window.anchorDate
-                    todayIso: window.todayIso
-                    firstDay: window.firstDay
-
-                    onDayRequested: iso => window.dateRequested(iso)
-                }
-
-                /// The hairline between the map and the legend. The sidebar
-                /// holds two unrelated lists and nothing but a gap would say
-                /// where one ends.
-                Rectangle {
-                    id: sidebarRule
-
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: mini.bottom
-                    anchors.topMargin: Theme.space4
-                    height: 1
-                    color: Theme.borderSubtle
-                }
-
+                /// **The rail is separated by space and headings, not by three
+                /// identical hairlines.**
+                ///
+                /// It used to draw a rule between the map and the calendars, a
+                /// second between the calendars and *Upcoming*, and a third
+                /// above the account footer — the same 1px `borderSubtle` line
+                /// at three different joins. A rule repeated at every join
+                /// stops being a division and becomes a texture: the column
+                /// read as four undifferentiated slabs, and nothing said which
+                /// of the joins was the structural one.
+                ///
+                /// Two of the three are gone. The lists carry their own caps
+                /// headings — `CALENDARS`, `UPCOMING` — and a heading with air
+                /// above it is already a division; adding a line to it is
+                /// saying the same thing twice. The one rule left is the
+                /// account footer's, which is the only join that is not two
+                /// lists in a row: it closes the panel the way the toolbar's
+                /// hairline closes the chrome band, and being the column's only
+                /// line is exactly what makes it read as that.
+                ///
                 /// The calendars. Static on purpose: there are no calendar
                 /// accounts to switch off yet, so every row is drawn checked
                 /// and nothing here takes a click. A row that toggled a filter
                 /// nothing reads would be worse than a row that plainly does
                 /// not move.
+                ///
+                /// **The rail is budgeted rather than stacked.** Three lists,
+                /// a footer and four gaps have to clear a 760px window with the
+                /// map taking 270 of it, so the rows are sized from what is
+                /// left: 26 for a calendar, 34 for an upcoming event, and the
+                /// inert *Add calendar* row is gone. It was the one line here
+                /// that promised something — a row with a `+` on it says a
+                /// dialog opens — and spending 32px of a full rail on a promise
+                /// nothing keeps, while a live list of what is next got cut off
+                /// below it, is the wrong trade twice over.
                 Column {
                     id: calendarList
 
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.top: sidebarRule.bottom
-                    anchors.topMargin: Theme.space4
+                    anchors.top: parent.top
+                    anchors.topMargin: Theme.space2
 
                     /// Bounded against the footer rather than left to run.
                     /// Eight rows plus the add row clear a 760px window with
@@ -573,7 +561,7 @@ FloatingWindow {
                     /// `Column` has no opinion about that — it would simply
                     /// draw through the account block and out of the panel.
                     height: Math.min(calendarList.implicitHeight,
-                                     account.y - calendarList.y - Theme.space3)
+                                     upcoming.y - calendarList.y - Theme.space3)
                     clip: true
 
                     Item {
@@ -601,7 +589,37 @@ FloatingWindow {
                             required property var modelData
 
                             width: calendarList.width
-                            height: 32
+                            height: 26
+
+                            /// The hover wash the rest of the shell's list rows
+                            /// wear. It is feedback, not a promise: the row
+                            /// still takes no click, and the wash is what says
+                            /// the pointer is on *this* calendar rather than
+                            /// the one above it while the eye runs the column.
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.leftMargin: -Theme.space2
+                                anchors.rightMargin: -Theme.space2
+                                radius: Theme.radiusSm
+                                color: calendarHover.containsMouse
+                                       ? CalendarTokens.chromeHover : "transparent"
+                                opacity: calendarHover.containsMouse ? 1 : 0
+
+                                Behavior on opacity {
+                                    enabled: Theme.animateTransforms
+                                    NumberAnimation {
+                                        duration: Theme.duration(Theme.motionFast)
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: calendarHover
+
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
 
                             /// A filled, ticked box rather than the 10px dot
                             /// the first pass drew. The dot said *this
@@ -642,45 +660,118 @@ FloatingWindow {
                         }
                     }
 
-                    /// The row that says what kind of list this is. It takes no
-                    /// click, for the same reason the rows above it take none —
-                    /// there is no calendar-account flow behind it yet — and it
-                    /// is drawn one value quieter than they are so that it
-                    /// reads as the list's edge rather than as a ninth
-                    /// calendar. Without it the eight rows simply stop, and a
-                    /// list of colours that simply stops is a legend; a list
-                    /// that ends in *Add calendar* is a set of things you own.
+                }
+
+                /// What is next, standing between the calendars list and the
+                /// footer — see `UpcomingPolicy.qml` for why the rail carries
+                /// it rather than being spaced out to hide the gap.
+                ///
+                /// Pinned above the account row rather than flowing under the
+                /// calendars, so the rail has a fixed skeleton at every window
+                /// height: map at the top, footer at the floor, and the two
+                /// lists between them, of which only the calendars one is
+                /// allowed to lose rows when the window is short.
+                Column {
+                    id: upcoming
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: account.top
+                    anchors.bottomMargin: Theme.space4
+
+                    readonly property var rows:
+                        window.upcomingPolicy.next(CalendarStore.events,
+                                                   window.nowStamp,
+                                                   window.upcomingPolicy.defaultLimit)
+
+                    /// The heading carries the join on its own — see the
+                    /// calendars list above for why the hairline that used to
+                    /// sit here went. The row is 34 rather than 28 so the air
+                    /// it took is air the heading keeps.
                     Item {
-                        width: calendarList.width
-                        height: 32
-
-                        Item {
-                            id: addGlyph
-
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 15
-                            height: 15
-
-                            Icon {
-                                anchors.centerIn: parent
-                                name: "plus"
-                                size: 14
-                                color: Theme.textMuted
-                            }
-                        }
+                        width: upcoming.width
+                        height: 34
 
                         Text {
-                            anchors.left: addGlyph.right
-                            anchors.leftMargin: Theme.space3
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Add calendar"
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 2
+                            text: "UPCOMING"
                             color: Theme.textMuted
-                            elide: Text.ElideRight
                             font.family: Theme.fontUi
-                            font.pointSize: Theme.pt(13)
-                            font.weight: Theme.weightRegular
+                            font.pointSize: Theme.pt(Theme.capsSize)
+                            font.weight: Theme.weightMedium
+                            font.letterSpacing: Theme.capsTrackingEm * Theme.pt(Theme.capsSize)
+                        }
+                    }
+
+                    Repeater {
+                        model: upcoming.rows
+
+                        /// A row is a hue rail, a title and when. The rail is
+                        /// 2px and full height rather than the list's rounded
+                        /// swatch: a checkbox above and a checkbox here would
+                        /// say these rows can be switched off too, and they
+                        /// cannot — they are the grid's events, seen from the
+                        /// side.
+                        delegate: Item {
+                            id: upcomingRow
+
+                            required property var modelData
+
+                            /// **38, and the two lines inside it are set 3
+                            /// apart.** At 34 with a 1px lead the row's own two
+                            /// lines were as close to each other as the row was
+                            /// to its neighbour — "All day" sat a hair under
+                            /// the title above it and a hair over the title
+                            /// below, so a three-row list read as six loose
+                            /// lines. The pairing has to be visible before the
+                            /// list is: 3 inside against 8 between is the
+                            /// smallest ratio that reads as two lines belonging
+                            /// to one event.
+                            width: upcoming.width
+                            height: 38
+
+                            Rectangle {
+                                id: upcomingRail
+
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 2
+                                height: 26
+                                radius: 1
+                                color: CalendarTokens.bar(
+                                    CalendarTokens.hues.forEvent(upcomingRow.modelData))
+                            }
+
+                            Column {
+                                anchors.left: upcomingRail.right
+                                anchors.leftMargin: Theme.space3
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 3
+
+                                Text {
+                                    width: parent.width
+                                    text: upcomingRow.modelData.title
+                                    color: Theme.textPrimary
+                                    elide: Text.ElideRight
+                                    font.family: Theme.fontUi
+                                    font.pointSize: Theme.pt(12.5)
+                                    font.weight: Theme.weightRegular
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: window.upcomingWhen(upcomingRow.modelData)
+                                    color: Theme.textMuted
+                                    elide: Text.ElideRight
+                                    font.family: Theme.fontUi
+                                    font.pointSize: Theme.pt(11)
+                                    font.weight: Theme.weightRegular
+                                    font.features: CalendarTokens.tabularFigures
+                                }
+                            }
                         }
                     }
                 }
@@ -790,6 +881,7 @@ FloatingWindow {
 
             onViewRequested: name => window.viewRequested(name)
             onTodayRequested: window.todayRequested()
+            onCreateRequested: window.createHere()
             onStepRequested: delta => {
                 const next = window.keyNav.shiftPeriod(window.view, window.anchorDate, delta);
                 if (next)

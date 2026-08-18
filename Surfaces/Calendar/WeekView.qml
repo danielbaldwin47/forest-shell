@@ -749,8 +749,21 @@ Item {
         anchors.top: headerBand.bottom
         height: view.bandHeight
 
-        /// One line, vertically centred in the band — the same convention as
-        /// every other label in this gutter.
+        /// One line, on the **first lane's** centre rather than the band's.
+        ///
+        /// Centring it in the band was right only while the band held one row.
+        /// The moment a second row of all-day chips appears the band grows
+        /// downward, the label slides to the middle of the two, and it stops
+        /// naming the row it sits beside: at three rows it labels the gap
+        /// between the second and the third. A gutter label points at a lane,
+        /// so it rides the lane — which is also what the hour labels beside it
+        /// do, each one on the rule it names.
+        ///
+        /// It is set at `capsSize` in `textSecondary`, not a tenth of a point
+        /// smaller in `textMuted`. It was the one label in the window below the
+        /// shell's caps size and the only one dimmer than the hour labels under
+        /// it, which made the band read as an afterthought rather than as the
+        /// row it is — the row that holds the three things happening today.
         ///
         /// It was two lines, because "ALL DAY" tracked at `capsTrackingEm` is
         /// 68px and the gutter is 56. Two lines then overflowed a 28px band and
@@ -759,15 +772,17 @@ Item {
         /// goes: caps at `capsSize` are legible untracked at this size, and one
         /// uncut line says more than two cut ones.
         Text {
+            id: allDayLabel
+
             x: 0
             width: view.gutterW - Theme.space2
-            anchors.verticalCenter: parent.verticalCenter
+            y: Theme.space1 + (CalendarTokens.allDayLaneH - allDayLabel.height) / 2
             text: "ALL DAY"
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
-            color: Theme.textMuted
+            color: Theme.textSecondary
             font.family: Theme.fontUi
-            font.pointSize: Theme.pt(10)
+            font.pointSize: Theme.pt(Theme.capsSize)
             font.weight: Theme.weightMedium
         }
 

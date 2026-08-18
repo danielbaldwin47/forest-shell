@@ -25,10 +25,36 @@
 // pair of arrows parked at the far right is a control whose effect happens
 // 900px away from it.
 //
-// The three moving controls also share one treatment. An earlier pass had bare
-// chevrons next to a bordered Today pill, which read as two ranks of control
-// where there is only one: all three do the same kind of thing, so all three
-// are the same button.
+// ## Four controls, four ranks — the bar's one hierarchy
+//
+// A pass of this bar dressed every control the same: the create button, Today,
+// both chevrons and the selected segment of the switcher were one dark chip
+// with one hairline, at four sizes. Read at a glance that is a row of five
+// identical objects, so nothing in it is primary, nothing is quiet, and the
+// switcher — whose whole job is to say *this one* — read as unselected.
+//
+// Sameness was the wrong answer to a real question. The controls do not do the
+// same kind of thing, so they are drawn at the rank they hold:
+//
+// - **The period cluster is a well with three tiles in it** — `‹ Today ›`, on
+//   the switcher's own sunken track. It holds the most-pressed controls in the
+//   window, so it is the one that must have a visible edge to press inside of;
+//   an earlier pass left the chevrons as bare glyphs on the argument that a box
+//   around each of a pair says what the glyphs already say, and the capture
+//   answered that a pair with no box says nothing at all until the pointer
+//   finds it. Grouped, they cannot be mistaken for the mini-month's steppers
+//   300px away either — that pair is 24px, unboxed and dimmer, which is the
+//   rank a map's controls hold against a grid's.
+// - **The switcher is the same well with a lifted tile in it**, and the tile is
+//   the lightest surface in the window (`CalendarTokens.switcherThumb`), which
+//   is the property that has to hold for a segmented control to have a state at
+//   all. Two wells on one bar is a rhyme, not a repetition: they are the same
+//   kind of question — which period, which scale — asked twice.
+// - **Create is the one coloured field, and it is the deep teal rather than the
+//   bright one.** It is the only control here that *makes* something, so it
+//   keeps hue where everything else has value; it stopped being the brightest
+//   object in a window it is pressed in once an hour. `CalendarTokens.
+//   createFill` carries that measurement.
 //
 // ## Today is a button that knows when it is pointless
 //
@@ -44,15 +70,13 @@
 // chevron glyphs either side of it. The most-used action in the bar read as
 // broken rather than as resting, which is the opposite of the point.
 //
-// So the rank difference lives in the *label* and the label alone: the box
-// never fades, so all three controls stay one treatment, while the label steps
-// from `textPrimary` when the button is live down to `textMuted` when it is
-// not. `textMuted` and not `textSecondary`, because `textSecondary` is what
-// the chevron glyphs either side wear: a resting Today at the same value as
-// its live neighbours is a button that never looks inert, which is the whole
-// claim. `textMuted` is 5.6:1 — one visible step below the chevrons, three
-// steps below its own live state, and still comfortably readable, which
-// `opacityInert` at 3.9:1 was not.
+// So the rank difference lives in the *label* and the label alone: the tile
+// keeps its place in the cluster, while the label steps from `textPrimary`
+// when the button is live down to `textMuted` when it is not. `textMuted` and
+// not `textSecondary`, because a resting Today anywhere near the value of the
+// chevrons either side of it is a button that never looks inert, which is the
+// whole claim. `textMuted` is 5.6:1 — plainly a step below the glyphs it sits
+// between, still comfortably readable, and not the 3.9:1 `opacityInert` was.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -78,6 +102,7 @@ Item {
     signal viewRequested(string name)
     signal stepRequested(int delta)
     signal todayRequested
+    signal createRequested
 
     /// The views, left to right. The same array `CalendarWindow.views` holds,
     /// but stated here in *display* order rather than borrowed: the singleton's
@@ -109,7 +134,10 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "transparent"
+        // The chrome plane, shared with the sidebar — see
+        // `CalendarTokens.chromeGround` for why the bar is no longer the same
+        // value as the grid under it.
+        color: CalendarTokens.chromeGround
 
         Rectangle {
             anchors.left: parent.left
@@ -176,78 +204,141 @@ Item {
     /// year — the same inset the title takes from the left edge and the
     /// switcher takes from the right — so the bar reads as three groups on one
     /// rhythm rather than as a title with an argument next to it.
-    Row {
+    /// **The moving controls are one segmented cluster, not three loose
+    /// objects.** They were a bare pair of chevrons and an outlined Today, and
+    /// the capture said what that costs: the chevrons had no drawn hit area at
+    /// all and Today's box was a hairline on a bar of nearly its own value, so
+    /// the two most-pressed controls in the window were also its faintest,
+    /// while the create button — one press an hour — was its loudest. Weight
+    /// should follow how often a hand reaches for a thing.
+    ///
+    /// A well with three tiles in it fixes both ends at once. The cluster is
+    /// the same sunken track the switcher uses, which is now plainly readable
+    /// against the lifted chrome, and it says the three controls are one
+    /// question — *which period* — the way the switcher says its three are the
+    /// scale. `‹ Today ›` and not `‹ › Today`: the destination belongs between
+    /// the two steps that walk past it, and the hairlines between the tiles are
+    /// what give each glyph an edge to be pressed inside of.
+    Rectangle {
+        id: nav
+
         anchors.left: yearText.right
+        // `space4` after the year — the same inset the title takes from the
+        // left edge and the switcher takes from the right — so the bar reads as
+        // three groups on one rhythm rather than as a title with an argument
+        // next to it.
         anchors.leftMargin: Theme.space4
         anchors.verticalCenter: parent.verticalCenter
-        // `space3` between groups, `space2` inside the pair below. Equal gaps
-        // across all three made the chevrons and Today one undifferentiated
-        // run of buttons; the pair is one control with two ends, and it has to
-        // look tighter than the gap to its neighbour or it never groups.
-        spacing: Theme.space3
+
+        width: navRow.width
+        height: CalendarTokens.controlH
+        radius: Theme.radiusSm
+        color: Theme.bgSunken
+        border.width: 1
+        border.color: Theme.borderSubtle
+        // The tiles are square-cornered inside a rounded well, so the two at
+        // the ends have to be cut to it.
+        clip: true
 
         Row {
-            spacing: Theme.space2
+            id: navRow
 
-            ChevronButton {
+            height: parent.height
+
+            IconButton {
                 glyph: "chevron-left"
+                glyphColor: Theme.textPrimary
                 onTapped: toolbar.stepRequested(-1)
             }
 
-            ChevronButton {
-                glyph: "chevron-right"
-                onTapped: toolbar.stepRequested(1)
-            }
-        }
+            NavRule {}
 
-        /// Today, in the same clothes as the chevrons beside it — one box, two
-        /// ranks, and the rank is carried by the label. See the header for the
-        /// measurement that put it there rather than in the button's opacity.
-        Rectangle {
-            id: todayButton
+            /// Today, as the middle tile. See the header for why the label
+            /// carries the rank rather than the button's opacity.
+            Rectangle {
+                id: todayButton
 
-            readonly property bool live: !toolbar.showsToday
+                readonly property bool live: !toolbar.showsToday
 
-            width: todayLabel.implicitWidth + Theme.space4
-            height: CalendarTokens.controlH
-            radius: Theme.radiusSm
-            color: todayPointer.containsMouse && todayButton.live
-                   ? Theme.surfaceOverlay
-                   : Theme.surfaceRaised
-            border.width: 1
-            border.color: Theme.borderSubtle
-
-            Behavior on color {
-                enabled: Theme.animateTransforms
-                ColorAnimation { duration: Theme.duration(Theme.motionFast) }
-            }
-
-            Text {
-                id: todayLabel
-
-                anchors.centerIn: parent
-                text: "Today"
-                color: todayButton.live ? Theme.textPrimary : Theme.textMuted
-                font.family: Theme.fontUi
-                font.pointSize: Theme.pt(12.5)
-                font.weight: Theme.weightMedium
+                width: todayLabel.implicitWidth + Theme.space3 * 2
+                height: CalendarTokens.controlH
+                color: todayPointer.containsMouse && todayButton.live
+                       ? CalendarTokens.chromeHover
+                       : "transparent"
 
                 Behavior on color {
                     enabled: Theme.animateTransforms
                     ColorAnimation { duration: Theme.duration(Theme.motionFast) }
                 }
+
+                Text {
+                    id: todayLabel
+
+                    anchors.centerIn: parent
+                    text: "Today"
+                    color: todayButton.live ? Theme.textPrimary : Theme.textMuted
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(12.5)
+                    font.weight: Theme.weightMedium
+
+                    Behavior on color {
+                        enabled: Theme.animateTransforms
+                        ColorAnimation { duration: Theme.duration(Theme.motionFast) }
+                    }
+                }
+
+                MouseArea {
+                    id: todayPointer
+
+                    anchors.fill: parent
+                    enabled: todayButton.live
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: toolbar.todayRequested()
+                }
             }
 
-            MouseArea {
-                id: todayPointer
+            NavRule {}
 
-                anchors.fill: parent
-                enabled: todayButton.live
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: toolbar.todayRequested()
+            IconButton {
+                glyph: "chevron-right"
+                glyphColor: Theme.textPrimary
+                onTapped: toolbar.stepRequested(1)
             }
         }
+    }
+
+    // --- making one ------------------------------------------------------------
+
+    /// New event. It used to sit at the top of the sidebar, above a wordmark,
+    /// which put the window's one *creating* control in the column that holds
+    /// its two *filtering* lists — and left the mini-month's month heading with
+    /// nowhere to sit but below the chrome band, off the toolbar title's
+    /// baseline. Moving it here fixes both: the sidebar band becomes the map's
+    /// heading, and every control in this window now lives on one bar.
+    ///
+    /// It rides beside the switcher rather than past it, so the switcher keeps
+    /// the `space4` right inset that answers the title's left one.
+    ///
+    /// **Filled, not outlined.** An earlier pass gave it accent *strokes* in a
+    /// box identical to Today's, on the argument that an accent field would be
+    /// the loudest area in the window. It would not: 900 square pixels of teal
+    /// against a 1180x760 window is a full stop, not a shout, and it is the
+    /// only mark in the chrome that says where the one creating action is.
+    /// Every other use of saturation on this surface belongs to an event's hue
+    /// or to today, and neither of those lives in the toolbar, so nothing here
+    /// is competing with it.
+    IconButton {
+        id: createButton
+
+        anchors.right: switcher.left
+        anchors.rightMargin: Theme.space3
+        anchors.verticalCenter: parent.verticalCenter
+        glyph: "plus"
+        glyphColor: CalendarTokens.createInk
+        restFill: CalendarTokens.createFill
+        hoverFill: CalendarTokens.accentHover
+        onTapped: toolbar.createRequested()
     }
 
     // --- the scale ------------------------------------------------------------
@@ -267,12 +358,15 @@ Item {
     /// Selection and rest were the same treatment, which leaves the control
     /// with no state at all.
     ///
-    /// So the roles are taken by value: the track is `bgSunken` (`#070a08`,
-    /// a well under the `bgBase` bar) and the thumb is `surfaceOverlay`, two
-    /// steps up from it and one step above every resting button in the bar.
-    /// The selected segment is now the lightest thing in the toolbar, which is
-    /// the only property that has to hold — a segmented control says "this
-    /// one" by lifting it, and lifting is a lightness, not a token name.
+    /// So the roles are taken by value: the track is `bgSunken` (`#070a08`, a
+    /// well sunk through the chrome plane) and the thumb is `CalendarTokens.
+    /// switcherThumb`, which is taken past the top of the surface ladder rather
+    /// than borrowed from it. `surfaceOverlay` was the first fix and only half
+    /// of one — two steps over the track is a tile you can find once you are
+    /// looking for it, and this control is read at a glance or not at all. The
+    /// selected segment is now the lightest thing in the window, which is the
+    /// only property that has to hold: a segmented control says "this one" by
+    /// lifting it, and lifting is a lightness, not a token name.
     Rectangle {
         id: switcher
 
@@ -321,7 +415,7 @@ Item {
             width: switcher.segmentW
             height: parent.height - switcher.inset * 2
             radius: Theme.radiusSm - 1
-            color: Theme.surfaceOverlay
+            color: CalendarTokens.switcherThumb
 
             Behavior on x {
                 enabled: Theme.animateTransforms
@@ -358,10 +452,19 @@ Item {
                         anchors.centerIn: parent
                         text: segment.modelData.charAt(0).toUpperCase()
                               + segment.modelData.slice(1)
-                        color: segment.active ? Theme.textPrimary : Theme.textSecondary
+                        /// The label carries the state as well as the thumb
+                        /// does. `textSecondary` for the resting segments was
+                        /// 9.3:1 against the bar — as loud as the selected one
+                        /// for anything but a side-by-side comparison, so the
+                        /// control's answer to "which view am I in" rested on
+                        /// a 33/255 fill alone. `textMuted` at regular weight
+                        /// is 5.6:1: plainly readable, plainly quieter, and the
+                        /// selected segment now differs in fill, value *and*
+                        /// weight — three signals, none of them subtle.
+                        color: segment.active ? Theme.textPrimary : Theme.textMuted
                         font.family: Theme.fontUi
                         font.pointSize: Theme.pt(12.5)
-                        font.weight: Theme.weightMedium
+                        font.weight: segment.active ? Theme.weightMedium : Theme.weightRegular
                     }
 
                     MouseArea {
@@ -375,24 +478,38 @@ Item {
         }
     }
 
-    /// A 30x30 icon button, wearing the same fill and hairline as the Today
-    /// button it stands next to — the one treatment the header argues for.
-    /// Inline rather than in `Widgets/` because it is the chevron pair and
-    /// nothing else: the moment a second surface wants one, it moves out of
-    /// here and gains a header of its own.
-    component ChevronButton: Rectangle {
+    /// A 30x30 icon button in two dresses — bare (the chevrons) and filled (the
+    /// create button). Inline rather than in `Widgets/` because it is this
+    /// bar's three icon buttons and nothing else: the moment a second surface
+    /// wants one, it moves out of here and gains a header of its own.
+    ///
+    /// The rest fill is transparent by default, so a chevron is a glyph with a
+    /// hit area and a hover wash and no drawn box at all. See the header for
+    /// why that is the rank a chevron holds.
+    /// The hairline between two tiles of the nav cluster. A full-height rule
+    /// rather than an inset one: the tiles are the hit areas, and a rule that
+    /// stopped short of the track's edges would draw the cluster as three
+    /// floating labels again.
+    component NavRule: Rectangle {
+        width: 1
+        height: CalendarTokens.controlH
+        color: Theme.borderSubtle
+    }
+
+    component IconButton: Rectangle {
         id: chevron
 
         property string glyph: ""
+        property color glyphColor: Theme.textSecondary
+        property color restFill: "transparent"
+        property color hoverFill: CalendarTokens.chromeHover
 
         signal tapped
 
         width: CalendarTokens.controlH
         height: CalendarTokens.controlH
         radius: Theme.radiusSm
-        color: chevronPointer.containsMouse ? Theme.surfaceOverlay : Theme.surfaceRaised
-        border.width: 1
-        border.color: Theme.borderSubtle
+        color: chevronPointer.containsMouse ? chevron.hoverFill : chevron.restFill
 
         Behavior on color {
             enabled: Theme.animateTransforms
@@ -403,7 +520,7 @@ Item {
             anchors.centerIn: parent
             name: chevron.glyph
             size: 16
-            color: Theme.textSecondary
+            color: chevron.glyphColor
         }
 
         MouseArea {

@@ -1741,6 +1741,7 @@ Item {
             DragGhost {
                 readonly property int col: Math.max(0, view.proposal.column)
 
+                dragPolicy: view.dragPolicy
                 visible: view.dragShown
                 z: 15
                 x: view.columnX(col) + view.colInset + CalendarTokens.dragInset

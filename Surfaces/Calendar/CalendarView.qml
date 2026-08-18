@@ -1037,6 +1037,7 @@ FloatingWindow {
             anchorDate: window.anchorDate
             firstDay: window.firstDay
             todayIso: window.todayIso
+            nowStamp: window.nowStamp
             events: CalendarStore.events
             selectedId: window.selectedId
             use24: window.use24

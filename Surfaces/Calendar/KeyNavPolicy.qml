@@ -586,6 +586,12 @@ QtObject {
         }
         out.push({ "id": "help.shortcuts", "label": "Keyboard shortcuts", "shortcut": "?",
                    "keys": printed["help.shortcuts"], "group": "Actions", "icon": "command" });
+        // A sheet row that lost its id would leave `keys` undefined and the
+        // badge column silently empty; the single key is the honest fallback.
+        for (let i = 0; i < out.length; i++) {
+            if (out[i].keys === undefined || out[i].keys === null)
+                out[i].keys = out[i].shortcut;
+        }
         return out;
     }
 

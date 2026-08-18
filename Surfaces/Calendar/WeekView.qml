@@ -641,7 +641,8 @@ Item {
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: dayHead.header ? dayHead.header.weekday : ""
-                        color: dayHead.modelData.isToday ? Theme.accentPrimary : Theme.textMuted
+                        color: dayHead.modelData.isToday ? Theme.accentPrimary
+                             : CalendarTokens.gridMuted
                         font.family: Theme.fontUi
                         font.pointSize: Theme.pt(Theme.capsSize)
                         font.weight: Theme.weightMedium
@@ -731,7 +732,7 @@ Item {
                               dayHead.load,
                               dayHead.load
                                   ? view.format.duration(dayHead.load.minutes) : "")
-                    color: Theme.textMuted
+                    color: CalendarTokens.gridMuted
                     font.features: CalendarTokens.tabularFigures
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
@@ -804,7 +805,7 @@ Item {
             // values is a gutter with two voices in it. It was `capsSize` in
             // `textSecondary`, which made the one label with no number in it the
             // loudest thing in the column.
-            color: Theme.textMuted
+            color: CalendarTokens.gridMuted
             font.family: Theme.fontUi
             font.pointSize: Theme.pt(11)
             font.weight: Theme.weightRegular
@@ -843,6 +844,15 @@ Item {
 
                 readonly property var event: view.eventById(modelData.id)
                 readonly property int hue: CalendarTokens.hues.forEvent(bandBar.event)
+
+                /// The band answers the past/future question the same way the
+                /// grid does — an all-day event is over when its day is, which
+                /// `HuePolicy.normaliseEnd` reads a bare date as. The band and
+                /// the grid speaking with one voice is the point: a week where
+                /// only the timed chips faded would say the band's events were
+                /// somehow still ahead.
+                readonly property bool past: CalendarTokens.hues.eventIsPast(
+                    bandBar.event, view.nowStamp)
 
                 /// The same lead-in a grid chip takes, so the two rows are one
                 /// language — and **the trailing gap is the continuation cue**.
@@ -889,22 +899,23 @@ Item {
                 // explains why, and a day view is where the difference is 800
                 // pixels of tint.
                 width: Math.round(view.layoutPolicy.bandBarWidth(
-                    bandBar.track, bandBar.natural, bandBar.runsOn || bandBar.runsIn))
+                    bandBar.track, bandBar.natural,
+                    bandBar.runsOn || bandBar.runsIn, modelData.span))
                 y: Theme.space1 + modelData.lane
                    * (CalendarTokens.allDayLaneH + CalendarTokens.allDayLaneGap)
                 height: CalendarTokens.allDayLaneH
                 radius: Theme.radiusSm - 2
                 clip: true
-                color: CalendarTokens.fill(bandBar.hue)
+                color: CalendarTokens.fillFor(bandBar.hue, bandBar.past)
                 border.width: 1
-                border.color: CalendarTokens.chipBorder(bandBar.hue)
+                border.color: CalendarTokens.chipBorderFor(bandBar.hue, bandBar.past)
 
                 Rectangle {
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: CalendarTokens.chipBar
-                    color: CalendarTokens.bar(bandBar.hue)
+                    color: CalendarTokens.barFor(bandBar.hue, bandBar.past)
                 }
 
                 /// The continuation marker, **outside the elided string**.
@@ -921,7 +932,7 @@ Item {
                     anchors.rightMargin: Theme.space1
                     anchors.verticalCenter: parent.verticalCenter
                     text: "→"
-                    color: CalendarTokens.text(bandBar.hue)
+                    color: CalendarTokens.textFor(bandBar.hue, bandBar.past)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     font.weight: Theme.weightMedium
@@ -936,7 +947,7 @@ Item {
                     elide: Text.ElideRight
                     text: (bandBar.runsIn ? "← " : "")
                           + (bandBar.event ? (bandBar.event.title || "Untitled") : "")
-                    color: CalendarTokens.text(bandBar.hue)
+                    color: CalendarTokens.textFor(bandBar.hue, bandBar.past)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     font.weight: Theme.weightMedium
@@ -1084,7 +1095,7 @@ Item {
                     horizontalAlignment: Text.AlignRight
                     text: modelData.label
                     visible: !view.grid.hourLabelHidden(modelData.y, nowRef)
-                    color: Theme.textMuted
+                    color: CalendarTokens.gridMuted
                     font.features: CalendarTokens.tabularFigures
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11)
@@ -1360,6 +1371,15 @@ Item {
                             continuesBelow: modelData.continuesBelow
                             use24: view.use24
                             selected: view.selectedId === modelData.id
+
+                            /// **Past or future**, off the view's one frozen
+                            /// clock rather than the chip's own. Every chip in
+                            /// the grid answers this against the same
+                            /// `nowStamp`, so the boundary is a single line
+                            /// through the week and not a ragged one drawn a
+                            /// frame apart per delegate.
+                            past: CalendarTokens.hues.eventIsPast(
+                                      modelData.event, view.nowStamp)
 
                             /// One state machine for the whole grid, handed
                             /// down: a `DragPolicy` per chip would be a hundred

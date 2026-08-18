@@ -1258,6 +1258,22 @@ TestCase {
         compare(layoutPolicy.bandBarWidth(NaN, 160, false), 0);
     }
 
+    /// A span across more than one column fills its track whatever it measures.
+    /// "Nordic QML Days" — Thursday to Saturday — was drawn 130px wide inside
+    /// Thursday, so a three-day conference read as a Thursday appointment and
+    /// the two days it covered read as empty. The width *is* the answer to
+    /// which days, so on a multi-column span it stops being negotiable.
+    function test_band_bar_spanning_days_fills_its_track() {
+        compare(layoutPolicy.bandBarWidth(540, 130, false, 3), 540);
+        compare(layoutPolicy.bandBarWidth(540, 130, false, 2), 540);
+        // One column keeps the natural-width rule that retired the day view's
+        // 870px slab, and so does an absent or nonsense column count.
+        compare(layoutPolicy.bandBarWidth(870, 160, false, 1), 160);
+        compare(layoutPolicy.bandBarWidth(870, 160, false), 160);
+        compare(layoutPolicy.bandBarWidth(870, 160, false, NaN), 160);
+        compare(layoutPolicy.bandBarWidth(870, 160, false, undefined), 160);
+    }
+
     // --- the column's own margins ----------------------------------------------
 
     function test_a_week_column_keeps_its_hairline_inset() {

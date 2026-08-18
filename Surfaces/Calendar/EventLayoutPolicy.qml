@@ -488,11 +488,27 @@ QtObject {
     /// against the frame is what says it carries on, and a natural-width bar
     /// floating clear of the edge would say the opposite.
     ///
+    /// **And so is a span that covers more than one column, which is the second
+    /// exception and was missing.** Read back off the week capture: "Nordic QML
+    /// Days" runs Thursday 09:00 to Saturday 17:00, and the natural-width rule
+    /// drew it as a 130px bar sitting in Thursday — a three-day conference
+    /// rendered as a Thursday appointment, with Friday and Saturday reading
+    /// empty. The rule above says the band's job is to say *which days*; on a
+    /// multi-column span the width **is** that answer, so the argument that
+    /// retires a stretched bar on a single day is exactly the argument that
+    /// requires one across three. `columns` defaults to 1, so the day view's
+    /// 870px slab stays retired.
+    ///
     /// `contentWidth` is a measurement — the surface takes it off `TextMetrics`
     /// — and everything done with it is here.
-    function bandBarWidth(track: real, contentWidth: real, continues: bool): real {
+    function bandBarWidth(track: real, contentWidth: real, continues: bool,
+                          columns): real {
         const t = isFinite(track) ? Math.max(0, track) : 0;
         if (continues === true)
+            return t;
+        const cols = (columns === undefined || columns === null
+                      || !isFinite(columns)) ? 1 : Math.round(columns);
+        if (cols > 1)
             return t;
         const natural = isFinite(contentWidth) ? Math.max(0, contentWidth) : 0;
         return Math.min(t, Math.max(policy.bandBarMinWidth, natural));

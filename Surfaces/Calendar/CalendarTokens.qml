@@ -458,6 +458,89 @@ Singleton {
     function fill(index: int): color { return tokens.fills[tokens.wrap(index)]; }
     function text(index: int): color { return tokens.texts[tokens.wrap(index)]; }
 
+    // --- the same three, once the clock is in the room --------------------------
+    //
+    // `HuePolicy` decides *whether* an event is past and *how far down* a past
+    // one goes; this is where those three numbers meet a Theme. Every one of
+    // these is the plain colour above when `past` is false, so a caller that
+    // does not know about the clock — the month chip, the drag ghost, the
+    // quick-create swatches — keeps exactly the picture it had.
+
+    readonly property real pastTintAlpha: tokens.hues.pastTintAlpha(Theme.dark)
+    readonly property real pastInkStrength: tokens.hues.pastInkStrength(Theme.dark)
+
+    /// The eight fills again at the past alpha — computed the same way and from
+    /// the same one number, so the two strengths cannot drift apart the way two
+    /// hand-written tables did.
+    readonly property var pastFills: tokens.bars.map(
+        hue => tokens.hues.tint(hue, String(Theme.surface), tokens.pastTintAlpha))
+
+    readonly property var pastBars: tokens.bars.map(
+        hue => tokens.hues.tint(hue, String(Theme.surface),
+                                tokens.hues.pastBarStrength))
+
+    readonly property var pastTexts: tokens.texts.map(
+        (ink, i) => tokens.hues.tint(String(ink), String(tokens.pastFills[i]),
+                                     tokens.pastInkStrength))
+
+    function barFor(index: int, past: bool): color {
+        const i = tokens.wrap(index);
+        return past === true ? tokens.pastBars[i] : tokens.bars[i];
+    }
+
+    function fillFor(index: int, past: bool): color {
+        const i = tokens.wrap(index);
+        return past === true ? tokens.pastFills[i] : tokens.fills[i];
+    }
+
+    function textFor(index: int, past: bool): color {
+        const i = tokens.wrap(index);
+        return past === true ? tokens.pastTexts[i] : tokens.texts[i];
+    }
+
+    /// A past chip's hairline is drawn off its own quieted bar, so the edge
+    /// recedes with the rest of it rather than outlining a faded card in a live
+    /// colour — which is what an unchanged border did on the first capture, and
+    /// it made the past chips read as *selected*.
+    function chipBorderFor(index: int, past: bool): color {
+        return Qt.alpha(tokens.barFor(index, past), Theme.dark ? 0.28 : 0.22);
+    }
+
+    function fillHoverFor(index: int, past: bool): color {
+        return Qt.tint(tokens.fillFor(index, past),
+                       Qt.alpha(Theme.surfaceOverlay, 0.12));
+    }
+
+    function monogramFillFor(index: int, past: bool): color {
+        return tokens.textFor(index, past);
+    }
+
+    function monogramInkFor(index: int, past: bool): color {
+        return tokens.fillFor(index, past);
+    }
+
+    // --- neutral furniture ------------------------------------------------------
+    //
+    // The gutter's hours, the weekday caps and the band's own label are
+    // *rulings*, not content, and they are drawn in the palette's greens
+    // desaturated onto their own luminance grey by `HuePolicy.neutralise`. The
+    // ratio each one held is unchanged — that is the property the mix is built
+    // around and the property the test asserts — so this is a hue change and
+    // never a contrast one. See `HuePolicy.neutralise` for why the chrome gives
+    // up the forest and the content keeps it.
+    //
+    // 0.75 rather than 1.0: at a full mix the gutter is a dead grey pasted onto
+    // a green page and reads as a different application's furniture. Three
+    // quarters lands it neutral to the eye while a trace of the page's own
+    // warmth stays in it, which is what makes the grid look built rather than
+    // imported.
+    readonly property real gridNeutrality: 0.75
+
+    readonly property color gridMuted: tokens.hues.neutralise(
+        String(Theme.textMuted), tokens.gridNeutrality)
+    readonly property color gridSecondary: tokens.hues.neutralise(
+        String(Theme.textSecondary), tokens.gridNeutrality)
+
     /// The hairline inside a chip, so two chips of the same hue packed side by
     /// side still read as two — and, at the new fill strengths, so a chip has a
     /// crisp edge rather than fading into the grid rule it abuts. Both modes

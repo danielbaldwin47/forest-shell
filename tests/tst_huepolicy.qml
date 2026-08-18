@@ -201,6 +201,37 @@ TestCase {
         compare(hues.tintAlpha(false), 0.12);
     }
 
+    /// A month banner is the only filled object in its grid, so its fill is
+    /// measured against the bare cell rather than against a tinted neighbour —
+    /// which is why it is a heavier alpha than the chip table's, and why it is a
+    /// second number rather than a second opinion about the first.
+    function test_a_banner_is_filled_harder_than_a_chip() {
+        compare(hues.bannerAlpha(true), 0.26);
+        compare(hues.bannerAlpha(false), 0.22);
+        verify(hues.bannerAlphaDark > hues.tintAlphaDark);
+        verify(hues.bannerAlphaLight > hues.tintAlphaLight);
+    }
+
+    /// The ceiling on that alpha is the ink, and it is a measurement. Every one
+    /// of the eight texts must still clear the 6:1 this surface solves at when
+    /// it is read on a banner fill, in both palettes. 0.30 dark was tried and
+    /// put moss at 5.67, which is the number that set 0.26.
+    function test_every_ink_clears_six_to_one_on_its_banner_fill() {
+        const cases = [
+            { "base": "#1c2621", "alpha": hues.bannerAlphaDark,
+              "bars": testCase.barsDark, "inks": testCase.inksDark },
+            { "base": "#ffffff", "alpha": hues.bannerAlphaLight,
+              "bars": testCase.barsLight, "inks": testCase.inksLight }
+        ];
+        for (const c of cases)
+            for (let i = 0; i < c.bars.length; i++) {
+                const fill = hues.tint(c.bars[i], c.base, c.alpha);
+                const ratio = hues.contrast(c.inks[i], fill);
+                verify(ratio >= 6.0,
+                       c.inks[i] + " on " + fill + " is " + ratio.toFixed(2) + ":1");
+            }
+    }
+
     // The eight dark fills in DESIGN-SPEC.md are exactly `bar` over
     // `Theme.surface` at 0.16, which is the claim that lets the table be
     // deleted and computed instead.
@@ -265,6 +296,174 @@ TestCase {
                    inksLight[i] + " on " + fill + " is "
                    + testCase.contrast(inksLight[i], fill).toFixed(2) + ":1");
         }
+    }
+
+    // --- past and future ------------------------------------------------------
+
+    readonly property var barsDark: ["#6fbec4", "#8fbf6a", "#d8ac81", "#e07a5f",
+                                     "#5b9dd9", "#afbd7a", "#b295cf", "#9d9e8d"]
+    readonly property var inksDark: ["#bbdede", "#c7ddb9", "#e6d6c2", "#efd0c7",
+                                     "#c3daed", "#d2dbbd", "#ddd5e8", "#d6d7d0"]
+    readonly property var barsLight: ["#0c757b", "#4a7d35", "#8a5a2f", "#b0512f",
+                                      "#23608f", "#59682c", "#6b4a8f", "#68695b"]
+    readonly property var inksLight: ["#085256", "#305224", "#664323", "#783821",
+                                      "#1c4d74", "#434e21", "#593d77", "#4b4b41"]
+
+    function test_past_is_decided_by_the_end_not_the_start() {
+        // The meeting the reader is sitting in started an hour ago and is the
+        // loudest thing on the grid, not the quietest.
+        verify(!hues.isPast("2026-08-18T14:00", "2026-08-18T13:40"));
+        verify(hues.isPast("2026-08-18T13:30", "2026-08-18T13:40"));
+        // The instant it ends it is past — the boundary is inclusive, so a chip
+        // never sits in a third state for a minute.
+        verify(hues.isPast("2026-08-18T13:40", "2026-08-18T13:40"));
+    }
+
+    function test_past_compares_chronologically_across_days() {
+        verify(hues.isPast("2026-08-17T23:59", "2026-08-18T00:00"));
+        verify(!hues.isPast("2026-08-19T00:00", "2026-08-18T23:59"));
+        // A string compare is only the chronological one while the fields are
+        // fixed-width; September must not sort before August because `9 < 1`.
+        verify(hues.isPast("2026-08-31T09:00", "2026-09-01T09:00"));
+        verify(!hues.isPast("2026-09-01T09:00", "2026-08-31T09:00"));
+    }
+
+    function test_no_clock_means_no_past() {
+        // The capture harness, the first frame after load and every test that
+        // does not care all pass "". A week that dimmed itself because it did
+        // not yet know the time would flicker on every launch.
+        verify(!hues.isPast("2026-08-17T09:00", ""));
+        verify(!hues.isPast("2026-08-17T09:00", "not-a-stamp"));
+        verify(!hues.isPast("", "2026-08-18T13:40"));
+        verify(!hues.isPast("whenever", "2026-08-18T13:40"));
+    }
+
+    function test_all_day_event_is_not_past_until_its_day_is() {
+        // A bare date used as an end normalises to the end of that day.
+        compare(hues.normaliseEnd("2026-08-18"), "2026-08-18T23:59");
+        verify(!hues.isPast("2026-08-18", "2026-08-18T13:40"));
+        verify(hues.isPast("2026-08-17", "2026-08-18T13:40"));
+        // And a bare date used as *now* is the start of that day, which is the
+        // direction that never greys out a live meeting.
+        compare(hues.normaliseNow("2026-08-18"), "2026-08-18T00:00");
+        verify(!hues.isPast("2026-08-18T09:00", "2026-08-18"));
+    }
+
+    function test_stamps_of_different_precision_still_compare() {
+        // Seconds on one side and none on the other would otherwise sort
+        // `…T09:30:00` after `…T09:30` at exactly the minute the answer flips.
+        verify(hues.isPast("2026-08-18T13:40:00", "2026-08-18T13:40"));
+        verify(hues.isPast("2026-08-18T13:40", "2026-08-18T13:40:59"));
+    }
+
+    function test_event_form_survives_a_delegate_mid_rebuild() {
+        verify(!hues.eventIsPast(null, "2026-08-18T13:40"));
+        verify(!hues.eventIsPast(undefined, "2026-08-18T13:40"));
+        verify(!hues.eventIsPast({}, "2026-08-18T13:40"));
+        verify(hues.eventIsPast({"end": "2026-08-18T09:30"}, "2026-08-18T13:40"));
+        compare(hues.strengthFor("2026-08-18T09:30", "2026-08-18T13:40"), "past");
+        compare(hues.strengthFor("2026-08-18T15:30", "2026-08-18T13:40"), "future");
+    }
+
+    /// **The ladder is a real one and both rungs are legible.** The reference
+    /// prints its past titles at about 2.5:1, which is not dim but unreadable;
+    /// this asserts every past ink still clears AA on its own past fill, and
+    /// that both rungs stay in their own band — past 4.5–5.5, future 7 and up,
+    /// and never closer than 1.4x apart. A hierarchy that is measurable rather
+    /// than eyeballed, and one a later "dim it a bit more" cannot quietly cross
+    /// in either direction.
+    function test_past_chips_stay_readable_and_future_ones_stay_louder() {
+        const modes = [
+            {"surface": "#141b17", "bars": testCase.barsDark,
+             "inks": testCase.inksDark, "dark": true},
+            {"surface": "#f7f9f5", "bars": testCase.barsLight,
+             "inks": testCase.inksLight, "dark": false}
+        ];
+        for (let m = 0; m < modes.length; m++) {
+            const mode = modes[m];
+            for (let i = 0; i < mode.bars.length; i++) {
+                const futureFill = hues.tint(mode.bars[i], mode.surface,
+                                             hues.tintAlpha(mode.dark));
+                const pastFill = hues.tint(mode.bars[i], mode.surface,
+                                           hues.pastTintAlpha(mode.dark));
+                const pastInk = hues.tint(mode.inks[i], pastFill,
+                                          hues.pastInkStrength(mode.dark));
+                const pastRatio = hues.contrast(pastInk, pastFill);
+                const futureRatio = hues.contrast(mode.inks[i], futureFill);
+                verify(pastRatio >= 4.5,
+                       "past ink " + pastInk + " on " + pastFill + " is "
+                       + pastRatio.toFixed(2) + ":1");
+                verify(pastRatio <= 5.5,
+                       "past ink " + pastInk + " is " + pastRatio.toFixed(2)
+                       + ":1 — dimmed is a band, not just a floor");
+                verify(futureRatio >= 7,
+                       "hue " + i + " future " + futureRatio.toFixed(2)
+                       + ":1 is not the loud rung");
+                verify(futureRatio >= pastRatio * 1.4,
+                       "hue " + i + " future " + futureRatio.toFixed(2)
+                       + " is not 1.4x past " + pastRatio.toFixed(2));
+            }
+        }
+    }
+
+    /// The past fill has to recede, not merely change: under half the live
+    /// alpha, so a past chip reads as a mark on the grid rather than a card on
+    /// it. What still says *which calendar* is the bar.
+    function test_past_strengths_are_the_quieter_ones() {
+        verify(hues.pastTintAlphaDark < hues.tintAlphaDark / 2);
+        verify(hues.pastTintAlphaLight < hues.tintAlphaLight / 2);
+        verify(hues.pastBarStrength < 0.5 && hues.pastBarStrength > 0.3);
+    }
+
+    /// `contrast` agrees with the arithmetic the rest of this file has always
+    /// used, which is what lets the assertions above be written against it.
+    function test_contrast_matches_the_reference_arithmetic() {
+        fuzzyCompare(hues.contrast("#ffffff", "#000000"), 21, 0.01);
+        fuzzyCompare(hues.contrast("#141b17", "#141b17"), 1, 0.001);
+        fuzzyCompare(hues.contrast("#bbdede", "#141b17"),
+                     testCase.contrast("#bbdede", "#141b17"), 0.01);
+    }
+
+    // --- neutral furniture ------------------------------------------------------
+
+    /// **Desaturating the chrome must be free.** `neutralise` mixes toward the
+    /// grey of the colour's *own* luminance, so every ratio the ink held against
+    /// every background it is drawn on survives. That property is the only
+    /// reason a policy is allowed near a text colour at all — assert it, or the
+    /// next person tunes the amount and quietly takes the gutter under AA.
+    function test_neutralise_preserves_contrast() {
+        const inks = ["#7d8f86", "#a9b8b0", "#e6ece8", "#5f7268", "#42544c"];
+        const grounds = ["#0b100d", "#141b17", "#f7f9f5", "#e8ece9"];
+        for (let i = 0; i < inks.length; i++) {
+            const out = hues.neutralise(inks[i], 0.75);
+            for (let g = 0; g < grounds.length; g++) {
+                const before = hues.contrast(inks[i], grounds[g]);
+                const after = hues.contrast(out, grounds[g]);
+                verify(Math.abs(after - before) < 0.12,
+                       inks[i] + " -> " + out + " on " + grounds[g] + ": "
+                       + before.toFixed(2) + " became " + after.toFixed(2));
+            }
+        }
+    }
+
+    /// And it must actually neutralise: the green cast is what is being removed,
+    /// so the channels have to converge.
+    function test_neutralise_removes_the_cast() {
+        const spread = c => {
+            const ch = hues.channels(c);
+            return Math.max(ch[0], ch[1], ch[2]) - Math.min(ch[0], ch[1], ch[2]);
+        };
+        // `textMuted` is #7d8f86 — 18 points of green across its channels.
+        verify(spread("#7d8f86") >= 18);
+        verify(spread(hues.neutralise("#7d8f86", 0.75)) <= 6);
+        // 0 is a no-op and 1 is a true grey, so the knob spans what it claims.
+        compare(hues.neutralise("#7d8f86", 0), "#7d8f86");
+        verify(spread(hues.neutralise("#7d8f86", 1)) <= 1);
+    }
+
+    function test_neutralise_survives_nonsense() {
+        compare(hues.neutralise("", 0.75), "");
+        compare(hues.neutralise("not a colour", 0.75), "not a colour");
     }
 
     /// WCAG, in the test rather than in the shipping code — the same arithmetic

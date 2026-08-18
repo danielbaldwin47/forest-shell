@@ -169,7 +169,11 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: letterCell.modelData
-                    color: Theme.textMuted
+                    // The same neutral the week's day caps and hour gutter take
+                    // — a weekday header is a ruling wherever it appears, and a
+                    // sidebar that kept the green cast while the grid beside it
+                    // dropped it would make the two look like two applications.
+                    color: CalendarTokens.gridMuted
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     font.weight: Theme.weightMedium

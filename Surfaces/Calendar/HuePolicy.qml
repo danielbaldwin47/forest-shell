@@ -215,6 +215,37 @@ QtObject {
         return dark ? policy.tintAlphaDark : policy.tintAlphaLight;
     }
 
+    /// The **banner** alpha, and the reason it is a second number rather than a
+    /// second opinion about the first.
+    ///
+    /// `tintAlpha` is solved for a chip drawn *among other tinted chips*: at
+    /// 0.16 a chip is one step from its neighbours, which is all it needs when
+    /// the neighbours are the same kind of object. A month banner is the only
+    /// filled thing in its grid — every timed event beside it is an unfilled
+    /// line — so its step is not against a neighbour but against the bare cell
+    /// under it, and 0.16 against a cell measured as a smudge rather than a
+    /// pill: the shape that carries the whole "this owns the day" statement was
+    /// the faintest object in the picture.
+    ///
+    /// 0.26 dark and 0.22 light are where the fill closes into a shape with an
+    /// edge of its own, which is what lets the banner drop the hairline it used
+    /// to need. The reference's all-day fill sits in the same place — roughly a
+    /// quarter of the calendar's own colour over the page.
+    ///
+    /// **The ceiling is the ink, and it is a measurement, not a taste.**
+    /// Computed over all eight hues against `surfaceRaised` in both palettes,
+    /// the worst ink lands at 6.22:1 dark and 6.35:1 light — clear of the 6:1
+    /// this surface solves at, which is itself past 4.5 because a chip prints
+    /// pt(11) type whose antialiased edges measure below the computed ratio.
+    /// 0.30 dark was tried first and put moss at 5.67:1; that is the number
+    /// that set these.
+    readonly property real bannerAlphaDark: 0.26
+    readonly property real bannerAlphaLight: 0.22
+
+    function bannerAlpha(dark: bool): real {
+        return dark ? policy.bannerAlphaDark : policy.bannerAlphaLight;
+    }
+
     /// `#rrggbb` for `hue` laid over `base` at `alpha`. Hex in, hex out, so the
     /// arithmetic is checkable offscreen without a `color` type or a Theme.
     function tint(hue: string, base: string, alpha: real): string {
@@ -243,5 +274,185 @@ QtObject {
             const n = Math.max(0, Math.min(255, Math.round(v)));
             return (n < 16 ? "0" : "") + n.toString(16);
         }).join("");
+    }
+
+    // --- past and future -------------------------------------------------------
+    //
+    // **The week's strongest ordering is not colour, it is time**, and until now
+    // this surface did not draw it. Every chip printed at the same weight, so a
+    // week already three-quarters spent looked exactly as busy as an empty one
+    // and the eye had to read the gutter to find out where it stood. The
+    // reference splits its chips on the same axis and the split is the single
+    // most useful thing about its week picture.
+    //
+    // Where this parts company with the reference is *how far* the past is
+    // pushed down. Measured off the live capture, its past titles sit at about
+    // 35% coverage on their fill — call it 2.5:1, well under AA — so a past
+    // meeting is not dim, it is unreadable, and the reader who wants to know
+    // what they were doing at 10am has to select the chip to find out. A past
+    // event is still information: it is what the week *was*. So the ladder here
+    // is a real one and both rungs are legible — future inks land at 8.9–9.6:1
+    // on their fills (dark) and 7.0–7.2 (light); past inks at 4.6–4.9 in both,
+    // still past AA. `tests/tst_huepolicy.qml` asserts both bands, which is what
+    // stops a later "dim it a bit more" from quietly crossing the line.
+
+    /// The tint alpha a **past** chip's fill is laid over the page at.
+    ///
+    /// Under half the live one (0.07 against 0.16 dark). A past chip should read
+    /// as a mark on the grid rather than as a card on it, and the thing that
+    /// still says *which calendar* is the accent bar, not the fill.
+    readonly property real pastTintAlphaDark: 0.07
+    readonly property real pastTintAlphaLight: 0.055
+
+    function pastTintAlpha(dark: bool): real {
+        return dark ? policy.pastTintAlphaDark : policy.pastTintAlphaLight;
+    }
+
+    /// How much of the hue a past chip's **accent bar** keeps, mixed over the
+    /// page. 0.45 — under half, so the bar is plainly quieter, and still enough
+    /// hue that a past `lake` and a past `ember` are told apart at a glance,
+    /// which is the whole reason the bar exists.
+    readonly property real pastBarStrength: 0.45
+
+    /// How much of the ink a past chip's **text** keeps, mixed over its own
+    /// fill. Two numbers, because the mix runs opposite ways in the two modes:
+    /// in dark the ink is pale over a dark fill and fading it costs contrast
+    /// fast, in light the ink is dark over a pale fill and fading it costs
+    /// contrast faster still. These are the lowest values on a 0.02 grid at
+    /// which all eight hues still clear 4.6:1 — solved, not chosen.
+    readonly property real pastInkStrengthDark: 0.60
+    readonly property real pastInkStrengthLight: 0.80
+
+    function pastInkStrength(dark: bool): real {
+        return dark ? policy.pastInkStrengthDark : policy.pastInkStrengthLight;
+    }
+
+    /// `YYYY-MM-DDTHH:MM` for a stamp that may be short of one, or `""`.
+    ///
+    /// An all-day event stores a bare date, and a bare date used as an *end* is
+    /// not over until the day is: `2026-08-18` normalises to `2026-08-18T23:59`,
+    /// so today's all-day event stays a future one all day. Anything longer is
+    /// cut to the minute so that two stamps of different precision still compare
+    /// — seconds on one side and none on the other would otherwise make
+    /// `…T09:30:00` sort after `…T09:30`, which is the wrong answer at exactly
+    /// the moment the answer changes.
+    function normaliseEnd(stamp: string): string {
+        const s = String(stamp === undefined || stamp === null ? "" : stamp).trim();
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(s))
+            return "";
+        if (s.length === 10)
+            return s + "T23:59";
+        return /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}/.test(s)
+            ? s.substring(0, 16) : "";
+    }
+
+    /// The same, for the clock. A bare date here is the *start* of the day: a
+    /// caller who says "now is 2026-08-18" has said nothing about the hour, and
+    /// treating that as midnight makes nothing on that day past, which is the
+    /// safe direction — a future chip misread as future costs nothing, a live
+    /// meeting greyed out costs the reader the one chip they were looking for.
+    function normaliseNow(stamp: string): string {
+        const s = String(stamp === undefined || stamp === null ? "" : stamp).trim();
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(s))
+            return "";
+        if (s.length === 10)
+            return s + "T00:00";
+        return /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}/.test(s)
+            ? s.substring(0, 16) : "";
+    }
+
+    /// **Has this event finished?** — the one decision the whole past/future
+    /// ladder hangs off.
+    ///
+    /// It is `end`, not `start`: an event that began an hour ago and runs for
+    /// another one is the reader's *current* meeting and the loudest thing on
+    /// the grid. Dimming at `start` would grey out the chip you are sitting in.
+    ///
+    /// No clock means no past. The capture harness, a test, and the surface for
+    /// the first frame after load all hand this an empty `nowStamp`, and a week
+    /// that dims itself because it does not yet know the time is a week that
+    /// flickers on every launch. Both stamps are ISO and fixed-width after
+    /// normalisation, so a string compare *is* the chronological one — no `Date`
+    /// parsing, no timezone, and the same answer offscreen as on the grid.
+    function isPast(endStamp: string, nowStamp: string): bool {
+        const now = policy.normaliseNow(nowStamp);
+        if (now.length === 0)
+            return false;
+        const end = policy.normaliseEnd(endStamp);
+        if (end.length === 0)
+            return false;
+        return end <= now;
+    }
+
+    /// `"past"` or `"future"` — the same decision named, for a surface that
+    /// wants to switch on it rather than on a bool, and for a log line.
+    function strengthFor(endStamp: string, nowStamp: string): string {
+        return policy.isPast(endStamp, nowStamp) ? "past" : "future";
+    }
+
+    /// The same question asked of a whole event. Missing event, missing clock
+    /// or a malformed stamp all answer `false`, for the reason `forEvent` above
+    /// answers 0: the caller is a delegate mid-rebuild.
+    function eventIsPast(event: var, nowStamp: string): bool {
+        if (!event)
+            return false;
+        return policy.isPast(event.end, nowStamp);
+    }
+
+    // --- contrast, so the ladder can be asserted rather than eyeballed ---------
+
+    /// Relative luminance per WCAG 2.1, from a `#rrggbb`.
+    function luminance(colour: string): real {
+        const c = policy.channels(colour);
+        if (!c)
+            return 0;
+        const lin = c.map(v => {
+            const x = v / 255;
+            return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    }
+
+    /// The WCAG contrast ratio between two `#rrggbb`, 1..21.
+    function contrast(a: string, b: string): real {
+        const x = policy.luminance(a);
+        const y = policy.luminance(b);
+        const hi = Math.max(x, y);
+        const lo = Math.min(x, y);
+        return (hi + 0.05) / (lo + 0.05);
+    }
+
+    // --- taking the forest out of the furniture ---------------------------------
+
+    /// `colour` pulled `amount` of the way toward the **grey of its own
+    /// luminance**.
+    ///
+    /// The palette's neutrals are not neutral — `textMuted` is `#7d8f86`, which
+    /// is a green — and that is right for a shell whose whole identity is the
+    /// forest. It is wrong for a *grid*: an hour gutter and a row of weekday
+    /// caps are rulings, and twenty of them in a tinted grey read as a wash the
+    /// eye keeps trying to interpret, sitting a few degrees off the eight hues
+    /// that actually carry meaning here. So the chrome desaturates and the
+    /// content does not — the theme survives in every surface, border, wash and
+    /// chip, and the furniture stops competing with them.
+    ///
+    /// Mixing toward the *equal-luminance* grey rather than toward mid-grey is
+    /// what makes this free: the endpoints have the same relative luminance, so
+    /// every ratio this ink held against every background it is drawn on
+    /// survives the change. `tests/tst_huepolicy.qml` asserts that, which is the
+    /// only reason this is allowed to touch text colour at all.
+    function neutralise(colour: string, amount: real): string {
+        const c = policy.channels(colour);
+        if (!c)
+            return String(colour || "");
+        const a = Math.max(0, Math.min(1, amount));
+        const target = policy.luminance(colour);
+        // Invert the sRGB transfer curve on the luminance to get the grey level
+        // that carries it: for a grey, R = G = B, so luminance is just the
+        // linear value back through the curve.
+        const g = target <= 0.0031308
+            ? target * 12.92 : 1.055 * Math.pow(target, 1 / 2.4) - 0.055;
+        const level = g * 255;
+        return policy.hex(c.map(v => v + (level - v) * a));
     }
 }

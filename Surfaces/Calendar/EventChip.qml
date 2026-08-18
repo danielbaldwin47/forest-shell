@@ -40,6 +40,17 @@ Item {
     /// Its hue index, resolved through `CalendarTokens`.
     property int hue: 0
 
+    /// **Is it over?** — set by the view from `HuePolicy.eventIsPast`, never
+    /// worked out here. The chip has no clock and must not grow one: two chips
+    /// asking `new Date()` a frame apart is how a grid gets a seam through the
+    /// middle of it, and a frozen `nowStamp` is the only reason two captures of
+    /// the same fixture are the same picture.
+    ///
+    /// Everything it changes is a colour — bar, fill, ink, hairline, monogram —
+    /// so the geometry of a past chip is the geometry of a future one and the
+    /// week's shape does not shift as the day moves through it.
+    property bool past: false
+
     /// `GuestPolicy.summary` for this event, resolved by the view that has the
     /// contact book. `null` — the default — is a chip with nothing to say about
     /// guests, which is every chip in a week column: the guest line is a thing
@@ -235,7 +246,7 @@ Item {
         radius: Theme.radiusSm + 1
         color: "transparent"
         border.width: Theme.rail
-        border.color: CalendarTokens.bar(chip.hue)
+        border.color: CalendarTokens.barFor(chip.hue, chip.past)
         visible: chip.selected
     }
 
@@ -269,9 +280,9 @@ Item {
         // rather than the chip's own edge. The packed tier corners at 3, which
         // is still a corner and leaves the bar whole.
         radius: chip.content.tight ? 3 : Theme.radiusSm
-        color: chip.hovered ? CalendarTokens.fillHover(chip.hue) : CalendarTokens.fill(chip.hue)
+        color: chip.hovered ? CalendarTokens.fillHoverFor(chip.hue, chip.past) : CalendarTokens.fillFor(chip.hue, chip.past)
         border.width: 1
-        border.color: CalendarTokens.chipBorder(chip.hue)
+        border.color: CalendarTokens.chipBorderFor(chip.hue, chip.past)
 
         Behavior on color {
             enabled: Theme.animateTransforms
@@ -286,7 +297,7 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: chip.content.bar
-            color: CalendarTokens.bar(chip.hue)
+            color: CalendarTokens.barFor(chip.hue, chip.past)
         }
 
         /// Title over time — the roomy case, and every packed chip tall enough
@@ -323,7 +334,7 @@ Item {
                 wrapMode: chip.content.titleLines > 1 ? Text.Wrap : Text.NoWrap
                 elide: Text.ElideRight
                 maximumLineCount: chip.content.titleLines
-                color: CalendarTokens.text(chip.hue)
+                color: CalendarTokens.textFor(chip.hue, chip.past)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
@@ -358,7 +369,7 @@ Item {
                 // spending the one ratio a chip is not allowed to spend. Size
                 // and weight carry the hierarchy instead; they cost nothing
                 // legibility owns.
-                color: CalendarTokens.text(chip.hue)
+                color: CalendarTokens.textFor(chip.hue, chip.past)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
                 // Regular carries the hierarchy at the roomy sizes; at the
@@ -407,8 +418,8 @@ Item {
 
                         size: 18
                         initials: avatar.modelData.initials
-                        fill: CalendarTokens.monogramFill(chip.hue)
-                        ink: CalendarTokens.monogramInk(chip.hue)
+                        fill: CalendarTokens.monogramFillFor(chip.hue, chip.past)
+                        ink: CalendarTokens.monogramInkFor(chip.hue, chip.past)
                     }
                 }
 
@@ -422,7 +433,7 @@ Item {
                     visible: guestLabel.text !== ""
                     text: chip.guests ? (chip.guests.line || "") : ""
                     elide: Text.ElideRight
-                    color: CalendarTokens.text(chip.hue)
+                    color: CalendarTokens.textFor(chip.hue, chip.past)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(chip.content.guestSize)
                     font.weight: Theme.weightRegular
@@ -459,7 +470,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.timeLabel
                 // Full strength, for the reason the stacked time above is.
-                color: CalendarTokens.text(chip.hue)
+                color: CalendarTokens.textFor(chip.hue, chip.past)
                 font.features: CalendarTokens.tabularFigures
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
@@ -478,7 +489,7 @@ Item {
                 text: chip.clippedTitle
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                color: CalendarTokens.text(chip.hue)
+                color: CalendarTokens.textFor(chip.hue, chip.past)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
@@ -500,6 +511,35 @@ Item {
         /// Which chips get one is `EventLayoutPolicy.showsGrip` — a height and a
         /// clear height, so a half-hour chip and a chip buried under a cascaded
         /// neighbour both keep their one clean line.
+        /// The at-rest half of the same affordance, and the reason the pill above
+        /// is allowed to stay hidden.
+        ///
+        /// The standing note on this surface was that the week *reads read-only*:
+        /// nothing on a still page says a chip can be taken hold of, so the
+        /// picture looks like a report rather than a calendar. The centred dash
+        /// failed at that job for the reason written above — it is a mark with no
+        /// geometry of its own. This is the opposite move: the chip's own bottom
+        /// edge, drawn as an edge, running the full width from the accent bar to
+        /// the right side at a fraction of the hue. It cannot read as a fault
+        /// because it is exactly where a card's edge belongs, and it says the one
+        /// true thing the hover pill says — *this line is the end of the event and
+        /// it is the thing that moves*.
+        ///
+        /// **Future chips only.** A past event's end is a fact rather than a
+        /// handle, and drawing the edge on all of them would put the loudest new
+        /// mark on the grid on precisely the chips the past/future ladder just
+        /// spent its effort quieting.
+        Rectangle {
+            visible: !chip.past && !chip.hovered
+                     && chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+            anchors.left: parent.left
+            anchors.leftMargin: chip.content.bar
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 2
+            color: Qt.alpha(CalendarTokens.barFor(chip.hue, false), 0.30)
+        }
+
         Rectangle {
             visible: chip.hovered
                      && chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
@@ -509,7 +549,7 @@ Item {
             width: 24
             height: 3
             radius: 1.5
-            color: CalendarTokens.bar(chip.hue)
+            color: CalendarTokens.barFor(chip.hue, chip.past)
             opacity: pointer.hoverZone === "bottom" ? 0.95 : 0.7
 
             Behavior on opacity {

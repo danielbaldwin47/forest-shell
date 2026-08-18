@@ -145,11 +145,18 @@ Item {
             id: card
 
             width: parent.width
-            height: header.height + 1 + listBox.height
+            height: header.height + 1 + listBox.height + 1 + footer.height
             radius: Theme.radiusLg
             color: Theme.surfaceRaised
             border.width: 1
-            border.color: Theme.borderSubtle
+            /// `borderStrong`, not `borderSubtle`, and the two plates behind
+            /// this rectangle are why. A shadow is black ink, and this card sits
+            /// on a scrim that is *already* black ink at 52% — so the plates buy
+            /// nothing in dark mode and the card's own edge is the only thing
+            /// separating it from the wash. At `borderSubtle` the round-2
+            /// capture's top-left corner dissolved into the backdrop. The
+            /// plates stay for light mode, where the page has somewhere to fall.
+            border.color: Theme.borderStrong
             clip: true
 
             scale: Theme.animateTransforms ? 0.97 : 1
@@ -185,7 +192,12 @@ Item {
                     id: magnifier
 
                     anchors.left: parent.left
-                    anchors.leftMargin: Theme.space4
+                    // The glyph gives back the 2px of padding Lucide draws into
+                    // its own box, so its ink lands on the same rail as the
+                    // section headings and the footer caps rather than 2px
+                    // right of them — `CalendarTokens.glyphInk` has the whole
+                    // argument.
+                    anchors.leftMargin: Theme.space4 - CalendarTokens.glyphInk
                     anchors.verticalCenter: parent.verticalCenter
                     name: "search"
                     size: 18
@@ -216,14 +228,16 @@ Item {
                     text: menu.query
                     onTextChanged: menu.query = text
 
-                    // The caret, as its own rectangle: the default is a hairline
-                    // in the text colour and this surface's caret is the accent
-                    // everywhere else too.
-                    cursorDelegate: Rectangle {
-                        width: 2
-                        radius: 1
-                        color: Theme.accentPrimary
-                    }
+                    // The built-in caret is turned off and drawn below instead.
+                    //
+                    // Not for colour — a `cursorDelegate` would have handled
+                    // that. For *presence*: Qt blinks the delegate, so the caret
+                    // is absent from half the frames, and a capture is one
+                    // frame. Round 2's picture of this field was judged as a
+                    // field with no caret at all, which loses the one mark that
+                    // says the thing is typeable — the field is otherwise a
+                    // magnifier and a grey line of placeholder.
+                    cursorDelegate: Item {}
 
                     // Up/Down/Enter belong to the list under the field, and a
                     // single-line TextInput has nothing to do with any of them.
@@ -247,12 +261,33 @@ Item {
                     }
 
                     Text {
-                        anchors.fill: parent
+                        anchors.left: parent.left
+                        // 3px, which is the caret's width plus a hair: an empty
+                        // field puts the caret at x 0 and the placeholder would
+                        // otherwise start underneath it. Typed text starts at 0
+                        // and the placeholder is gone by then, so the 3px is
+                        // never a jump anyone sees.
+                        anchors.leftMargin: 3
+                        anchors.verticalCenter: parent.verticalCenter
                         visible: field.text.length === 0
-                        verticalAlignment: Text.AlignVCenter
                         text: qsTr("Search commands")
                         color: Theme.textMuted
                         font: field.font
+                    }
+
+                    /// The caret, always on. The menu opens focused and closes
+                    /// on Escape, so for as long as this rectangle exists the
+                    /// field owns the keyboard — there is no state where a
+                    /// blink-off frame is telling the truth about it.
+                    Rectangle {
+                        id: caret
+
+                        x: field.cursorRectangle.x
+                        y: field.cursorRectangle.y
+                        width: 2
+                        height: field.cursorRectangle.height
+                        radius: 1
+                        color: Theme.accentPrimary
                     }
                 }
             }
@@ -286,9 +321,23 @@ Item {
                 // The list is as tall as its content up to a ceiling, so a menu
                 // with two rows in it is a small card rather than a tall one
                 // with a hole in the bottom.
+                //
+                // The ceiling is 60% of the *window*, and it is on the list
+                // rather than on the card on purpose: a cap on the card would
+                // have to come out of something, and the two things it would
+                // come out of — the field you are typing into and the legend
+                // that says how to leave — are the two that must never scroll
+                // away. So the list scrolls and the chrome stays whole.
+                //
+                // 0.66 and not 0.6: the whole grouped keymap is 452px tall on a
+                // 760px window and 0.6 clipped it by four — a menu that scrolls
+                // by half a row is a menu that looks broken rather than long.
+                // The cap is still a cap; it is just set above the one list
+                // this surface is guaranteed to draw.
                 height: menu.rows.length === 0
                       ? 64
-                      : Math.min(list.contentHeight, 372) + Theme.space2 * 2
+                      : Math.min(list.contentHeight, Math.round(menu.height * 0.66))
+                        + Theme.space2 * 2
 
                 ListView {
                     id: list
@@ -318,7 +367,22 @@ Item {
                                                        && rowItem.index === menu.highlight
 
                         width: ListView.view.width
-                        height: rowItem.isGroup ? 28 : 40
+                        // A heading is a label *for* the rows beneath it, so it
+                        // has to sit closer to them than to the group it just
+                        // left — otherwise it floats equidistant and binds to
+                        // neither, which is what round 2 measured: 38px above,
+                        // 40px below, four headings that named nothing.
+                        //
+                        // 42 tall with the label 4px off its own bottom puts 55
+                        // device px of air above the caps and 25 below, better
+                        // than 2:1, and the binding is no longer something the
+                        // reader has to work out.
+                        //
+                        // The *first* heading is 32, because the rule under the
+                        // search field is already doing the separating there and
+                        // a full measure of air under it would open a hole in
+                        // the top of the list.
+                        height: rowItem.isGroup ? (rowItem.index === 0 ? 32 : 42) : 40
 
                         // --- a heading ---------------------------------------
 
@@ -345,24 +409,11 @@ Item {
                             anchors.rightMargin: Theme.space2
                             visible: !rowItem.isGroup
                             radius: Theme.radiusSm
-                            // `surfaceOverlay` alone is 8 levels of grey away
-                            // from `surfaceRaised` — measured on the first
-                            // capture, where the selected row was almost
-                            // invisible next to the card. A share of the accent
-                            // mixed in ties the band to the rail beside it and
-                            // makes the pair legible as one mark.
-                            //
-                            // 0.18 and not 0.10. A tenth composited to #2c3e38,
-                            // which is **1.37:1** on the card — under the 1.4
-                            // floor a band has to clear to be a band at all,
-                            // and a selected row you have to look for is the
-                            // exact failure the rail was added to cover for.
-                            // 0.18 lands 1.63:1 dark and 1.44:1 light, and the
-                            // row label still reads 7.96:1 on it.
-                            color: rowItem.selected
-                                 ? Qt.tint(Theme.surfaceOverlay,
-                                           Qt.alpha(Theme.accentPrimary, 0.18))
-                                 : "transparent"
+                            // The band and the rail are one hue at two
+                            // lightnesses — `CalendarTokens.menuSelectFill`
+                            // carries the measurement and the argument.
+                            color: rowItem.selected ? CalendarTokens.menuSelectFill
+                                                    : "transparent"
 
                             /// The anchor the eye tracks — see the header.
                             Rectangle {
@@ -382,12 +433,20 @@ Item {
                             id: rowIcon
 
                             anchors.left: parent.left
-                            anchors.leftMargin: Theme.space4
+                            // Same rail as the magnifier above and the headings
+                            // beside it — see `CalendarTokens.glyphInk`.
+                            anchors.leftMargin: Theme.space4 - CalendarTokens.glyphInk
                             anchors.verticalCenter: parent.verticalCenter
                             visible: !rowItem.isGroup
                             name: rowItem.isGroup ? "" : String(rowItem.modelData.command.icon)
                             size: 18
-                            color: rowItem.selected ? Theme.textPrimary : Theme.textSecondary
+                            // Deliberately *not* brighter on the selected row.
+                            // The selection is one band plus one rail; a row
+                            // that also swapped its icon colour, its label
+                            // weight and its badge would be four marks saying
+                            // one thing, and the first capture read as a row
+                            // shouting rather than a row chosen.
+                            color: Theme.textSecondary
                         }
 
                         Text {
@@ -402,7 +461,7 @@ Item {
                             color: Theme.textPrimary
                             font.family: Theme.fontUi
                             font.pointSize: Theme.pt(13.5)
-                            font.weight: rowItem.selected ? Theme.weightMedium : Theme.weightRegular
+                            font.weight: Theme.weightRegular
                         }
 
                         Keycaps {
@@ -412,9 +471,13 @@ Item {
                             anchors.rightMargin: Theme.space4
                             anchors.verticalCenter: parent.verticalCenter
                             visible: !rowItem.isGroup
+                            // One badge per row — `KeyNavPolicy.menuKeys` picks
+                            // which of a row's ways in the menu prints, and the
+                            // shortcuts sheet keeps the rest.
                             caps: rowItem.isGroup
                                 ? []
-                                : menu.keyNav.keyCaps(rowItem.modelData.command.shortcut)
+                                : menu.keyNav.keyCaps(
+                                      menu.keyNav.menuKeys(rowItem.modelData.command))
                         }
 
                         MouseArea {
@@ -432,6 +495,42 @@ Item {
                     }
                 }
 
+                // --- the scroll affordances ------------------------------------
+                //
+                // A list that scrolls has to say so. Both marks are bound to
+                // `list` rather than to a row count, so a query that shortens
+                // the list takes them away and neither can be left claiming
+                // there is more when there is not.
+
+                /// More below, as a fade rather than a hard cut: the row under
+                /// the ceiling is half-drawn on purpose, which is the oldest
+                /// and most honest way of saying the list continues.
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 24
+                    visible: list.interactive && !list.atYEnd
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Qt.alpha(Theme.surfaceRaised, 0) }
+                        GradientStop { position: 1; color: Theme.surfaceRaised }
+                    }
+                }
+
+                /// How far down, and how much of it there is.
+                Rectangle {
+                    readonly property real track: listBox.height - Theme.space2 * 2
+
+                    anchors.right: parent.right
+                    anchors.rightMargin: 3
+                    width: 3
+                    radius: 1.5
+                    visible: list.interactive
+                    color: Theme.borderStrong
+                    y: Theme.space2 + list.visibleArea.yPosition * track
+                    height: Math.max(24, list.visibleArea.heightRatio * track)
+                }
+
                 /// A query that matched nothing is a state, not an error — say
                 /// so, rather than collapsing to a hairline under the field.
                 Text {
@@ -441,6 +540,76 @@ Item {
                     color: Theme.textMuted
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(13.5)
+                }
+            }
+
+            // --- the legend ----------------------------------------------------
+            //
+            // What the rows cannot say: how to move between them, take one, and
+            // leave. Three marks on a quieter ground than the list, so the band
+            // reads as the card's edge rather than a fourth group of commands —
+            // which is also why it is the one part of the card that never
+            // scrolls. `KeyNavPolicy.menuFooter` chooses the three.
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: listBox.bottom
+                height: 1
+                color: Theme.borderSubtle
+            }
+
+            Rectangle {
+                id: footer
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 36
+                color: Qt.alpha(Theme.bgSunken, 0.5)
+
+                Row {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Theme.space4
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.space3
+
+                    Repeater {
+                        model: menu.keyNav.menuFooter()
+
+                        delegate: Row {
+                            id: hint
+
+                            required property int index
+                            required property var modelData
+
+                            spacing: Theme.space2
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: hint.index > 0
+                                text: "·"
+                                color: Theme.textMuted
+                                opacity: 0.6
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(12)
+                            }
+
+                            Keycaps {
+                                anchors.verticalCenter: parent.verticalCenter
+                                caps: menu.keyNav.keyCaps(hint.modelData.keys)
+                            }
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: String(hint.modelData.label)
+                                color: Theme.textMuted
+                                font.family: Theme.fontUi
+                                font.pointSize: Theme.pt(11.5)
+                                font.weight: Theme.weightRegular
+                            }
+                        }
+                    }
                 }
             }
         }

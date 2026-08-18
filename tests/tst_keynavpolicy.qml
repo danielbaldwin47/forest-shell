@@ -665,7 +665,7 @@ TestCase {
             }
         }
         verify(seenCommand);
-        compare(headings, ["View", "Navigate", "Event", "Help"]);
+        compare(headings, ["View", "Navigate", "Actions"]);
     }
 
     function test_menu_rows_of_a_filtered_list_drop_the_empty_headings() {
@@ -719,29 +719,129 @@ TestCase {
     function test_probe_every_command_carries_a_group_and_an_icon() {
         // The menu draws both; a command that arrived without either would be a
         // blank slot rather than a missing command, which is the harder bug.
-        const groups = ["View", "Navigate", "Event", "Help"];
+        const groups = ["View", "Navigate", "Actions"];
         for (const command of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" }))) {
             verify(groups.indexOf(command.group) >= 0);
             verify(command.icon.length > 0);
         }
     }
 
+    function test_probe_the_menu_heads_three_groups_not_four() {
+        // `Help` used to head a single row on its own — a heading, a measure of
+        // air above it and another below, all to introduce one line. Three
+        // groups for eight commands is the ratio; four was chrome.
+        const rows = keys.menuRows(keys.commands(testCase.ctxOf({})));
+        let headings = 0;
+        let commands = 0;
+        for (const row of rows) {
+            if (row.kind === "group")
+                headings++;
+            else
+                commands++;
+        }
+        compare(headings, 3);
+        verify(commands >= 3 * headings);
+    }
+
+    // --- what a menu row prints, as against what the sheet does ---------------
+
+    function test_a_menu_row_prints_the_first_way_in_and_the_sheet_keeps_the_rest() {
+        // The sheet's job is the whole keymap; a row's job is one badge at the
+        // end of a line of prose.
+        compare(keys.menuKeys({ "keys": "C / Ctrl+N", "shortcut": "C" }), "C");
+        compare(keys.menuKeys({ "keys": "J / \u2190", "shortcut": "J" }), "J");
+        compare(keys.menuKeys({ "keys": "Backspace / Del", "shortcut": "Backspace" }),
+                "Backspace");
+        // A single way in is printed whole, chord and all.
+        compare(keys.menuKeys({ "keys": "Ctrl+N", "shortcut": "N" }), "Ctrl+N");
+    }
+
+    function test_a_menu_row_with_no_printed_form_falls_back_to_its_one_key() {
+        // A badge is the whole reason the row is worth reading twice; a row
+        // that arrived without `keys` still teaches the key it has.
+        compare(keys.menuKeys({ "shortcut": "?" }), "?");
+        compare(keys.menuKeys({ "keys": "", "shortcut": "?" }), "?");
+        compare(keys.menuKeys({}), "");
+        compare(keys.menuKeys(undefined), "");
+    }
+
+    function test_probe_every_menu_row_prints_exactly_one_cap_or_one_chord() {
+        // The measured defect: three caps and two separators at the end of one
+        // 40px row, with the two separators set at different widths. Whatever
+        // else a badge is, it is never an alternative *and* a chord at once.
+        for (const command of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" }))) {
+            const caps = keys.keyCaps(keys.menuKeys(command));
+            verify(caps.length > 0);
+            for (const cap of caps)
+                verify(cap.kind !== "sep" || cap.text === "+");
+        }
+    }
+
     // --- shortcuts as keycaps -------------------------------------------------
 
-    function test_a_chord_is_caps_side_by_side_and_an_alternative_keeps_its_slash() {
+    function test_a_chord_is_joined_by_a_plus_and_an_alternative_by_a_slash() {
         const chord = keys.keyCaps("Ctrl+N");
-        compare(chord.length, 2);
+        compare(chord.length, 3);
         compare(chord[0].kind, "key");
         compare(chord[0].text, "Ctrl");
-        compare(chord[1].text, "N");
+        compare(chord[1].kind, "sep");
+        compare(chord[1].text, "+");
+        compare(chord[2].kind, "key");
+        compare(chord[2].text, "N");
 
+        // The string that is the whole argument for printing both marks: with
+        // the plus dropped this was four caps in a row and the grouping was the
+        // reader's problem.
         const either = keys.keyCaps("C / Ctrl+N");
-        compare(either.length, 4);
+        compare(either.length, 5);
         compare(either[0].text, "C");
         compare(either[1].kind, "sep");
         compare(either[1].text, "/");
         compare(either[2].text, "Ctrl");
-        compare(either[3].text, "N");
+        compare(either[3].kind, "sep");
+        compare(either[3].text, "+");
+        compare(either[4].text, "N");
+    }
+
+    function test_the_footer_legend_names_the_three_keys_the_menu_itself_answers() {
+        const feet = keys.menuFooter();
+        compare(feet.length, 3);
+        compare(feet.map(f => f.label), ["Navigate", "Select", "Close"]);
+        for (const foot of feet) {
+            const caps = keys.keyCaps(foot.keys);
+            // One cap each — the legend is three marks, not a keyboard.
+            compare(caps.length, 1);
+            compare(caps[0].kind, "key");
+        }
+        // Not a command rail in disguise: nothing here is a command id.
+        const ids = keys.commands(testCase.ctxOf({})).map(c => c.id);
+        for (const foot of feet)
+            verify(ids.indexOf(foot.label.toLowerCase()) < 0);
+    }
+
+    function test_every_command_prints_its_whole_shortcut_not_half_of_it() {
+        // `shortcut` is the one key a probe presses; `keys` is what the rail
+        // draws. Where they differ, the printed form has to be the longer one —
+        // a rail that dropped `Ctrl+N` would be teaching half the keymap.
+        const printed = ({});
+        for (const cmd of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" }))) {
+            verify(!!cmd.keys, cmd.id + " prints nothing on its rail");
+            verify(cmd.keys.indexOf(cmd.shortcut) >= 0,
+                   cmd.id + " prints " + cmd.keys + ", which does not contain " + cmd.shortcut);
+            verify(keys.keyCaps(cmd.keys).length > 0);
+            printed[cmd.keys] = true;
+        }
+        // The two shapes the rail exists to show at all: an alternative and a
+        // chord. Without either, one keycap per row would have done.
+        verify(printed["J / ←"]);
+        verify(printed["C / Ctrl+N"]);
+
+        // And the printed form is the sheet's, so the two cannot drift.
+        const table = ({});
+        for (const row of keys.shortcutsTable())
+            table[row.keys] = true;
+        for (const cmd of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" })))
+            verify(table[cmd.keys], cmd.keys + " is on no row of the shortcuts sheet");
     }
 
     function test_probe_every_row_of_the_sheet_breaks_into_caps() {

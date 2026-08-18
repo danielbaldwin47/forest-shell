@@ -109,7 +109,8 @@ ShellRoot {
     /// The calendar's pose. `--cal-view` picks day, week or month; `--cal-date`
     /// is the day the view is built around; `--cal-state` names an overlay or
     /// an interaction to pose: `drag-create`, `drag-move` and `resize` pose a
-    /// gesture on the week grid; `command` and `shortcuts` open the two
+    /// gesture on the week grid; `command` (empty query) and `command-filtered`
+    /// (`to` typed) and `shortcuts` open the two
     /// keyboard overlays. (`guests` and `popover` are named and refused by
     /// tools/capture-harness.sh until they exist, so the knob never renders a
     /// plain view and calls it a pose.)
@@ -1413,12 +1414,23 @@ ShellRoot {
             // driven with a key, for the same reason the drag is posed rather
             // than dragged: this mode has no compositor to deliver either.
             //
-            // The menu is posed **with a query typed** — an empty field is a
-            // picture of a menu that has not been asked anything, and the one
-            // claim worth photographing is that filtering narrows the list and
-            // the highlight lands on what is left.
+            // Two poses, and `command` is the **empty** one.
+            //
+            // It was the typed one, on the argument that a picture of an empty
+            // field says nothing about whether filtering works. True, and it
+            // bought that at the cost of the picture being a menu at all: the
+            // one query left one row under the field, and a card that is 74%
+            // chrome around a single command is a photograph of a search result,
+            // not of a command menu. What has to be judgeable here is the thing
+            // this surface is for — the whole keymap, grouped, with its rail of
+            // shortcuts down the right — so the default pose opens with nothing
+            // typed and every command showing.
+            //
+            // Filtering keeps its own picture rather than losing one:
+            // `command-filtered` is the old pose under its own name.
             commandOpen: root.calState === "command"
-            commandQuery: root.calState === "command" ? "to" : ""
+                      || root.calState === "command-filtered"
+            commandQuery: root.calState === "command-filtered" ? "to" : ""
             shortcutsOpen: root.calState === "shortcuts"
 
             // The guests pose, on the same terms and for the same reason: the

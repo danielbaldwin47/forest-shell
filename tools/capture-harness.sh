@@ -156,9 +156,10 @@
 # an overlay to pose: `drag-create`, `drag-move` and `resize` pose a gesture on
 # the week grid, `popover` is the frame after `drag-create` — the quick-create
 # panel on the event that drag made — `guests` opens the event editor with its
-# picker down, and `command` and `shortcuts` open the two keyboard overlays
-# (the menu with a query already typed, because a picture of an empty field says
-# nothing about whether filtering works). Its events and contacts come from
+# picker down, and `command` and `shortcuts` open the two keyboard overlays.
+# `command` opens the menu with nothing typed — the whole keymap, grouped, which
+# is the thing that surface is for; `command-filtered` types `to` into it, which
+# is the narrower claim that filtering picks a row. Its events and contacts come from
 # tools/fixtures/calendar-*.json, copied into the scratch XDG dirs, so the
 # picture is the same on every machine.
 #
@@ -316,7 +317,10 @@ esac
 case "$CAL_STATE" in
     "") ;;
     drag-create|drag-move|resize|popover) ;;
-    command|shortcuts|guests) ;;
+    # `command` opens the menu with an empty query — every command, grouped —
+    # and `command-filtered` is the same menu with `to` typed into it, which is
+    # the narrower claim that filtering picks a row and the highlight follows.
+    command|command-filtered|shortcuts|guests) ;;
     *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
 esac
 

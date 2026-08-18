@@ -226,7 +226,51 @@ Singleton {
     /// floating on an undimmed calendar. A modal over a document has to push
     /// the document back, and the only ink that does that in both themes is
     /// black. Light needs less of it because its page has further to fall.
-    readonly property color scrimWash: Qt.rgba(0, 0, 0, Theme.dark ? 0.46 : 0.28)
+    ///
+    /// 0.52 and not 0.46. A saturated event chip is the brightest thing on this
+    /// grid, and at 0.46 the ones flanking the card still read at full strength
+    /// — the scrim measured as working (every pixel behind fell to 0.54 of
+    /// itself) and still looked like none, because what a scrim has to beat is
+    /// the loudest ink behind it, not the average. 0.52 puts a lamplight chip
+    /// below the card's own fill, which is the test: nothing behind the modal
+    /// should out-shout it.
+    readonly property color scrimWash: Qt.rgba(0, 0, 0, Theme.dark ? 0.52 : 0.34)
+
+    // --- the command menu -----------------------------------------------------
+
+    /// The band under the command menu's selected row.
+    ///
+    /// **One accent hue per component**, and the first draft had two. The band
+    /// was `Qt.tint(surfaceOverlay, Qt.alpha(accentPrimary, 0.18))` — the accent
+    /// mixed into a grey that carries this palette's olive cast, which dragged
+    /// the result to hue 167° while the rail two pixels to its left stayed at
+    /// the accent's own 184°. Seventeen degrees apart on one row reads as two
+    /// decisions rather than one mark: a green-teal band with a cyan bar on it.
+    ///
+    /// So the band is the accent's *own* hue at a different lightness — darker
+    /// than the card in dark, paler in light — and the rail is the accent
+    /// itself. Same hue, two steps, one idea.
+    ///
+    /// Measured on `surfaceRaised`: 1.60:1 dark, 1.46:1 light, both clear of the
+    /// 1.4 floor a band has to beat to read as a band at all; `textPrimary` on
+    /// it is 8.1:1 dark and 12.9:1 light, so the label loses nothing.
+    readonly property color menuSelectFill: Theme.dark ? "#2c484a" : "#b0dee1"
+
+    /// How far a Lucide glyph's ink sits inside its own box, in px, at the 18px
+    /// size this surface draws row icons at.
+    ///
+    /// The set is drawn on a 24-unit grid with the artwork inset 3 units, so an
+    /// icon box anchored to a margin lands its *ink* ~2px right of a letter
+    /// anchored to the same margin. A menu whose magnifier, row icons, section
+    /// headings and footer caps were all anchored at `space4` therefore had four
+    /// left edges instead of one — measured at 10 device px of scatter, which is
+    /// exactly the "no single left rail" a reader feels without being able to
+    /// name. The glyphs give the 2px back; text and caps keep the margin.
+    ///
+    /// This only works because the icons are chosen to *share* an inset — see
+    /// `KeyNavPolicy.commands`, where the chevrons (9 units in, 6.75px) were the
+    /// outlier that produced the scatter in the first place.
+    readonly property int glyphInk: 2
 
     // --- the column washes ----------------------------------------------------
 

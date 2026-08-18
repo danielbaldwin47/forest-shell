@@ -492,11 +492,36 @@ QtObject {
         return [left, right];
     }
 
-    /// What the command menu lists, as `{id, label, shortcut, group}`.
+    /// What the command menu lists, as `{id, label, shortcut, keys, group}`.
     ///
     /// `id` is the verb the view dispatches on — `"view.day"`, `"period.next"`
     /// — rather than an index, so reordering this list or filtering it cannot
     /// change what running an entry does.
+    ///
+    /// **`shortcut` is one key; `keys` is the whole printed form.** They are two
+    /// fields because they answer two questions and the answers differ: the one
+    /// key is what a test can *press* to prove the row runs its own command,
+    /// while what the menu should *teach* is every way in — `C / Ctrl+N`, not
+    /// the half of it that happens to be a single keystroke. Collapsing them
+    /// would mean either a rail that under-reports the keymap or a probe that
+    /// cannot press what it reads. `keys` is the same string the shortcuts
+    /// sheet prints, so the menu and the sheet still cannot drift.
+    ///
+    /// **The icons are one set, and that is a constraint on which names may
+    /// appear here.** Lucide draws on a 24-unit grid and its glyphs do not share
+    /// an inset: the calendar family starts its ink at unit 3, the arrows at 5,
+    /// the chevrons at 9. The first draft mixed all three, so the row icons had
+    /// three left edges between them and two optical weights — dense calendar
+    /// boxes next to bare hairline chevrons. Every icon here is now either the
+    /// calendar family or an arrow (3 or 5 units, ≤1.5px apart at 18px) and
+    /// carries comparable ink, which is what lets `CalendarTokens.glyphInk` be
+    /// one number rather than a table.
+    ///
+    /// **Three groups, not four.** `Help` used to label one row on its own,
+    /// which is a heading, a rule of air above it and a rule below to introduce
+    /// a single line — more chrome than the content justifies. Opening the
+    /// shortcuts sheet is a thing this surface does, so it lives under `Actions`
+    /// with the other things it does.
     ///
     /// Two of them are context-dependent: open and delete appear only with
     /// something selected, and name it when `ctx.selectedTitle` is known, since
@@ -507,30 +532,53 @@ QtObject {
         const noun = ({ "day": "day", "week": "week", "month": "month" })[c.view] || "period";
         const subject = c.selectedTitle ? "“" + c.selectedTitle + "”" : "the selected event";
         const out = [
-            { "id": "view.day", "label": "Day view", "shortcut": "D",
+            { "id": "view.day", "label": "Day view", "shortcut": "D", "keys": "D",
               "group": "View", "icon": "calendar" },
-            { "id": "view.week", "label": "Week view", "shortcut": "W",
+            { "id": "view.week", "label": "Week view", "shortcut": "W", "keys": "W",
               "group": "View", "icon": "calendar-range" },
-            { "id": "view.month", "label": "Month view", "shortcut": "M",
+            { "id": "view.month", "label": "Month view", "shortcut": "M", "keys": "M",
               "group": "View", "icon": "calendar-days" },
-            { "id": "today", "label": "Jump to today", "shortcut": "T",
+            { "id": "today", "label": "Jump to today", "shortcut": "T", "keys": "T",
               "group": "Navigate", "icon": "calendar-check" },
             { "id": "period.previous", "label": "Previous " + noun, "shortcut": "J",
-              "group": "Navigate", "icon": "chevron-left" },
+              "keys": "J / ←", "group": "Navigate", "icon": "arrow-left" },
             { "id": "period.next", "label": "Next " + noun, "shortcut": "K",
-              "group": "Navigate", "icon": "chevron-right" },
+              "keys": "K / →", "group": "Navigate", "icon": "arrow-right" },
             { "id": "event.create", "label": "New event", "shortcut": "C",
-              "group": "Event", "icon": "plus" }
+              "keys": "C / Ctrl+N", "group": "Actions", "icon": "calendar-plus" }
         ];
         if (c.selectedId) {
             out.push({ "id": "event.open", "label": "Open " + subject, "shortcut": "Enter",
-                       "group": "Event", "icon": "square-pen" });
+                       "keys": "Enter", "group": "Actions", "icon": "square-pen" });
             out.push({ "id": "event.delete", "label": "Delete " + subject, "shortcut": "Backspace",
-                       "group": "Event", "icon": "trash-2" });
+                       "keys": "Backspace / Del", "group": "Actions", "icon": "trash-2" });
         }
         out.push({ "id": "help.shortcuts", "label": "Keyboard shortcuts", "shortcut": "?",
-                   "group": "Help", "icon": "keyboard" });
+                   "keys": "?", "group": "Actions", "icon": "command" });
         return out;
+    }
+
+    /// What a command menu row prints as its badge — as opposed to what the
+    /// shortcuts sheet prints, which is still the whole of `keys`.
+    ///
+    /// The sheet is a *table of the keymap*: `C / Ctrl+N`, both ways in, is the
+    /// answer to the question it exists to answer. A menu row is not a table
+    /// row — it is a line of prose with one badge at the end of it, and three
+    /// caps plus two separators there is a second sentence competing with the
+    /// first. Measured on the round-2 capture, `New event` ended in four marks
+    /// whose two separators were set at different widths, so the badge taught
+    /// its own grouping before it taught the key.
+    ///
+    /// So the menu prints the **first** alternative and `?` teaches the rest.
+    /// Falls back to `shortcut` when a row carries no printed form, because a
+    /// row with no badge at all is a row that teaches nothing.
+    function menuKeys(command: var): string {
+        const c = command || {};
+        const printed = String(c.keys === undefined || c.keys === null ? "" : c.keys);
+        const first = printed.split("/")[0].trim();
+        if (first)
+            return first;
+        return String(c.shortcut === undefined || c.shortcut === null ? "" : c.shortcut).trim();
     }
 
     /// How well `query` matches `text`, and the whole of the ranking:
@@ -595,12 +643,18 @@ QtObject {
     /// A shortcut string broken into what a keycap row draws:
     /// `{kind: "key"|"sep", text}`.
     ///
-    /// Two separators, and they mean opposite things, which is why one is drawn
-    /// and one is not. `+` is a **chord** — `Ctrl+N` is one gesture, so its caps
-    /// sit side by side and the plus disappears, exactly as a keyboard does not
-    /// have a plus key on it. `/` is an **alternative** — `C / Ctrl+N` is two
-    /// ways to do one thing, and dropping that slash would read as a four-key
-    /// chord nobody could press.
+    /// Two separators, and they mean opposite things, which is why **both** are
+    /// drawn and they are drawn differently. `+` is a **chord** — `Ctrl+N` is
+    /// one gesture. `/` is an **alternative** — `C / Ctrl+N` is two ways to do
+    /// one thing.
+    ///
+    /// The plus used to be dropped, on the argument that a keyboard has no plus
+    /// key on it. That is true and it was still wrong: the only string where it
+    /// matters is one carrying both separators, and `C / Ctrl N` there is four
+    /// caps in a row whose grouping the reader has to guess. Printing both marks
+    /// costs one glyph and makes the grouping something the row states rather
+    /// than implies — so `+` is a `sep` like `/`, and the surface draws it
+    /// tighter and quieter than a cap.
     function keyCaps(text: var): var {
         const s = String(text === undefined || text === null ? "" : text).trim();
         const out = [];
@@ -612,8 +666,13 @@ QtObject {
             const before = out.length;
             for (let j = 0; j < chord.length; j++) {
                 const cap = chord[j].trim();
-                if (cap)
-                    out.push({ "kind": "key", "text": cap });
+                if (!cap)
+                    continue;
+                // Only *between* two caps of one chord — a ragged `+K+` must not
+                // print a plus with nothing on one side of it.
+                if (out.length > before)
+                    out.push({ "kind": "sep", "text": "+" });
+                out.push({ "kind": "key", "text": cap });
             }
             // Only between two alternatives that both produced a cap — a
             // trailing slash must not print a separator with nothing after it.
@@ -621,6 +680,24 @@ QtObject {
                 out.splice(before, 0, { "kind": "sep", "text": "/" });
         }
         return out;
+    }
+
+    /// The legend along the foot of the command menu, `[{keys, label}]`.
+    ///
+    /// Three and only three, and they are the three keys that work *inside* the
+    /// menu rather than the three most useful commands: a legend that advertised
+    /// `T` would be teaching the list what the list is already teaching. What a
+    /// person cannot see from the rows is how to move between them, take one,
+    /// and leave — so that is what the band says, in the order the hand does it.
+    ///
+    /// `↑↓` is one cap, not two: it is a single control (the arrow pair), and two
+    /// caps there would read as two separate keys to press.
+    function menuFooter(): var {
+        return [
+            { "keys": "↑↓", "label": "Navigate" },
+            { "keys": "↵", "label": "Select" },
+            { "keys": "Esc", "label": "Close" }
+        ];
     }
 
     // --- the menu as rows, headings included ----------------------------------

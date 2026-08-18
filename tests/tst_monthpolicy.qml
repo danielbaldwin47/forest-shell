@@ -111,6 +111,36 @@ TestCase {
         compare(mondayFirst[3][6].isWeekend, true);    // Sunday the 23rd
     }
 
+    /// The header's weekend columns have to agree with the cells under them —
+    /// a header washed on the wrong two columns is worse than an unwashed one.
+    function test_the_header_marks_the_same_two_columns_the_cells_do() {
+        const monday = policy.weekendColumns(1);
+        compare(monday.length, 7);
+        compare(monday, [false, false, false, false, false, true, true]);
+
+        const sunday = policy.weekendColumns(0);
+        compare(sunday, [true, false, false, false, false, false, true]);
+
+        // Every column agrees with the row of cells beneath it, which is the
+        // only claim that actually matters.
+        for (const first of [0, 1, 3, 6]) {
+            const cols = policy.weekendColumns(first);
+            const week = policy.grid("2026-08-18", first, "")[3];
+            for (let c = 0; c < 7; c++)
+                compare(cols[c], week[c].isWeekend, "column " + c + " first " + first);
+        }
+    }
+
+    function test_a_header_first_day_outside_the_week_wraps_like_the_grid() {
+        compare(policy.weekendColumns(8), policy.weekendColumns(1));
+        compare(policy.weekendColumns(-6), policy.weekendColumns(1));
+        compare(policy.weekendColumns(15), policy.weekendColumns(1));
+        // Junk never reaches the arithmetic: the parameter is typed `int`, so
+        // the engine coerces a NaN to 0 before the function is entered. Asserted
+        // so nobody "fixes" the NaN guard into a different default.
+        compare(policy.weekendColumns(NaN), policy.weekendColumns(0));
+    }
+
     /// The bug CalendarPolicy.isToday was written against: the 1st of September
     /// sits in August's last row, and a day-number match alone would light two
     /// cells on the 1st of August.
@@ -314,6 +344,76 @@ TestCase {
         compare(policy.chipsPerCell(100, null, null, null), 3);
         compare(policy.chipsPerCell(100, 20), 3);
         compare(policy.chipsPerCell(100, 10), 6);   // 22 + 6x10 + 5x2 = 92
+    }
+
+    // --- capacity once the banners have been paid for -------------------------
+    //
+    // `chipsPerCell` and `laneCount` do not compose on their own, and the bug
+    // that gap hides is invisible in either half: a view that sizes its chip
+    // stack from the raw cell height draws one chip too many in exactly the
+    // rows that have a multi-day bar in them, and it draws it under the cell's
+    // own floor.
+
+    function test_a_row_with_no_banners_costs_nothing() {
+        compare(policy.chipCapacity(100, 0), policy.chipsPerCell(100));
+        compare(policy.chipCapacity(100, 0), 3);
+    }
+
+    function test_each_banner_lane_costs_one_chip_row() {
+        // 100px, 22 header: three chips bare, and each lane is a chip's height
+        // plus the gap under it — the gap that separates the last bar from the
+        // first chip.
+        compare(policy.chipCapacity(100, 1), 2);
+        compare(policy.chipCapacity(100, 2), 1);
+        compare(policy.chipCapacity(100, 3), 0);
+        compare(policy.chipCapacity(100, 9), 0);   // never negative
+    }
+
+    function test_capacity_takes_the_view_s_own_chip_metrics() {
+        // The month grid draws 21px chips, not the policy's default 20, and a
+        // lane that is a different height again is sayable without a second
+        // function: 26 header + 1 lane of 30+2 + 2x21 + 1x2 = 102.
+        compare(policy.chipCapacity(105, 1, 21, 26, 2, 30), 2);
+        compare(policy.chipCapacity(101, 1, 21, 26, 2, 30), 1);
+    }
+
+    function test_lanes_that_are_not_a_number_are_no_lanes() {
+        compare(policy.chipCapacity(100, undefined), 3);
+        compare(policy.chipCapacity(100, -4), 3);
+    }
+
+    // --- the chips a cell draws when its banners are bars ----------------------
+
+    function test_cell_chips_leave_the_banners_to_the_row() {
+        // The 18th carries five events, two of them banners drawn as bars.
+        const chips = policy.cellChips(testCase.sample, "2026-08-18", 99);
+        compare(testCase.ids(chips.shown), "evt-a,evt-b,evt-c");
+        compare(chips.moreCount, 0);
+    }
+
+    function test_the_more_row_is_itself_a_row() {
+        // Three timed events and room for two rows: one chip and "+2 more",
+        // never two chips and a third row hanging below the cell.
+        const tight = policy.cellChips(testCase.sample, "2026-08-18", 2);
+        compare(testCase.ids(tight.shown), "evt-a");
+        compare(tight.moreCount, 2);
+
+        // Room for exactly what is there hides nothing.
+        const exact = policy.cellChips(testCase.sample, "2026-08-18", 3);
+        compare(exact.shown.length, 3);
+        compare(exact.moreCount, 0);
+    }
+
+    function test_a_cell_with_no_room_hides_everything_and_says_so() {
+        const none = policy.cellChips(testCase.sample, "2026-08-18", 0);
+        compare(none.shown.length, 0);
+        compare(none.moreCount, 3);
+    }
+
+    function test_cell_chips_uncapped_and_empty() {
+        compare(policy.cellChips(testCase.sample, "2026-08-18", -1).shown.length, 3);
+        compare(policy.cellChips(testCase.sample, "2026-08-25", 4).shown.length, 0);
+        compare(policy.cellChips(testCase.sample, "not-a-day", 4).moreCount, 0);
     }
 
     // --- multi-day bars -------------------------------------------------------

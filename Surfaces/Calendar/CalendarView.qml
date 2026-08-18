@@ -232,15 +232,25 @@ FloatingWindow {
             onEventActivated: id => window.eventSelected(id)
         }
 
-        /// The month grid is a later piece. Saying so out loud beats an empty
-        /// panel that reads as a grid that failed to draw.
-        Text {
-            anchors.centerIn: grid
+        /// The month grid, in the same rectangle as the week one and swapped by
+        /// `visible` rather than a `Loader`. Both views are cheap and neither
+        /// holds state a rebuild would lose — but the week view *does* hold a
+        /// scroll position, and a `Loader` would drop it every time somebody
+        /// looked at the month and came back.
+        MonthView {
+            id: monthGrid
+
+            anchors.fill: grid
             visible: window.view === "month"
-            text: "month view — not built yet"
-            color: Theme.textMuted
-            font.family: Theme.fontUi
-            font.pointSize: Theme.pt(15)
+
+            anchorDate: window.anchorDate
+            firstDay: window.firstDay
+            todayIso: window.todayIso
+            events: CalendarStore.events
+            selectedId: window.selectedId
+            use24: window.use24
+
+            onEventActivated: id => window.eventSelected(id)
         }
     }
 }

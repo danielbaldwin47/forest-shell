@@ -102,6 +102,22 @@ QtObject {
         return out;
     }
 
+    /// Which of the seven header columns are weekend columns, in column order.
+    ///
+    /// The header has no day behind it — it is above all six rows at once — so
+    /// it cannot read `isWeekend` off a cell, and a view that worked it out
+    /// inline would be the second place in the shell that decides what a
+    /// weekend is. Same `Locale.Sunday === 0` convention as `grid`.
+    function weekendColumns(firstDay: int): var {
+        const start = isNaN(firstDay) ? 1 : ((Math.floor(firstDay) % 7) + 7) % 7;
+        const out = [];
+        for (let c = 0; c < policy.columns; c++) {
+            const dow = (start + c) % 7;
+            out.push(dow === 0 || dow === 6);
+        }
+        return out;
+    }
+
     // --- what a cell shows ----------------------------------------------------
 
     /// Whether an event is drawn as a *banner* — a bar across the top of its
@@ -171,6 +187,59 @@ QtObject {
         if (!(pitch > 0) || isNaN(cellHeight))
             return 0;
         return Math.max(0, Math.floor((cellHeight - header + space) / pitch));
+    }
+
+    /// How many chips fit *once the row's banner lanes have taken their share*.
+    ///
+    /// This is the join `chipsPerCell` alone cannot make, and getting it wrong
+    /// is invisible in a test of either half: `laneCount` counts the bars a row
+    /// must reserve room for, `chipsPerCell` counts what fits in a height, and
+    /// nothing until now subtracted the first from the second. A view that asks
+    /// `chipsPerCell(rowHeight)` and then draws banners on top of the answer
+    /// draws one chip too many in every row that has a multi-day event in it —
+    /// the last one under the cell's floor, where the grid line cuts it in half.
+    ///
+    /// Lanes cost `lanes * (laneHeight + gap)`: the gap is *below* each lane,
+    /// because the last one still has to be separated from the first chip.
+    /// A row with no banners costs nothing, so an ordinary week is exactly
+    /// `chipsPerCell`.
+    ///
+    /// `laneHeight` defaults to `chipHeight` — a banner and a chip are the same
+    /// height in the month grid, which is what makes the two stacks read as one
+    /// column — and every other argument means what it does in `chipsPerCell`.
+    function chipCapacity(cellHeight: real, lanes: int, chipHeight, headerHeight, gap, laneHeight): int {
+        const chip = chipHeight === undefined || chipHeight === null ? policy.chipHeight : chipHeight;
+        const space = gap === undefined || gap === null ? policy.chipGap : gap;
+        const lane = laneHeight === undefined || laneHeight === null ? chip : laneHeight;
+        const count = Math.max(0, isNaN(lanes) ? 0 : Math.floor(lanes));
+        return policy.chipsPerCell(cellHeight - count * (lane + space),
+                                   chip, headerHeight, space);
+    }
+
+    /// What a cell draws when its banners are drawn as **row bars** rather than
+    /// as chips inside it: `{ shown, moreCount }` over the timed events alone.
+    ///
+    /// `cellEvents` answers the other question — what a cell shows when it owns
+    /// the whole stack — and a month grid that draws bars across the row would
+    /// count each banner twice if it asked that one: once in the bar and once in
+    /// the chip list underneath it.
+    ///
+    /// The overflow rule is the part worth stating. "+N more" is itself a row,
+    /// so a cell with room for three rows and four events shows **two** chips
+    /// and "+2 more" — never three chips and "+1 more", which needs four rows
+    /// and is how a month grid ends up with a line hanging below its own cell.
+    /// A capacity of zero has no room even for the affordance, so everything is
+    /// hidden and the caller is told how much.
+    function cellChips(events: var, iso: string, capacity): var {
+        const timed = policy.cellEvents(events, iso, -1).timed;
+        const uncapped = capacity === undefined || capacity === null || isNaN(capacity) || capacity < 0;
+        const cap = uncapped ? timed.length : Math.floor(capacity);
+        if (timed.length <= cap)
+            return { "shown": timed, "moreCount": 0 };
+        if (cap <= 0)
+            return { "shown": [], "moreCount": timed.length };
+        const shown = timed.slice(0, cap - 1);
+        return { "shown": shown, "moreCount": timed.length - shown.length };
     }
 
     // --- multi-day bars -------------------------------------------------------

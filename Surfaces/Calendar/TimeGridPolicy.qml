@@ -165,15 +165,20 @@ QtObject {
     /// them.
     readonly property int labelGap: 24
 
-    /// Where nudging stops and hiding starts, and it is now most of the band.
+    /// Where nudging stops and hiding starts, and it is now **overlap alone**.
     ///
-    /// A nudge moves an hour label off its own rule, which is the one convention
-    /// this gutter has; spending 17px of that to seat a label the live stamp is
-    /// already standing next to buys a worse picture than dropping it. Inside
-    /// 20px the hour label goes and the stamp speaks for the band — the rule is
-    /// still drawn, and the hour above and below still name it. Past 20 the
-    /// nudge is small enough to be honest.
-    readonly property int labelCollapse: 20
+    /// It was 20, on the argument that a label the stamp is standing next to is
+    /// better dropped than moved. Captured at 13:40 that argument lost badly:
+    /// `2 PM` is 18.7px under the stamp, so it was the label that went — and the
+    /// gutter then ran from `1 PM` to `3 PM` with no number in between, a
+    /// two-hour stretch of grid with nothing to count off. Deleting the anchor
+    /// nearest the reader's own eye is the one thing this rule must not do.
+    ///
+    /// 13 is the collision and nothing more: a pt(11) label's box is about 14px,
+    /// so under 13 the two strings genuinely overprint and no nudge saves them.
+    /// Above it the label leans clear — at 13:40 `2 PM` moves 5.3px down and both
+    /// numbers are legible, which is the picture the gutter is for.
+    readonly property int labelCollapse: 13
 
     /// Whether an hour label is suppressed because the live time is sitting on
     /// top of it.
@@ -213,6 +218,27 @@ QtObject {
     function isWeekend(iso: string): bool {
         const dow = grid.time.dayOfWeek(iso);
         return dow === 0 || dow === 6;
+    }
+
+    /// Which wash a column wears: `"today"`, `"weekend"` or `"none"`.
+    ///
+    /// **A one-column run wears none of them, and that is the whole rule.** A
+    /// wash is a comparison — it says *this* column is not like the others — so
+    /// on a day view, where there is exactly one column and its date is already
+    /// printed in the header and in the toolbar title, the same 5% of
+    /// `accentPrimary` stops being a marker and becomes the page. Captured at
+    /// `dayCount: 1` it was a teal slab 870px wide with a calendar drawn on it,
+    /// and the weekend wash does the same thing on a Saturday.
+    ///
+    /// Today still wins over the weekend where both apply, and does not add to
+    /// it: a Saturday that is today should read as *today*, not as the one
+    /// column carrying two washes.
+    function columnWash(isToday: bool, isWeekend: bool, count: int): string {
+        if (Math.round(count) <= 1)
+            return "none";
+        if (isToday)
+            return "today";
+        return isWeekend ? "weekend" : "none";
     }
 
     /// The columns of a view, left to right:

@@ -346,9 +346,18 @@ TestCase {
         compare(format.titleParts("month", "2026-08-18", 1),
                 { "lead": "August", "year": "2026" });
         compare(format.titleParts("week", "2026-08-18", 1),
-                { "lead": "Aug 17 – 23", "year": "2026" });
+                { "lead": "Aug 17 – 23,", "year": "2026" });
         compare(format.titleParts("day", "2026-08-18", 1),
-                { "lead": "Tuesday, August 18", "year": "2026" });
+                { "lead": "Tuesday, August 18,", "year": "2026" });
+    }
+
+    function test_titleParts_keeps_the_comma_on_the_lead() {
+        // The seam is the space, not the punctuation. Split at the comma and
+        // the toolbar sets "Aug 17 – 23" beside "2026" with a gap and no
+        // connective, which reads as two fragments rather than one range.
+        const parts = format.titleParts("week", "2026-08-18", 1);
+        verify(/,$/.test(parts.lead), parts.lead);
+        compare(parts.lead + " " + parts.year, format.title("week", "2026-08-18", 1));
     }
 
     function test_titleParts_takes_only_the_last_year() {
@@ -358,7 +367,7 @@ TestCase {
         // split.
         compare(format.title("week", "2025-12-31", 1), "Dec 29, 2025 – Jan 4, 2026");
         compare(format.titleParts("week", "2025-12-31", 1),
-                { "lead": "Dec 29, 2025 – Jan 4", "year": "2026" });
+                { "lead": "Dec 29, 2025 – Jan 4,", "year": "2026" });
     }
 
     function test_titleParts_never_hands_back_undefined() {
@@ -415,4 +424,16 @@ TestCase {
         compare(format.startTime("", false, true), "");
         compare(format.startTime("2026-08-18T24:00", true, false), "");
     }
+
+    function test_a_day_header_carries_both_lengths_of_its_weekday() {
+        // Seven columns take the abbreviation; one column has room for the
+        // whole word, and both come off the one function so they can never
+        // disagree about which Tuesday they mean.
+        const h = format.dayHeader("2026-08-18");
+        compare(h.weekday, "TUE");
+        compare(h.weekdayFull, "Tuesday");
+        compare(format.dayHeader("2026-08-23").weekdayFull, "Sunday");
+        compare(format.dayHeader("2024-02-29").weekdayFull, "Thursday");
+    }
+
 }

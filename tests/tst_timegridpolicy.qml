@@ -468,13 +468,16 @@ TestCase {
         const now = grid.nowLineY("2026-08-18T13:40", 56);
         fuzzyCompare(now, 13 * 56 + 40 * 56 / 60, 0.01);
 
-        // 14:00 is 18.7px below it, and that is the case the capture ruled on:
-        // `2 PM` twenty pixels under a live `1:40 PM` reads as a pair of numbers
-        // rather than as a rule name and a clock. Inside `labelCollapse` the
-        // hour label goes; the rule it names is still drawn, and 1 PM and 3 PM
-        // still bracket it.
-        verify(grid.hourLabelHidden(14 * 56, now));
-        compare(grid.hourLabelShift(14 * 56, now), 0);
+        // 14:00 is 18.7px below it, and that is the case the second capture
+        // ruled on: hiding it left `1 PM` and `3 PM` bracketing two hours of
+        // grid with no number between them. It is not an overlap, so it is not
+        // hidden — it leans down to `labelGap` and both numbers are legible.
+        verify(!grid.hourLabelHidden(14 * 56, now));
+        fuzzyCompare(14 * 56 + grid.hourLabelShift(14 * 56, now),
+                     now + grid.labelGap, 0.001);
+        // The genuine overprint still goes: a rule 6px off the stamp cannot be
+        // separated by any nudge this gutter is allowed to make.
+        verify(grid.hourLabelHidden(now + 6, now));
 
         // 13:00 is the *current hour* and is 37px away, with nothing near it.
         // Hiding it would blank a legible label and leave the illegible one.
@@ -515,12 +518,33 @@ TestCase {
 
     function test_hourLabelHidden_gap_is_symmetric_and_overridable() {
         compare(grid.labelGap, 24);
-        compare(grid.labelCollapse, 20);
+        compare(grid.labelCollapse, 13);
         // Hiding is the inner distance; the outer one nudges.
-        verify(grid.hourLabelHidden(100, 119));
-        verify(grid.hourLabelHidden(100, 81));
-        verify(!grid.hourLabelHidden(100, 120));
-        verify(!grid.hourLabelHidden(100, 80));
+        verify(grid.hourLabelHidden(100, 112));
+        verify(grid.hourLabelHidden(100, 88));
+        verify(!grid.hourLabelHidden(100, 113));
+        verify(!grid.hourLabelHidden(100, 87));
         verify(!grid.hourLabelHidden(100, 106, 5));
     }
+
+    // --- which wash a column wears --------------------------------------------
+
+    function test_a_week_column_wears_today_over_the_weekend() {
+        compare(grid.columnWash(true, false, 7), "today");
+        compare(grid.columnWash(false, true, 7), "weekend");
+        compare(grid.columnWash(false, false, 7), "none");
+        // Today and a Saturday at once is *today*, not both.
+        compare(grid.columnWash(true, true, 7), "today");
+    }
+
+    function test_a_single_column_wears_no_wash_at_all() {
+        // The day view. A wash is a comparison and there is nothing to compare
+        // it with, so today does not paint 870px of accent over its own grid.
+        compare(grid.columnWash(true, false, 1), "none");
+        compare(grid.columnWash(false, true, 1), "none");
+        compare(grid.columnWash(true, true, 1), "none");
+        // Two columns is already a comparison.
+        compare(grid.columnWash(true, false, 2), "today");
+    }
+
 }

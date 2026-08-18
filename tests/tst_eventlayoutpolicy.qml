@@ -1186,4 +1186,200 @@ TestCase {
             fuzzyCompare(placed[p].wFrac, 0.2, 0.0001);
         }
     }
+
+    // --- the width a day column buys ------------------------------------------
+
+    function test_a_wide_one_line_chip_prints_the_whole_range_inline() {
+        // A half-hour meeting is one line whatever its width. In a week column
+        // that line can only afford the start; in a day column it prints the
+        // range, which is the day view earning its width.
+        const packed = layoutPolicy.chipContent(186, 28, 30);
+        compare(packed.mode, "inline");
+        compare(packed.timeForm, "start");
+
+        const wide = layoutPolicy.chipContent(560, 28, 30);
+        compare(wide.mode, "inline");
+        compare(wide.timeForm, "range");
+
+        // The boundary is the boundary, and nothing either side of it moves.
+        compare(layoutPolicy.chipContent(239, 28, 30).timeForm, "start");
+        compare(layoutPolicy.chipContent(240, 28, 30).timeForm, "range");
+    }
+
+    function test_the_guest_line_needs_both_width_and_height() {
+        // Wide and tall: guests.
+        verify(layoutPolicy.chipContent(560, 84, 90).showGuests);
+        // Wide and short: a 45-minute chip keeps title over time and nothing
+        // else, because a third line would come out of the second.
+        verify(!layoutPolicy.chipContent(560, 42, 45).showGuests);
+        verify(!layoutPolicy.chipContent(560, 47, 90).showGuests);
+        verify(layoutPolicy.chipContent(560, 48, 90).showGuests);
+        // Tall but narrow: every week column, at every packing.
+        verify(!layoutPolicy.chipContent(123, 84, 90).showGuests);
+        verify(!layoutPolicy.chipContent(189, 84, 90).showGuests);
+        verify(layoutPolicy.chipContent(190, 84, 90).showGuests);
+        // A one-line chip has no line to spare however wide it is.
+        verify(!layoutPolicy.chipContent(560, 28, 30).showGuests);
+    }
+
+    function test_the_guest_line_is_charged_against_the_title_wrap() {
+        // The same box, with and without a guest line: the title may not wrap
+        // into a row already promised to somebody else.
+        const withGuests = layoutPolicy.chipContent(560, 84, 90);
+        const without = layoutPolicy.chipContent(189, 84, 90);
+        verify(withGuests.showGuests);
+        verify(!without.showGuests);
+        verify(withGuests.titleLines < without.titleLines);
+        compare(withGuests.guestSize, withGuests.timeSize);
+    }
+
+    // --- how wide an all-day bar is actually drawn -----------------------------
+
+    function test_a_band_bar_that_ends_inside_the_run_takes_its_natural_width() {
+        // The day view: one column of 870px, one all-day event, and a bar the
+        // width of its own title rather than a slab of tint.
+        compare(layoutPolicy.bandBarWidth(870, 160, false), 160);
+        // A week column is narrower than the title, so the track still wins and
+        // the rule is invisible where it always was.
+        compare(layoutPolicy.bandBarWidth(123, 160, false), 123);
+    }
+
+    function test_a_band_bar_that_runs_off_an_edge_stays_flush() {
+        // The cut edge against the frame is what says it carries on; a natural
+        // width floating clear of that edge would say the opposite.
+        compare(layoutPolicy.bandBarWidth(870, 160, true), 870);
+    }
+
+    function test_a_band_bar_never_shrinks_below_a_swatch() {
+        compare(layoutPolicy.bandBarWidth(870, 10, false), layoutPolicy.bandBarMinWidth);
+        // Unless the track itself is that small, in which case the track wins.
+        compare(layoutPolicy.bandBarWidth(40, 10, false), 40);
+        // Nonsense in, zero out rather than NaN through to a width binding.
+        compare(layoutPolicy.bandBarWidth(NaN, 160, false), 0);
+    }
+
+    // --- the column's own margins ----------------------------------------------
+
+    function test_a_week_column_keeps_its_hairline_inset() {
+        // Nothing about the week view moves: 123px is under `wideColumnWidth`,
+        // so the inset is the base the surface passes in.
+        compare(layoutPolicy.columnInset(123, 2), 2);
+        compare(layoutPolicy.columnInset(319, 2), 2);
+        // And the track is what it always was — width less the inset, plus the
+        // gap every chip pays back off its right edge.
+        compare(layoutPolicy.columnTrack(123, 2, 2), 121);
+    }
+
+    function test_a_day_column_pays_for_a_real_margin() {
+        compare(layoutPolicy.columnInset(320, 2), layoutPolicy.wideColumnInset);
+        compare(layoutPolicy.columnInset(1300, 2), 8);
+        // Symmetry is the whole point: the last chip's right edge lands the
+        // same distance from the column's right as the first chip's left edge
+        // does from its left.
+        const inset = layoutPolicy.columnInset(1300, 2);
+        const track = layoutPolicy.columnTrack(1300, inset, 2);
+        const rightEdge = inset + track - 2;
+        compare(1300 - rightEdge, inset);
+    }
+
+    function test_column_metrics_survive_nonsense() {
+        compare(layoutPolicy.columnInset(NaN, 2), 2);
+        compare(layoutPolicy.columnInset(1300, NaN), 8);
+        compare(layoutPolicy.columnTrack(NaN, 2, 2), 0);
+        compare(layoutPolicy.columnTrack(4, 8, 2), 0);
+    }
+
+    // --- the gutter between packed lanes ---------------------------------------
+
+    function test_a_week_lane_keeps_the_two_pixels_it_had() {
+        // A 121px track split three ways is a 40px lane; 3% of it rounds to
+        // one, and the floor takes it back to the gap the week already ships.
+        compare(layoutPolicy.laneGap(121 / 3, 2), 2);
+        compare(layoutPolicy.laneGap(121, 2), 4);
+    }
+
+    function test_a_day_lane_opens_a_gutter_wide_enough_to_see() {
+        // The day capture: a 1300px track, three concurrent meetings, 433px
+        // each. Two pixels there is half a percent of a lane and reads as an
+        // occlusion; the cap is what makes three chips read as three.
+        const lane = 1300 / 3;
+        compare(layoutPolicy.laneGap(lane, 2), layoutPolicy.maxLaneGap);
+        verify(layoutPolicy.laneGap(lane, 2) > layoutPolicy.laneGap(40, 2));
+    }
+
+    function test_the_gutter_is_never_tighter_than_the_base() {
+        compare(layoutPolicy.laneGap(10, 4), 4);
+        compare(layoutPolicy.laneGap(0, 2), 2);
+        compare(layoutPolicy.laneGap(NaN, 2), 2);
+        compare(layoutPolicy.laneGap(-40, 2), 2);
+        compare(layoutPolicy.laneGap(400, NaN), 12);
+    }
+
+    // --- what a day comes to ---------------------------------------------------
+
+    function test_a_day_load_counts_events_and_minutes() {
+        const load = layoutPolicy.dayLoad([
+            { id: "a", start: "2026-08-18T10:00", end: "2026-08-18T11:30" },
+            { id: "b", start: "2026-08-18T10:30", end: "2026-08-18T12:00" },
+            { id: "c", start: "2026-08-18T15:00", end: "2026-08-18T15:45" }
+        ]);
+        compare(load.count, 3);
+        // Overlaps count twice: three concurrent meetings are three
+        // obligations, and merging them would be a softer claim than the grid
+        // beneath the header makes.
+        compare(load.minutes, 90 + 90 + 45);
+    }
+
+    function test_the_all_day_band_counts_but_books_no_time() {
+        const timed = [
+            { id: "a", start: "2026-08-18T10:00", end: "2026-08-18T11:30" }
+        ];
+        const load = layoutPolicy.dayLoad(timed, 2);
+        // Both chips in the band are on the page, so both are in the count.
+        compare(load.count, 3);
+        // And neither is eight hours of anything.
+        compare(load.minutes, 90);
+        compare(layoutPolicy.dayLoad(timed, 0).count, 1);
+        compare(layoutPolicy.dayLoad(timed, null).count, 1);
+        compare(layoutPolicy.dayLoad(timed, -4).count, 1);
+    }
+
+    function test_a_day_load_ignores_what_is_not_an_event() {
+        const load = layoutPolicy.dayLoad([
+            null,
+            { id: "a", start: "2026-08-18T09:00", end: "2026-08-18T09:30" },
+            { id: "bad", start: "nonsense", end: "2026-08-18T10:00" }
+        ]);
+        compare(load.count, 1);
+        compare(load.minutes, 30);
+        compare(layoutPolicy.dayLoad(null).count, 0);
+        compare(layoutPolicy.dayLoad(null).minutes, 0);
+    }
+
+    function test_a_day_load_label_says_it_once() {
+        compare(layoutPolicy.dayLoadLabel({ count: 4, minutes: 300 }, "5h"),
+                "4 events · 5h");
+        compare(layoutPolicy.dayLoadLabel({ count: 1, minutes: 45 }, "45m"),
+                "1 event · 45m");
+        // No duration to print is a count on its own, not a dangling separator.
+        compare(layoutPolicy.dayLoadLabel({ count: 2, minutes: 0 }, ""), "2 events");
+        // An empty day says nothing rather than "0 events".
+        compare(layoutPolicy.dayLoadLabel({ count: 0, minutes: 0 }, "0m"), "");
+        compare(layoutPolicy.dayLoadLabel(null, "5h"), "");
+    }
+
+    // --- the resize grip --------------------------------------------------------
+
+    function test_only_a_chip_with_a_clear_bottom_edge_offers_a_grip() {
+        verify(layoutPolicy.showsGrip(84));
+        verify(layoutPolicy.showsGrip(layoutPolicy.gripMinHeight));
+        // A half-hour chip is 28px: its one line of type is the whole box.
+        verify(!layoutPolicy.showsGrip(28));
+        // And a tall chip mostly hidden under a cascaded neighbour has no
+        // bottom edge to hand anybody, whatever its own height says.
+        verify(!layoutPolicy.showsGrip(84, 28));
+        verify(layoutPolicy.showsGrip(84, 60));
+        verify(!layoutPolicy.showsGrip(NaN));
+    }
+
 }

@@ -31,6 +31,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
+import qs.Services.Calendar
 
 Item {
     id: view
@@ -68,7 +69,16 @@ Item {
 
     signal eventActivated(string id)
 
+    /// The contact book, and it is here for exactly one reason: a chip wide
+    /// enough for a guest line has to name the people on it, and an event
+    /// carries ids. Defaulted to the store rather than required from the
+    /// caller, because a view that draws nothing without it would be a view
+    /// that breaks the day the caller forgets — and the day view is the only
+    /// place the width for a guest line ever exists.
+    property var contacts: CalendarStore.contacts
+
     property TimeGridPolicy grid: TimeGridPolicy {}
+    property GuestPolicy guestPolicy: GuestPolicy {}
     property EventLayoutPolicy layoutPolicy: EventLayoutPolicy {}
     property CalendarFormat format: CalendarFormat {}
 
@@ -87,6 +97,14 @@ Item {
     readonly property real columnW: view.columns.length > 0
         ? view.grid.columnWidth(view.gutterW, view.width, view.columns.length)
         : 0
+
+    /// The margin every column keeps on **both** of its edges — the hairline a
+    /// week column can afford, or a real one once the column is a page wide.
+    /// `EventLayoutPolicy.columnInset` is the rule; the header, the all-day bar
+    /// and the chips all read it from here, which is what stops the day view
+    /// setting its date on one left edge and its events on another.
+    readonly property real colInset:
+        view.layoutPolicy.columnInset(view.columnW, CalendarTokens.chipInset)
 
     readonly property string rangeStart: view.columns.length > 0 ? view.columns[0].iso : ""
 
@@ -199,6 +217,7 @@ Item {
                 "continuesBelow": rect.continuesBelow,
                 "xFrac": slot.xFrac,
                 "wFrac": slot.wFrac,
+                "columns": slot.columns,
                 "depth": slot.depth,
                 // Minutes of clear box turned into pixels of it, on the one
                 // conversion the grid owns. `Infinity` stays infinite — the
@@ -207,6 +226,10 @@ Item {
                           ? view.grid.minutesToY(slot.clearMinutes, view.hourRow)
                           : Infinity,
                 "minutes": view.layoutPolicy.time.diffMinutes(event.start, event.end),
+                // Resolved here, where the contact book is, rather than in the
+                // chip — the chip is handed a picture's worth of facts and no
+                // lookups, the same as every other field on this record.
+                "guests": view.guestPolicy.summary(event.guests, view.contacts, 3),
                 "hue": hueOf[event.id] !== undefined
                        ? hueOf[event.id] : CalendarTokens.hues.forEvent(event)
             });
@@ -234,11 +257,18 @@ Item {
             width: view.columnWidthFor(index)
             y: 0
             height: view.height
-            // Today wins over the weekend, and does not add to it: a Saturday
-            // that is today should read as *today*, not as the one column with
-            // two washes on it.
-            color: modelData.isToday ? CalendarTokens.todayWash
-                 : modelData.isWeekend ? CalendarTokens.weekendWash
+            // Which wash, including the day view's answer of none at all, is
+            // `TimeGridPolicy.columnWash` — a comparison between columns is
+            // meaningless when there is one column, and the capture of a single
+            // teal column 870px wide is why that is written down and tested
+            // rather than left to a `dayCount > 1` here.
+            readonly property string wash:
+                view.grid.columnWash(modelData.isToday === true,
+                                     modelData.isWeekend === true,
+                                     view.columns.length)
+
+            color: wash === "today" ? CalendarTokens.todayWash
+                 : wash === "weekend" ? CalendarTokens.weekendWash
                  : "transparent"
         }
     }
@@ -264,11 +294,31 @@ Item {
 
                 readonly property var header: view.format.dayHeader(dayHead.modelData.iso)
 
+                /// One column is a day view, and a day view's header is set
+                /// **along** the column rather than stacked in the middle of
+                /// it. Centring a two-line stack over 870px of column leaves
+                /// the date floating in the middle of the window with the grid
+                /// it names starting at the far left; the same two facts set on
+                /// one line at the column's leading edge sit over the chips
+                /// they belong to, and there is room for the weekday's whole
+                /// name where seven columns have room for three letters.
+                readonly property bool solo: view.columns.length === 1
+
+                /// Only the day view asks — a week header has no room for it
+                /// and seven of them would be a row of arithmetic.
+                readonly property var load: dayHead.solo
+                    ? view.layoutPolicy.dayLoad(
+                        view.layoutPolicy.eventPolicy.forDay(view.gridDayEvents,
+                                                             dayHead.modelData.iso),
+                        view.bandLanes.length)
+                    : null
+
                 x: view.columnX(dayHead.index)
                 width: view.columnWidthFor(dayHead.index)
                 height: headerBand.height
 
                 Column {
+                    visible: !dayHead.solo
                     anchors.centerIn: parent
                     spacing: 2
 
@@ -306,6 +356,70 @@ Item {
                             font.weight: Theme.weightMedium
                         }
                     }
+                }
+
+                /// The day view's header: numeral, then the weekday's whole
+                /// name, hard against the column's leading edge.
+                Row {
+                    visible: dayHead.solo
+                    // The chips' own left edge, not a margin of its own.
+                    x: view.colInset
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.space2
+
+                    Rectangle {
+                        width: 28
+                        height: 28
+                        radius: Theme.radiusFull
+                        color: dayHead.modelData.isToday ? Theme.accentPrimary : "transparent"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: dayHead.header ? dayHead.header.day : ""
+                            color: dayHead.modelData.isToday ? Theme.bgBase : Theme.textPrimary
+                            font.features: CalendarTokens.tabularFigures
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(17)
+                            font.weight: Theme.weightMedium
+                        }
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: dayHead.header ? dayHead.header.weekdayFull : ""
+                        // Set as a word, not as tracked caps: `TUESDAY` at
+                        // `capsTrackingEm` is a banner, and the numeral beside
+                        // it is already the loud half of the pair.
+                        color: dayHead.modelData.isToday ? Theme.accentPrimary
+                             : Theme.textSecondary
+                        font.family: Theme.fontUi
+                        font.pointSize: Theme.pt(13.5)
+                        font.weight: Theme.weightMedium
+                    }
+                }
+
+                /// What the day header spends its 48px on that the toolbar has
+                /// not already said. The toolbar prints the whole date above
+                /// this row; a header that only repeated it would be a band of
+                /// pixels making no claim. The count and the booked total are
+                /// the two facts a reader is scanning a day for, and they are
+                /// set at the column's *trailing* edge so the date stays the
+                /// one thing on the leading one. `EventLayoutPolicy` decides
+                /// the wording; this prints it.
+                Text {
+                    visible: dayHead.solo && text !== ""
+                    anchors.right: parent.right
+                    anchors.rightMargin: view.colInset
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: view.layoutPolicy.dayLoadLabel(
+                              dayHead.load,
+                              dayHead.load
+                                  ? view.format.duration(dayHead.load.minutes) : "")
+                    color: Theme.textMuted
+                    font.features: CalendarTokens.tabularFigures
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(11.5)
+                    font.weight: Theme.weightRegular
                 }
             }
         }
@@ -408,13 +522,37 @@ Item {
                 readonly property bool runsIn: modelData.continuesLeft === true
 
                 readonly property real lead: view.columnX(modelData.startCol)
-                    + (bandBar.runsIn ? 0 : CalendarTokens.chipInset)
+                    + (bandBar.runsIn ? 0 : view.colInset)
                 readonly property real trail:
                     view.columnRight(modelData.startCol + modelData.span - 1)
                     - (bandBar.runsOn ? 0 : CalendarTokens.chipGap * 3)
 
+                /// What the bar's own contents measure, which is the one number
+                /// `bandBarWidth` cannot work out for itself — a font metric,
+                /// and a policy that could read a font could not be tested
+                /// offscreen. The rule about what to do with it is the policy's.
+                readonly property real natural: CalendarTokens.chipBar
+                    + Theme.space2 + bandTitleMetrics.width + Theme.space2
+
+                readonly property real track:
+                    Math.max(0, Math.round(bandBar.trail) - Math.round(bandBar.lead))
+
+                TextMetrics {
+                    id: bandTitleMetrics
+
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(11.5)
+                    font.weight: Theme.weightMedium
+                    text: bandBar.event ? (bandBar.event.title || "Untitled") : ""
+                }
+
                 x: Math.round(bandBar.lead)
-                width: Math.max(0, Math.round(bandBar.trail) - Math.round(bandBar.lead))
+                // Natural width where the span ends inside the run, the whole
+                // track where it runs off an edge — `EventLayoutPolicy`
+                // explains why, and a day view is where the difference is 800
+                // pixels of tint.
+                width: Math.round(view.layoutPolicy.bandBarWidth(
+                    bandBar.track, bandBar.natural, bandBar.runsOn || bandBar.runsIn))
                 y: Theme.space1 + modelData.lane
                    * (CalendarTokens.allDayLaneH + CalendarTokens.allDayLaneGap)
                 height: CalendarTokens.allDayLaneH
@@ -536,13 +674,20 @@ Item {
                     width: content.width - view.gutterW
                     y: Math.round(view.grid.minutesToY(index * 60 + 30, view.hourRow))
                     height: 1
-                    // 0.22 and not 0.4. At 0.4 a half-hour hairline is within a
+                    // 0.4, and it was 0.22. The argument for 0.22 was that a
+                    // half-hour hairline at 0.4 competes with an hour rule for
+                    // the beat, and it does — at arm's length. At 100% it
+                    // vanished outright: the note off the capture was a grid
+                    // with *no* half-hour rules at all and no way to eyeball
+                    // 2:30 across an empty afternoon. A hint nobody can see is
+                    // not a hint, and the hour keeps the beat by being the
+                    // solid one. At 0.4 a half-hour hairline is within a
                     // hair of an hour rule's own weight, so a two-hour block
                     // reads as four identical bands and the hour — the thing the
                     // gutter actually names — stops being the beat. The
                     // half-hour is a *hint* for where 2:30 is; it only has to be
                     // findable when looked for.
-                    color: Qt.alpha(Theme.borderSubtle, 0.22)
+                    color: Qt.alpha(Theme.borderSubtle, 0.4)
                 }
             }
 
@@ -611,6 +756,67 @@ Item {
                 }
             }
 
+            /// **Hover-to-create.** The empty grid answers the pointer with the
+            /// slot a click would make, which is the affordance Notion has and
+            /// the first capture of this grid did not: a wall of chips with no
+            /// sign that the space between them is a place you can put
+            /// something.
+            ///
+            /// `acceptedButtons: Qt.NoButton` on purpose — this area is a
+            /// *sensor*, not a button. It sits under the chips and takes no
+            /// press, so a click still reaches whatever it was aimed at, and a
+            /// chip's own hover area consumes the hover before this one sees it,
+            /// which is what stops the ghost appearing under a meeting.
+            ///
+            /// Every number in it is already a policy: `columnForX` picks the
+            /// day, `yToMinutes` and `snap` pick the quarter hour, `minutesToY`
+            /// puts it back. Nothing new is decided here.
+            MouseArea {
+                id: createHover
+
+                x: view.gutterW
+                y: 0
+                width: content.width - view.gutterW
+                height: content.height
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+            }
+
+            Rectangle {
+                id: createHint
+
+                readonly property int col: createHover.containsMouse
+                    ? view.grid.columnForX(createHover.mouseX + view.gutterW,
+                                           view.gutterW, content.width,
+                                           view.columns.length)
+                    : -1
+                readonly property real startMin: view.grid.snap(
+                    view.grid.yToMinutes(createHover.mouseY, view.hourRow),
+                    CalendarTokens.snapMin)
+
+                visible: createHint.col >= 0
+                x: view.columnX(Math.max(0, createHint.col)) + view.colInset
+                width: Math.max(0, view.columnWidthFor(Math.max(0, createHint.col))
+                                - view.colInset * 2)
+                y: Math.round(view.grid.minutesToY(createHint.startMin, view.hourRow))
+                height: Math.round(view.grid.minutesToY(30, view.hourRow))
+                radius: Theme.radiusSm
+                color: Qt.alpha(Theme.surfaceOverlay, 0.55)
+                border.width: 1
+                border.color: Theme.borderStrong
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "+"
+                    color: Theme.textSecondary
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(13.5)
+                    font.weight: Theme.weightMedium
+                }
+            }
+
             /// One column of chips per day. The model is the column array, so a
             /// column rebuilds when its date changes and not when the array is
             /// merely reassigned.
@@ -628,9 +834,11 @@ Item {
                     height: content.height
 
                     Repeater {
-                        model: view.chipsFor(column.modelData.iso, column.width
-                                             - CalendarTokens.chipInset
-                                             - CalendarTokens.chipGap)
+                        model: view.chipsFor(
+                            column.modelData.iso,
+                            view.layoutPolicy.columnTrack(column.width, view.colInset,
+                                                          CalendarTokens.chipGap)
+                            - CalendarTokens.chipGap)
 
                         delegate: EventChip {
                             required property var modelData
@@ -658,24 +866,46 @@ Item {
                             // between neighbours and once at the trailing edge.
                             // Two chips in adjacent *days* are then
                             // `chipGap + rule + chipInset` apart and never abut.
+                            //
+                            // **Which gap depends on what is beside it.** A
+                            // chip that ends at the track's right edge pays the
+                            // column's own `chipGap` and nothing more, so the
+                            // trailing margin stays equal to the leading one.
+                            // A chip with a neighbour to its right pays
+                            // `EventLayoutPolicy.laneGap` instead — a share of
+                            // the lane, so the gutter is as visible in a 433px
+                            // day lane as two pixels are in a 39px week one.
+                            // Without it the day view's packed lanes abut, and
+                            // the picture reads as a cascade of occlusions
+                            // rather than as meetings side by side.
                             readonly property real track:
-                                column.width - CalendarTokens.chipInset
+                                view.layoutPolicy.columnTrack(
+                                    column.width, view.colInset,
+                                    CalendarTokens.chipGap)
                             readonly property real lead:
-                                CalendarTokens.chipInset + modelData.xFrac * track
+                                view.colInset + modelData.xFrac * track
                             readonly property real trail:
-                                CalendarTokens.chipInset
+                                view.colInset
                                 + (modelData.xFrac + modelData.wFrac) * track
+                            readonly property bool atTrackEnd:
+                                modelData.xFrac + modelData.wFrac >= 0.999
+                            readonly property int rightGap:
+                                atTrackEnd ? CalendarTokens.chipGap
+                                    : view.layoutPolicy.laneGap(
+                                        track / Math.max(1, modelData.columns),
+                                        CalendarTokens.chipGap)
 
                             z: modelData.depth
                             x: Math.round(lead)
                             width: Math.max(CalendarTokens.chipGap,
-                                            Math.round(trail) - CalendarTokens.chipGap
+                                            Math.round(trail) - rightGap
                                                 - Math.round(lead))
                             y: Math.round(modelData.y)
                             height: Math.max(CalendarTokens.chipMinH,
                                              Math.round(modelData.h) - 1)
 
                             event: modelData.event
+                            guests: modelData.guests
                             hue: modelData.hue
                             depth: modelData.depth
                             clearHeight: modelData.clearH

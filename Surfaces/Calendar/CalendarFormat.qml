@@ -141,15 +141,21 @@ QtObject {
     /// first year where it is and lifts only the second — the lead reads
     /// `"Dec 29, 2025 – Jan 4"`, which is exactly the week it names.
     ///
+    /// The comma stays with the lead. Only the *space* before the year is the
+    /// seam; the comma is punctuation belonging to the phrase in front of it,
+    /// and dropping it left the toolbar reading `"Aug 16 – 22  2026"` — two
+    /// disconnected fragments with a doubled gap where a range should be one
+    /// string. `"August 2026"` has no comma to keep and loses nothing.
+    ///
     /// An unrecognised view gives `{lead: "", year: ""}` rather than `null`, so
     /// a toolbar binding onto `.lead` renders an empty title instead of
     /// throwing on every frame.
     function titleParts(view: string, anchorIso: string, firstDay: int): var {
         const full = format.title(view, anchorIso, firstDay);
-        const match = /^(.*?)[,\s]*\s(\d{4})$/.exec(full);
+        const match = /^(.*?)(,?)\s+(\d{4})$/.exec(full);
         if (!match)
             return { "lead": full, "year": "" };
-        return { "lead": match[1], "year": match[2] };
+        return { "lead": match[1] + match[2], "year": match[3] };
     }
 
     /// `"August 2026"`.
@@ -226,6 +232,11 @@ QtObject {
             return null;
         return {
             weekday: format.weekdayAbbrevs[format.time.dayOfWeek(iso)].toUpperCase(),
+            // The long name is the day view's, and it is set as a *word* rather
+            // than as tracked caps: one column has the width for `Tuesday`, and
+            // seven do not. Both forms are returned from the one function so the
+            // two views can never disagree about which Tuesday they mean.
+            weekdayFull: format.weekdayNames[format.time.dayOfWeek(iso)],
             day: String(d.day)
         };
     }

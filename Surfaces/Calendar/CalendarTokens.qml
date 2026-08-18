@@ -91,6 +91,18 @@ Singleton {
     /// segment of the view switcher all stand this tall.
     readonly property int controlH: 30
 
+    /// The line the chrome band's two display-face headings sit on, measured
+    /// from the top of the band.
+    ///
+    /// The sidebar's wordmark and the toolbar's date title are set at different
+    /// sizes on either side of a hairline, and vertical *centring* does not put
+    /// two different sizes on one line — the larger face's box is taller, so its
+    /// baseline drops. Measured on the first capture of this band: 3px apart,
+    /// which is far enough to see and close enough to look like a mistake
+    /// rather than a decision. Stating the baseline instead of the centre makes
+    /// the two agree by construction at any size either of them is ever set in.
+    readonly property int titleBaseline: 34
+
     /// Lining, tabular figures — `font.features` for every number on this
     /// surface that sits in a column with another number: the hour gutter, the
     /// day-header numerals, the now stamp, and every time printed on a chip.
@@ -173,6 +185,33 @@ Singleton {
     readonly property color todayWash:
         Qt.alpha(Theme.accentPrimary, Theme.dark ? 0.30 : 0.20)
 
+    /// The mini-month's band — the run of days the grid beside it is showing.
+    ///
+    /// The spec said `surfaceOverlay`, and measured on the sidebar's own ground
+    /// that is #1E2B26 on #141B17: a step of about 1.2:1, which at arm's length
+    /// disappears entirely and leaves "which week am I in" carried by the 20px
+    /// today dot alone. It is the same mistake the today column wash made
+    /// before it moved to `todayWash`, and it takes the same fix — tint the
+    /// ground toward the accent rather than lifting it toward grey, so the band
+    /// gains hue as well as value and survives a desaturated read.
+    ///
+    /// The hairline is what stops it reading as a lit *cell* row: a filled
+    /// stadium with a defined edge is a selection, an undrawn one is a smudge.
+    ///
+    /// **The hue is `borderStrong`, not the accent, and that is the second
+    /// correction.** Tinting toward `accentPrimary` fixed the visibility and
+    /// broke the reading: today's disc is solid `accentPrimary`, so a teal
+    /// capsule around a teal disc merged into one blob and the week stopped
+    /// saying *this week, and today is the marker inside it*. `borderStrong` is
+    /// the palette's desaturated slate — a step of about 1.4:1 over the
+    /// sidebar's ground, so it survives the same desaturated read the accent
+    /// wash was chosen for, while leaving saturation to mean exactly one thing
+    /// in this grid: today.
+    readonly property color bandFill:
+        Qt.alpha(Theme.borderStrong, Theme.dark ? 0.45 : 0.22)
+    readonly property color bandBorder:
+        Qt.alpha(Theme.borderStrong, Theme.dark ? 0.90 : 0.55)
+
     // --- the hues -------------------------------------------------------------
 
     /// Which hue an event wears. The choice is pure and tested next door; this
@@ -250,6 +289,24 @@ Singleton {
     /// was the same problem there.
     function chipBorder(index: int): color {
         return Qt.alpha(tokens.bar(index), Theme.dark ? 0.28 : 0.22);
+    }
+
+    /// The guest monogram, **inverted out of the chip's own two colours**.
+    ///
+    /// It was the bar ink at 0.30 behind initials in the text ink, which is a
+    /// pale letter on a tint of the same hue on a tint of the same hue: three
+    /// values within a few steps of each other, and the capture came back with
+    /// `JA BO WS` on olive reading as texture rather than as letters. The chip
+    /// already owns a pair guaranteed to clear 4.5:1 in both modes — `text` on
+    /// `fill` — so the monogram simply swaps them: the disc is the text ink and
+    /// the letters are the fill. Same contrast, read the other way round, and
+    /// the discs now also separate from the chip they sit in.
+    function monogramFill(index: int): color {
+        return tokens.text(index);
+    }
+
+    function monogramInk(index: int): color {
+        return tokens.fill(index);
     }
 
     /// A chip under the pointer, lifted 12% toward the overlay — the same

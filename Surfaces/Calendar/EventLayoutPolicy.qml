@@ -467,6 +467,37 @@ QtObject {
         return out;
     }
 
+    /// The floor a band bar is never cut below, whatever its title measures.
+    /// Under about this much a bar stops reading as a span at all and reads as
+    /// a swatch someone dropped on the band.
+    readonly property int bandBarMinWidth: 72
+
+    /// How wide an all-day bar is actually drawn, given the track its columns
+    /// give it and what its own contents measure.
+    ///
+    /// **A bar that ends inside the run takes its natural width; one that runs
+    /// off an edge fills the track.** In a week column the two are the same
+    /// number — a 123px column and a title that elides — so this rule is
+    /// invisible there and decisive on a day view, where one all-day event was
+    /// drawn as an 870px slab of tint with four words at the left end of it.
+    /// The band's job is to say *which days*, and on a single-column day the
+    /// answer is "this one" however wide the bar is; stretching therefore buys
+    /// nothing and costs the row its shape.
+    ///
+    /// A continuing span is the exception and must stay flush: the cut edge
+    /// against the frame is what says it carries on, and a natural-width bar
+    /// floating clear of the edge would say the opposite.
+    ///
+    /// `contentWidth` is a measurement — the surface takes it off `TextMetrics`
+    /// — and everything done with it is here.
+    function bandBarWidth(track: real, contentWidth: real, continues: bool): real {
+        const t = isFinite(track) ? Math.max(0, track) : 0;
+        if (continues === true)
+            return t;
+        const natural = isFinite(contentWidth) ? Math.max(0, contentWidth) : 0;
+        return Math.min(t, Math.max(policy.bandBarMinWidth, natural));
+    }
+
     // --- which row an event belongs on ----------------------------------------
 
     /// True for an event that belongs in the all-day band rather than in the
@@ -664,6 +695,186 @@ QtObject {
     /// time it would have been better off without.
     readonly property int inlineTimeMinWidth: 96
 
+    /// Where a one-line chip stops printing its start alone and prints **the
+    /// whole range** after the title, on the same line.
+    ///
+    /// This is the day view earning its width. `inlineTimeMinWidth` is the
+    /// floor for any inline time at all and buys `9:00 AM`, which is all a
+    /// 123px week column can carry; a single column is seven times that, and a
+    /// half-hour meeting there printed `3:00 PM` beside 700px of empty fill —
+    /// the one chip on the surface with room to spare saying the least. 240 is
+    /// `"10:00 – 11:30 AM"` at pt(11) — 90px measured — plus the roomy padding
+    /// and a title worth eliding, so the range never crowds the thing it
+    /// follows.
+    readonly property int inlineRangeMinWidth: 240
+
+    /// The guest line: **the third thing a chip says, and only where the box
+    /// has room for it without taking anything from the first two.**
+    ///
+    /// Height first. 48 is the brief's number and it is also the arithmetic: a
+    /// roomy chip's title line is 17px, its time line 15, its top pad 3 — 35 —
+    /// so 48 is the first height with a whole third line spare. A 45-minute
+    /// meeting (42px) therefore keeps title over time and gains nothing it
+    /// cannot afford.
+    ///
+    /// Width second, and it is the harder gate: initials in a row of avatars
+    /// plus a `+N` is about 70px, and a chip that spent its width on three
+    /// packed lanes has none of it. 190 keeps guests out of every week column
+    /// (123px, and 59 or 39 once shared) and lets them into a day column, which
+    /// is exactly the split the brief asks for — the day view shows more
+    /// because it has more, not because it is a different chip.
+    readonly property int guestLineMinHeight: 48
+    readonly property int guestsMinWidth: 190
+
+    /// --- the column's own margins ---------------------------------------------
+
+    /// Where a column stops being a slot in a week and starts being a page.
+    ///
+    /// A 123px week column cannot spend eight pixels a side on air: that is 13%
+    /// of the track, and the chips are the thing the reader came for. A single
+    /// 1300px day column spending the same eight is spending 1%, and the picture
+    /// it buys is the one the capture asked for — chips sitting *in* a track
+    /// rather than bleeding into the window frame at one end and the day rule at
+    /// the other. 320 is roughly two week columns: past it the column is wide
+    /// enough that no chip loses a word to the margin.
+    readonly property int wideColumnWidth: 320
+    readonly property int wideColumnInset: 8
+
+    /// The leading — and, symmetrically, the trailing — margin inside a column.
+    ///
+    /// `base` is the narrow answer (`CalendarTokens.chipInset`), passed in so
+    /// this file still knows no pixels of its own. **Symmetric on purpose.** The
+    /// day view's own header sat at 10px while its chips sat at 2, so the date
+    /// and the events it names were on two different left edges, and the last
+    /// chip in a packed row ran into the frame with nothing under the header's
+    /// margin at all. One inset, used by both, and the track is the difference.
+    function columnInset(columnWidth: real, base): real {
+        const b = (typeof base === "number" && base >= 0) ? base : 2;
+        if (!isFinite(columnWidth))
+            return b;
+        return columnWidth >= policy.wideColumnWidth
+            ? Math.max(b, policy.wideColumnInset) : b;
+    }
+
+    /// The width the chips divide between them, given a column and its inset.
+    /// The `gap` comes back because every chip pays it off its own right edge —
+    /// so adding it here once is what makes the *last* chip's right margin come
+    /// out equal to the first chip's left one instead of `inset - gap`.
+    function columnTrack(columnWidth: real, inset: real, gap: real): real {
+        const w = isFinite(columnWidth) ? columnWidth : 0;
+        const i = isFinite(inset) ? inset : 0;
+        const g = isFinite(gap) ? gap : 0;
+        return Math.max(0, w - 2 * i + g);
+    }
+
+    /// The air between two chips that sit side by side in one column — and the
+    /// single number that decides whether packed lanes read as *packed* or as
+    /// one chip drawn over another.
+    ///
+    /// **It has to scale with the lane, because the eye reads the ratio.** Two
+    /// pixels between two 39px week lanes is 5% of a lane: a seam, and it reads
+    /// as one. The same two pixels between two 433px day lanes is 0.5%, and the
+    /// picture that came back off the day capture was exactly that — three
+    /// concurrent meetings that had been divided into three equal lanes by this
+    /// file and looked, on the page, like a cascade of one chip occluding the
+    /// next, right rounded corner and all. Nothing was covering anything; there
+    /// was simply no gutter to see. A fixed gap cannot fix both columns at once,
+    /// so the gap is a fraction of the lane it separates.
+    ///
+    /// 3% keeps a 40px week lane at the 2px it already had (rounding down to
+    /// the floor) and opens a 433px day lane to the cap. The cap is 12: past
+    /// that the gutter starts competing with the chips for the reader's
+    /// attention, and it is air, not information.
+    ///
+    /// `base` is the narrow answer (`CalendarTokens.chipGap`) and is also the
+    /// floor — no arrangement is ever tighter than the one the week column
+    /// already ships.
+    readonly property int maxLaneGap: 12
+    readonly property real laneGapFrac: 0.03
+
+    function laneGap(laneWidth: real, base): int {
+        const b = (typeof base === "number" && base >= 0) ? Math.floor(base) : 2;
+        if (!isFinite(laneWidth) || laneWidth <= 0)
+            return b;
+        return Math.max(b, Math.min(policy.maxLaneGap,
+                                    Math.round(laneWidth * policy.laneGapFrac)));
+    }
+
+    /// --- what a day comes to --------------------------------------------------
+
+    /// The count and the total booked minutes of one day's timed events.
+    ///
+    /// The day view's header row is the one row in the surface that can be
+    /// accused of saying nothing new — the toolbar above it already prints the
+    /// whole date, so a header that prints the date again has spent 48px
+    /// repeating itself. This is what it spends them on instead: the two facts
+    /// about the day that neither the toolbar nor the grid states outright, and
+    /// that a reader scanning for "how booked am I" is actually after.
+    ///
+    /// Overlaps are counted twice on purpose. Three concurrent meetings *are*
+    /// four and a half hours of obligation, and a figure that quietly merged
+    /// them would be a different, softer claim than the grid beneath it makes.
+    ///
+    /// `allDayCount` is the band above the grid, and it counts but contributes
+    /// no minutes — an all-day event is not eight hours of anything, and a
+    /// total that swallowed one would put a day's real load out by a working
+    /// week. It is a count and not a list because the band has already been
+    /// clipped to this day by the time anybody can count it. Leaving it out
+    /// entirely was the first version, and it printed "4 events" under a header
+    /// with five chips visible beneath it.
+    function dayLoad(events: var, allDayCount: var): var {
+        const list = Array.isArray(events) ? events : [];
+        let minutes = 0;
+        let count = 0;
+        for (let i = 0; i < list.length; i++) {
+            const slot = policy.slotOf(list[i]);
+            if (!slot)
+                continue;
+            count++;
+            minutes += Math.max(0, slot.to - slot.from);
+        }
+        const banded = (typeof allDayCount === "number" && allDayCount > 0)
+            ? Math.floor(allDayCount) : 0;
+        return { "count": count + banded, "minutes": minutes };
+    }
+
+    /// `dayLoad` as the string the header prints. The duration arrives already
+    /// formatted (`CalendarFormat.duration`) so this file still speaks no
+    /// language of its own; what it decides is the plural and the separator,
+    /// and that an empty day says nothing at all rather than "0 events".
+    function dayLoadLabel(load: var, durationText: var): string {
+        if (!load || !(load.count > 0))
+            return "";
+        const head = load.count === 1 ? "1 event" : String(load.count) + " events";
+        return (typeof durationText === "string" && durationText !== "")
+            ? head + " · " + durationText : head;
+    }
+
+    /// --- the resize affordance ------------------------------------------------
+
+    /// The shortest chip that carries a visible resize grip.
+    ///
+    /// Notion draws none at all, and the note off the first capture was that our
+    /// grid "looks readable but not operable" — a wall of blocks with nothing
+    /// saying they can be taken hold of. A grip that appears only on hover says
+    /// nothing to a reader who has not already guessed; this one is drawn faint
+    /// and always, and brightens under the pointer.
+    ///
+    /// 44 is where it stops costing more than it says: the pill is 3px tall and
+    /// sits 3px off the bottom edge, so under about 44px it is inside the type
+    /// it is supposed to sit clear of. A half-hour chip (28px) therefore keeps
+    /// its one clean line and is resized by grabbing its edge, unlabelled.
+    /// `clearHeight` is the same guard the content rule uses — a chip mostly
+    /// covered by a cascaded neighbour has no bottom edge to offer.
+    readonly property int gripMinHeight: 44
+
+    function showsGrip(height: real, clearHeight): bool {
+        const full = isFinite(height) ? height : 0;
+        const clear = (clearHeight === undefined || clearHeight === null
+                       || !isFinite(clearHeight)) ? full : Math.max(0, clearHeight);
+        return Math.min(full, clear) >= policy.gripMinHeight;
+    }
+
     /// Everything a chip needs to know about its own contents:
     ///
     ///   - `mode` — `"stacked"` (title over time), `"inline"` (title then time
@@ -740,23 +951,40 @@ QtObject {
         // and a chip that wanted a banner but got `titleOnly` keeps its pad.
         const padTop = bannerSet ? 0 : (tight ? 2 : 3);
 
+        // The guest line, on the two gates above. `mode === "stacked"` is part
+        // of it and not an accident: an inline chip has one line by definition,
+        // and a `titleOnly` chip could not afford a time, let alone a guest.
+        const showGuests = mode === "stacked"
+            && w >= policy.guestsMinWidth && h >= policy.guestLineMinHeight;
+
         // A line box is its point size and a bit; the exact metric belongs to
         // the font and the surface measures it, but the *count* is a decision
         // and has to be the same on every screen, so it is taken from the sizes
         // this function chose rather than from anything rendered.
         const titleLine = Math.round(titleSize * policy.lineFactor);
         const timeLine = mode === "stacked" ? Math.round(timeSize * policy.lineFactor) : 0;
-        const room = h - padTop - timeLine - 2;
+        // The guest line is charged against the title's wrapping allowance the
+        // same way the time line is, so a chip never wraps into a row it has
+        // already promised to something else.
+        const guestLine = showGuests ? Math.round(timeSize * policy.lineFactor) : 0;
+        const room = h - padTop - timeLine - guestLine - 2;
         const lineCap = tight ? policy.maxTightTitleLines : policy.maxTitleLines;
         const titleLines = (mode === "stacked" && textW >= policy.wrapMinTextWidth)
             ? Math.max(1, Math.min(lineCap, Math.floor(room / titleLine)))
             : 1;
 
-        const form = mode === "inline" ? "start" : timeForm;
+        // An inline time is the start alone, *until the chip is wide enough for
+        // the range* — see `inlineRangeMinWidth`. Above it the one-line chip
+        // says exactly what the two-line one says, which is the point of giving
+        // the day view its width.
+        const form = (mode === "inline" && w < policy.inlineRangeMinWidth)
+            ? "start" : timeForm;
 
         return {
             "mode": mode,
             "showTime": mode !== "titleOnly",
+            "showGuests": showGuests,
+            "guestSize": timeSize,
             "timeForm": form,
             "timeMeridiem": form === "range" || textW >= policy.meridiemMinTextWidth,
             "narrow": narrow,

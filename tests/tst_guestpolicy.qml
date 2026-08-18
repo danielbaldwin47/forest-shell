@@ -376,4 +376,81 @@ TestCase {
         compare(guests.parseFreeText("jose@example.org", accented), null);
         verify(guests.parseFreeText("jose@example.com", accented) !== null);
     }
+
+    function test_a_chip_summary_names_a_lone_guest_and_counts_a_party() {
+        const contacts = [
+            { id: "mira", name: "Mira Vale", email: "mira@example.com" },
+            { id: "opal", name: "Opal Reed", email: "opal@example.com" },
+            { id: "juno", name: "Juno Sato", email: "juno@example.com" },
+            { id: "wren", name: "Wren Ashby", email: "wren@example.com" }
+        ];
+
+        // One guest is a name: an avatar beside a "1" says nothing twice.
+        const solo = guests.summary(["opal"], contacts, 3);
+        compare(solo.count, 1);
+        compare(solo.soloName, "Opal Reed");
+        compare(solo.countLabel, "");
+        compare(solo.shown.length, 1);
+        compare(solo.shown[0].initials, "OR");
+
+        // A party that fits is drawn whole and counted nowhere.
+        const three = guests.summary(["mira", "opal", "juno"], contacts, 3);
+        compare(three.shown.length, 3);
+        compare(three.countLabel, "");
+        compare(three.soloName, "");
+
+        // Past the avatars the count is of **everybody**, not of the overflow.
+        const four = guests.summary(["mira", "opal", "juno", "wren"], contacts, 3);
+        compare(four.count, 4);
+        compare(four.shown.length, 3);
+        compare(four.countLabel, "4");
+    }
+
+    function test_the_chip_line_names_one_guest_and_counts_a_party() {
+        const contacts = [
+            { id: "mira", name: "Mira Vance", email: "mira@example.com" },
+            { id: "opal", name: "Opal Reed", email: "opal@example.com" },
+            { id: "juno", name: "Juno Sato", email: "juno@example.com" }
+        ];
+
+        // One guest, whole name — there is room and a surname is worth having.
+        compare(guests.summary(["opal"], contacts, 3).line, "Opal Reed");
+        // Everybody has a disc, so the line names them rather than counting the
+        // discs back to the reader.
+        compare(guests.summary(["mira", "opal", "juno"], contacts, 3).line,
+                "Mira, Opal, Juno");
+        // And where the avatars ran out, the remainder is the only number: the
+        // two in front of it are named, so `+1` cannot be read as the party.
+        compare(guests.summary(["mira", "opal", "juno"], contacts, 2).line,
+                "Mira, Opal +1");
+        // No discs at all is the one case with nothing to name against, and
+        // there the count is the whole line.
+        compare(guests.summary(["mira", "opal", "juno"], contacts, 0).line,
+                "3 guests");
+        compare(guests.summary([], contacts, 3).line, "");
+        compare(guests.summary(null, null, 3).line, "");
+    }
+
+    function test_a_short_name_is_the_leading_word() {
+        compare(guests.shortName("Mira Vance"), "Mira");
+        compare(guests.shortName("  Juno   Sato "), "Juno");
+        compare(guests.shortName("Prince"), "Prince");
+        compare(guests.shortName(""), "");
+        compare(guests.shortName(null), "");
+        compare(guests.shortName(42), "");
+    }
+
+    function test_a_summary_of_nobody_is_empty_rather_than_missing() {
+        const none = guests.summary([], [], 3);
+        compare(none.count, 0);
+        compare(none.shown.length, 0);
+        compare(none.countLabel, "");
+        compare(none.soloName, "");
+        compare(guests.summary(null, null, 3).count, 0);
+        // An id with no contact behind it is still a guest, named after itself.
+        const orphan = guests.summary(["ghost"], [], 3);
+        compare(orphan.count, 1);
+        compare(orphan.soloName, "ghost");
+    }
+
 }

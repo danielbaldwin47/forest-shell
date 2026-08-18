@@ -40,6 +40,15 @@ Item {
     /// Its hue index, resolved through `CalendarTokens`.
     property int hue: 0
 
+    /// `GuestPolicy.summary` for this event, resolved by the view that has the
+    /// contact book. `null` — the default — is a chip with nothing to say about
+    /// guests, which is every chip in a week column: the guest line is a thing
+    /// a *wide* chip earns, and `chipContent.showGuests` is the gate.
+    property var guests: null
+
+    readonly property int guestCount:
+        (chip.guests && chip.guests.count) ? chip.guests.count : 0
+
     /// The event's real duration in minutes. Passed in rather than derived from
     /// `height`, because `chipMinH` floors a short event's height and the
     /// content rule needs the duration that was floored, not the floor.
@@ -188,6 +197,8 @@ Item {
             }
 
             Text {
+                id: stackedTime
+
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: stackedTitle.bottom
@@ -226,6 +237,71 @@ Item {
                 // the size difference is still the hierarchy.
                 font.weight: (chip.content.banner || chip.content.tight)
                     ? Theme.weightMedium : Theme.weightRegular
+            }
+
+            /// The guest line — the third thing a wide chip says, and the one
+            /// the day view exists to have room for.
+            ///
+            /// Avatars in the chip's **own hue** rather than in a per-person
+            /// colour. A guest palette would put four unrelated colours inside
+            /// one tinted box and the chip would stop reading as one event; the
+            /// initials are what tell people apart, and the hue is what tells
+            /// events apart. `GuestPolicy.colourFor` stays for the picker,
+            /// where a row *is* a person.
+            Row {
+                id: guestRow
+
+                visible: chip.content.showGuests && chip.guestCount > 0
+                // Left edge only: a `Row` sizes itself from its children, and
+                // anchoring both sides would fight that. The body clips, which
+                // is the backstop if a name ever runs the width.
+                anchors.left: parent.left
+                anchors.top: stackedTime.bottom
+                anchors.topMargin: 3
+                spacing: Theme.space1
+
+                Repeater {
+                    model: (guestRow.visible && chip.guests) ? chip.guests.shown : []
+
+                    delegate: Rectangle {
+                        id: avatar
+
+                        required property var modelData
+
+                        width: 18
+                        height: 18
+                        radius: Theme.radiusFull
+                        color: CalendarTokens.monogramFill(chip.hue)
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: avatar.modelData.initials
+                            color: CalendarTokens.monogramInk(chip.hue)
+                            font.family: Theme.fontUi
+                            // 9.5 and not 8.5. Two glyphs at 8.5 are 9px of
+                            // type inside an 18px disc — the disc reads and the
+                            // letters do not, which is the worst of both.
+                            font.pointSize: Theme.pt(9.5)
+                            font.weight: Theme.weightMedium
+                        }
+                    }
+                }
+
+                /// The guests, named rather than counted — the discs beside it
+                /// already say how many there are, and a `2 guests` after two
+                /// discs is the same fact twice. See `GuestPolicy.nameLine`.
+                Text {
+                    id: guestLabel
+
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: guestLabel.text !== ""
+                    text: chip.guests ? (chip.guests.line || "") : ""
+                    elide: Text.ElideRight
+                    color: CalendarTokens.text(chip.hue)
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(chip.content.guestSize)
+                    font.weight: Theme.weightRegular
+                }
             }
         }
 
@@ -281,6 +357,42 @@ Item {
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
+            }
+        }
+
+        /// The resize grip: a 24x3 pill on the bottom edge, in the chip's hue.
+        ///
+        /// **Under the pointer only**, and it took a capture to settle which
+        /// way round. Drawn always it was meant to say "this edge can be taken
+        /// hold of"; what it actually did on a still page was put a faint
+        /// centred dash inside every chip, and the reading that came back was
+        /// not "handle" but "rendering fault" — a mark with no edge, no
+        /// gradient and nothing to grab. An affordance that has to be explained
+        /// is decoration. It appears when the pointer is on the chip, which is
+        /// the only moment a hand can act on it, and brightens again on the
+        /// resize strip itself.
+        ///
+        /// Which chips get one is `EventLayoutPolicy.showsGrip` — a height and a
+        /// clear height, so a half-hour chip and a chip buried under a cascaded
+        /// neighbour both keep their one clean line.
+        Rectangle {
+            visible: chip.hovered
+                     && chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 3
+            width: 24
+            height: 3
+            radius: 1.5
+            color: CalendarTokens.bar(chip.hue)
+            opacity: resizeEdge.containsMouse ? 0.95 : 0.7
+
+            Behavior on opacity {
+                enabled: Theme.duration(Theme.motionFast) > 0
+                NumberAnimation {
+                    duration: Theme.duration(Theme.motionFast)
+                    easing.type: Easing.OutCubic
+                }
             }
         }
     }
@@ -343,5 +455,21 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: chip.activated(chip.event ? chip.event.id : "")
+    }
+
+    /// The bottom strip, over the body's own pointer area so the edge answers
+    /// with the resize cursor rather than the hand. 6px, which is the smallest
+    /// strip a pointer lands on reliably and half of what would eat the last
+    /// line of type on a chip that shows one.
+    MouseArea {
+        id: resizeEdge
+
+        visible: chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 6
+        hoverEnabled: true
+        cursorShape: Qt.SizeVerCursor
     }
 }

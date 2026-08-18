@@ -388,6 +388,18 @@
       "guests": [
         "mira"
       ]
+    },
+    {
+      "id": "evt-37",
+      "title": "Sprint demo day",
+      "start": "2026-08-18T00:00",
+      "end": "2026-08-19T00:00",
+      "allDay": true,
+      "colour": "",
+      "guests": [
+        "mira",
+        "juno"
+      ]
     }
   ]
 }

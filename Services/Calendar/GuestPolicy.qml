@@ -184,6 +184,37 @@ QtObject {
         return firstGlyph(words[0]) + firstGlyph(words[words.length - 1]);
     }
 
+    /// The name a chip calls somebody by when it has a row of them to fit: the
+    /// first whitespace-delimited word. Not a "given name" — plenty of names do
+    /// not have one where English expects it — just the leading word, which is
+    /// what a list of people in a small box can carry.
+    function shortName(name: var): string {
+        if (typeof name !== "string")
+            return "";
+        const words = name.trim().split(/\s+/).filter(w => w.length > 0);
+        return words.length === 0 ? "" : words[0];
+    }
+
+    /// The guest line: the shown guests by name, then a `+N` for anybody there
+    /// was no avatar for. One guest is named in full; nobody is a blank.
+    function nameLine(all: var, shown: var): string {
+        const party = Array.isArray(all) ? all : [];
+        const faces = Array.isArray(shown) ? shown : [];
+        if (party.length === 0)
+            return "";
+        if (party.length === 1)
+            return party[0].name;
+        const names = faces.map(function (g) {
+            return policy.shortName(g.name);
+        }).filter(function (n) {
+            return n !== "";
+        });
+        const rest = party.length - faces.length;
+        if (names.length === 0)
+            return String(party.length) + " guests";
+        return rest > 0 ? names.join(", ") + " +" + String(rest) : names.join(", ");
+    }
+
     /// A hue name for `key`, stable across runs and across machines. FNV-1a over
     /// the code units — any hash would do, but it has to be *this* one forever,
     /// because a changed hash repaints every avatar in the shell.
@@ -250,6 +281,54 @@ QtObject {
             });
         }
         return out;
+    }
+
+    /// The guest line on a wide chip: a few avatars and a count of the rest.
+    ///
+    /// **The count is of the whole party, not of the overflow.** `+2` after two
+    /// avatars is ambiguous — four people or two? — where `4` beside two faces
+    /// is the number anybody actually wants off a calendar chip, and it is the
+    /// number that stays right when the chip narrows and shows fewer avatars.
+    /// So the overflow is expressed as the total and the avatars are however
+    /// many fit.
+    ///
+    /// A single guest is the one case with no count: one avatar beside a `1`
+    /// says nothing twice, so a lone guest is drawn as their name instead —
+    /// which is the whole fact, in less room than the pair of tokens.
+    ///
+    /// `maxShown` is the surface's — it is a width, and width is measured, not
+    /// decided here.
+    function summary(guestIds: var, contacts: var, maxShown: var): var {
+        const all = displayList(guestIds, contacts, null);
+        const cap = (typeof maxShown === "number" && maxShown >= 0)
+            ? Math.floor(maxShown) : 3;
+        const shown = all.slice(0, Math.min(cap, all.length));
+        return {
+            count: all.length,
+            shown: shown,
+            // The whole party, printed only where the avatars do not already
+            // account for everybody.
+            countLabel: (all.length > 1 && shown.length < all.length)
+                ? String(all.length) : "",
+            soloName: all.length === 1 ? all[0].name : "",
+            // The one string the chip prints beside the avatars, so the surface
+            // holds no `if` about guests at all.
+            //
+            // **It names people; it does not count the faces beside it.** The
+            // previous rule printed the party size — two avatars followed by
+            // "2 guests", three followed by "3 guests" — and the capture read
+            // as a row that said the same thing twice, once in monograms too
+            // small to be sure of and once in words. The count was never the
+            // scarce fact: the reader can see how many discs there are. *Who*
+            // is the fact, and the initials only hint at it.
+            //
+            // So the shown guests are named by their first names, and the
+            // number returns only for the ones there was no disc for — a `+2`
+            // that follows three faces is unambiguous precisely because the
+            // three in front of it are named. A lone guest keeps their whole
+            // name: there is room, and a surname is worth having when there is.
+            line: policy.nameLine(all, shown)
+        };
     }
 
     /// Is `text` an address? Deliberately loose — one `@`, something either

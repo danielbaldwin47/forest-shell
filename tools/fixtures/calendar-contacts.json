@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "contacts": [
+    { "id": "mira",  "name": "Mira Okonkwo",   "email": "mira@example.org",  "colour": "#7aa2f7" },
+    { "id": "juno",  "name": "Juno Alvarez",   "email": "juno@example.org",  "colour": "#9ece6a" },
+    { "id": "tabby", "name": "Tabitha Fenn",   "email": "tabby@example.org", "colour": "#e0af68" },
+    { "id": "rune",  "name": "Rune Halvorsen", "email": "rune@example.org",  "colour": "#bb9af7" },
+    { "id": "opal",  "name": "Opal Nakamura",  "email": "opal@example.org",  "colour": "#7dcfff" },
+    { "id": "cass",  "name": "Cass Delacroix", "email": "cass@example.org",  "colour": "#f7768e" },
+    { "id": "birch", "name": "Birch Odili",    "email": "birch@example.org", "colour": "#73daca" },
+    { "id": "wren",  "name": "Wren Sadiq",     "email": "wren@example.org",  "colour": "#ff9e64" },
+    { "id": "amina", "name": "Amina Sultan",   "email": "amina@example.org", "colour": "#b4a0e0" }
+  ]
+}

@@ -1,0 +1,483 @@
+// Where a minute sits on the week grid, and which day a pixel belongs to.
+//
+// The week and day views are one component with a different column count, and
+// almost everything they draw is arithmetic over two numbers: how tall an hour
+// is, and how wide a column is. That arithmetic is the whole of this file, so
+// the view stays a picture — a `Repeater` of columns, a `Repeater` of hour
+// lines, a `Rectangle` per event — and every off-by-one it could have is
+// checkable offscreen (`tests/tst_timegridpolicy.qml`).
+//
+// Two currencies, matching CalendarTime.qml: a *day* is `"2026-08-18"` and a
+// *stamp* is `"2026-08-18T09:15"`, both local wall clock, neither an instant.
+// Day and minute arithmetic is delegated to `CalendarTime` rather than redone
+// here — `Date` appears nowhere in the calendar, for the reasons its header
+// gives.
+//
+// The conventions the rest of the grid is built on:
+//
+//   - **Minutes run 0..1440 within a day**, midnight to midnight. 1440 is a
+//     real value, not an overflow: it is where an event ending at midnight
+//     stops, and it is the bottom edge of the grid.
+//   - **y is measured from the top of the day**, not from the top of the
+//     viewport. Scrolling is the view's job (`visibleScrollY` only says where
+//     to start), so nothing here has to know it happened.
+//   - **x is measured from the left of the grid, gutter included.** `gridWidth`
+//     is the full width of the grid surface and the hour gutter is the first
+//     `gutterWidth` of it, so a view can hand over its own `width` and the
+//     `x` a `MouseArea` reports without adjusting either. A point inside the
+//     gutter belongs to no column, which is what makes `-1` meaningful.
+//   - **Weekend is Saturday and Sunday** — a shading rule, not a locale one, so
+//     it does not move when `firstDay` does.
+//   - **A non-positive `hourHeight` is a caller bug and yields `NaN`**, not a
+//     collapsed grid: a zero-height hour would map every minute of the day to
+//     y=0 and every drag would silently land at midnight.
+import QtQuick
+import "../../Services/Calendar"
+
+QtObject {
+    id: grid
+
+    /// Pixels per hour. The view sets it — a zoom control is a change to this
+    /// one number — and every function below takes it as an optional argument
+    /// so a test can state its own without touching the object.
+    property real hourHeight: 60
+
+    /// The minute the grid opens on. Seven is early enough to have the working
+    /// day below it and late enough that the night is scrolled away.
+    readonly property int defaultStartHour: 7
+
+    /// The drag snap, in minutes. Shared with `EventPolicy.minMinutes` by
+    /// coincidence of value, not by dependency: this one is about where a
+    /// pointer lands, that one about how short an event may be.
+    readonly property int defaultStep: 15
+
+    property CalendarTime time: CalendarTime {}
+
+    /// Where every string in this file is spelled — see `hourLabel`.
+    property CalendarFormat format: CalendarFormat {}
+
+    // --- the vertical axis ----------------------------------------------------
+
+    /// The hour height a call should use: its own argument when it was given
+    /// one, the property otherwise. Non-positive is `NaN` — see the header.
+    function hourPixels(hourHeight) {
+        const h = (hourHeight === undefined || hourHeight === null) ? grid.hourHeight : hourHeight;
+        return (typeof h === "number" && isFinite(h) && h > 0) ? h : NaN;
+    }
+
+    /// The full height of one day's column.
+    function dayHeight(hourHeight) {
+        return 24 * grid.hourPixels(hourHeight);
+    }
+
+    /// Minutes since midnight -> y from the top of the day.
+    function minutesToY(minutes, hourHeight) {
+        return minutes / 60 * grid.hourPixels(hourHeight);
+    }
+
+    /// y from the top of the day -> minutes since midnight. Neither snapped nor
+    /// clamped: a raw pointer position is all three of those things separately,
+    /// and a drag that wants the unsnapped value (a ghost following the cursor)
+    /// would have to undo the rounding otherwise.
+    function yToMinutes(y, hourHeight) {
+        return y / grid.hourPixels(hourHeight) * 60;
+    }
+
+    /// The y of the hour rule a minute falls **inside** — 13:40 answers 13:00's
+    /// line, not 14:00's. This is the gutter's question rather than the grid's:
+    /// a drag lands at some minute, and the pill that says which hour it landed
+    /// in has to sit on the rule above it or the reader tracks a box back to the
+    /// labels to find out.
+    ///
+    /// It is a floor and not `snap`, which rounds to the *nearest* line and
+    /// would put 13:40's pill an hour below the ghost. Non-finite minutes, or an
+    /// hour height that is not one, answer `NaN` the way every other reading on
+    /// this axis does.
+    function hourTopY(minutes: real, hourHeight): real {
+        const h = grid.hourPixels(hourHeight);
+        if (!isFinite(minutes) || !isFinite(h))
+            return NaN;
+        return Math.floor(minutes / 60) * h;
+    }
+
+    /// To the nearest `step` minutes, a half rounding forward to the later
+    /// line. A non-positive step is a no-op rather than a division by zero.
+    function snap(minutes, step) {
+        const s = (step === undefined || step === null) ? grid.defaultStep : step;
+        if (!(s > 0) || !isFinite(minutes))
+            return minutes;
+        return Math.round(minutes / s) * s;
+    }
+
+    /// Into the day, 0..1440 inclusive at both ends.
+    function clampMinutes(minutes: real): real {
+        if (!isFinite(minutes))
+            return NaN;
+        return Math.max(0, Math.min(1440, minutes));
+    }
+
+    // --- the hour gutter ------------------------------------------------------
+
+    /// One gutter label. `"01:00"` in 24-hour form; `"1 AM"` in 12-hour, with
+    /// no minutes on it — the gutter marks whole hours, and ":00" on every line
+    /// is thirteen characters of noise in a column that has to stay narrow.
+    ///
+    /// `CalendarFormat` spells it. This file owns where a label goes, not how
+    /// it reads, and two hour clocks in one surface is how a gutter and a chip
+    /// come to disagree about noon.
+    function hourLabel(hour: int, use24: bool): string {
+        // Wrapped before delegating — CalendarFormat.hourLabel assumes 0..23
+        // and a caller stepping the gutter past midnight hands it 24 or -1.
+        hour = ((hour % 24) + 24) % 24;
+        return grid.format.hourLabel(hour, use24);
+    }
+
+    /// The gutter, top to bottom: `[{hour, label, y}]` for **1..23**.
+    ///
+    /// Midnight and 24:00 are deliberately absent. Both sit exactly on an edge
+    /// of the grid, where half the glyph would be clipped away, and the day
+    /// they belong to is already named by the column header.
+    function hourLabels(use24, hourHeight) {
+        const h = grid.hourPixels(hourHeight);
+        const out = [];
+        for (let hour = 1; hour <= 23; hour++) {
+            out.push({
+                "hour": hour,
+                "label": grid.hourLabel(hour, use24 === true),
+                "y": grid.minutesToY(hour * 60, h)
+            });
+        }
+        return out;
+    }
+
+    /// Where the now-line goes for a wall-clock stamp, or **-1 for "no line"**.
+    ///
+    /// Only the minutes of the stamp are read; which column it belongs on is
+    /// the view's question, and it already knows its own days. -1 is
+    /// unambiguous because a real answer is never negative.
+    function nowLineY(stamp: string, hourHeight): real {
+        const minutes = grid.time.parseMinutes(stamp);
+        if (minutes < 0)
+            return -1;
+        return grid.minutesToY(minutes, hourHeight);
+    }
+
+    /// How close an hour label may come to the live-time label before one of
+    /// them has to move, and how close before one of them has to go.
+    ///
+    /// **The gap was 20 and it cost the grid its anchor.** At 13:40 with
+    /// `hourRow: 56` the 14:00 label is 18.7px below the stamp — inside 20, so
+    /// it was suppressed — while three chips in that band read `2:00 – 3:00 PM`
+    /// and the hour they named had no label. Losing the hour rule's name
+    /// exactly where the live time is pointing is the worst place on the grid
+    /// to lose it.
+    ///
+    /// So the rule is now two distances rather than one. Between `labelGap` and
+    /// `labelCollapse` the hour label is *nudged* clear (`hourLabelShift`) and
+    /// keeps its name; a nudge is at most `labelGap - labelCollapse` = 9px,
+    /// which is under a fifth of an hour row and reads as a label leaning off
+    /// its rule rather than as a label on the wrong one. Inside
+    /// `labelCollapse` the two are genuinely on top of each other and no nudge
+    /// short enough to be honest would separate them, so the hour label goes.
+    ///
+    /// 24, and the number is a *reading* distance rather than a collision one.
+    /// Two pt(11) labels clear each other's boxes at 16 apart, which is why 16
+    /// was the number; at 16 they still read as one stack of two numbers, and the
+    /// note off the capture was that `2 PM` crowded the live `1:40 PM` twenty
+    /// pixels under it. A gutter is a column of one number per rule, so the
+    /// exception has to be spaced like one — 24 is where the eye stops pairing
+    /// them.
+    readonly property int labelGap: 24
+
+    /// Where nudging stops and hiding starts, and it is now **overlap alone**.
+    ///
+    /// It was 20, on the argument that a label the stamp is standing next to is
+    /// better dropped than moved. Captured at 13:40 that argument lost badly:
+    /// `2 PM` is 18.7px under the stamp, so it was the label that went — and the
+    /// gutter then ran from `1 PM` to `3 PM` with no number in between, a
+    /// two-hour stretch of grid with nothing to count off. Deleting the anchor
+    /// nearest the reader's own eye is the one thing this rule must not do.
+    ///
+    /// 13 is the collision and nothing more: a pt(11) label's box is about 14px,
+    /// so under 13 the two strings genuinely overprint and no nudge saves them.
+    /// Above it the label leans clear — at 13:40 `2 PM` moves 5.3px down and both
+    /// numbers are legible, which is the picture the gutter is for.
+    readonly property int labelCollapse: 13
+
+    /// Whether an hour label is suppressed because the live time is sitting on
+    /// top of it.
+    ///
+    /// **This is not "hide the current hour", which is what it looks like it
+    /// should be.** At 13:40 with `hourRow: 56` the now-line is 37px below the
+    /// 13:00 rule and 19px above the 14:00 one — so hiding *the current hour*
+    /// would blank a label nothing is near and leave the one actually being
+    /// overprinted in place. The question is a distance, so the rule is a
+    /// distance. `nowY < 0` — the clock is not in this view — hides nothing.
+    function hourLabelHidden(labelY: real, nowY: real, gap): bool {
+        if (!(nowY >= 0) || !isFinite(labelY))
+            return false;
+        const g = (gap === undefined || gap === null) ? grid.labelCollapse : gap;
+        return Math.abs(labelY - nowY) < g;
+    }
+
+    /// How far an hour label moves to clear the live-time stamp: `0` almost
+    /// everywhere, and away from the stamp in the band between `labelCollapse`
+    /// and `labelGap`. Signed — a label above the stamp moves up, one below
+    /// moves down — so the nudge never carries a label *across* the line it is
+    /// making room for. A label already hidden gets no shift, because a shift
+    /// is a thing that happens to a label you can see.
+    function hourLabelShift(labelY: real, nowY: real, gap): real {
+        if (!(nowY >= 0) || !isFinite(labelY))
+            return 0;
+        const g = (gap === undefined || gap === null) ? grid.labelGap : gap;
+        const d = labelY - nowY;
+        if (Math.abs(d) >= g || grid.hourLabelHidden(labelY, nowY))
+            return 0;
+        return (d >= 0 ? g : -g) - d;
+    }
+
+    // --- the horizontal axis --------------------------------------------------
+
+    /// Saturday or Sunday. `false` for anything that is not a day.
+    function isWeekend(iso: string): bool {
+        const dow = grid.time.dayOfWeek(iso);
+        return dow === 0 || dow === 6;
+    }
+
+    /// Which wash a column wears: `"today"`, `"weekend"` or `"none"`.
+    ///
+    /// **A one-column run wears none of them, and that is the whole rule.** A
+    /// wash is a comparison — it says *this* column is not like the others — so
+    /// on a day view, where there is exactly one column and its date is already
+    /// printed in the header and in the toolbar title, the same 5% of
+    /// `accentPrimary` stops being a marker and becomes the page. Captured at
+    /// `dayCount: 1` it was a teal slab 870px wide with a calendar drawn on it,
+    /// and the weekend wash does the same thing on a Saturday.
+    ///
+    /// Today still wins over the weekend where both apply, and does not add to
+    /// it: a Saturday that is today should read as *today*, not as the one
+    /// column carrying two washes.
+    function columnWash(isToday: bool, isWeekend: bool, count: int): string {
+        if (Math.round(count) <= 1)
+            return "none";
+        if (isToday)
+            return "today";
+        return isWeekend ? "weekend" : "none";
+    }
+
+    /// The columns of a view, left to right:
+    /// `[{iso, weekday, dayNumber, isToday, isWeekend}]`.
+    ///
+    /// **Seven columns is a week** and is aligned to `firstDay`, so the anchor
+    /// can be any day in it and the view does not jump when you move within
+    /// one. **Any other count is a run of days beginning at the anchor**, which
+    /// is what makes `count: 1` the day view with no second code path.
+    ///
+    /// `todayIso` is passed in rather than read from a clock: this file has no
+    /// clock, and the harness that poses a picture needs to say what "today" is
+    /// or no two runs match. Omitting it means no column is today.
+    function dayColumns(anchorIso, firstDay, count, todayIso) {
+        const n = Math.round(count);
+        if (!(n > 0) || !grid.time.isDay(anchorIso))
+            return [];
+        const start = n === 7 ? grid.time.weekStart(anchorIso, firstDay) : anchorIso;
+        if (!start)
+            return [];
+        const out = [];
+        for (let i = 0; i < n; i++) {
+            const iso = grid.time.addDays(start, i);
+            const parsed = grid.time.parseDay(iso);
+            const dow = grid.time.dayOfWeek(iso);
+            out.push({
+                "iso": iso,
+                "weekday": dow,
+                "dayNumber": parsed ? parsed.day : -1,
+                "isToday": iso === todayIso,
+                "isWeekend": dow === 0 || dow === 6
+            });
+        }
+        return out;
+    }
+
+    /// The width of one column. `NaN` if the gutter leaves nothing over.
+    function columnWidth(gutterWidth: real, gridWidth: real, count: int): real {
+        const n = Math.round(count);
+        const w = (gridWidth - gutterWidth) / n;
+        return (n > 0 && isFinite(w) && w > 0) ? w : NaN;
+    }
+
+    /// The `count + 1` boundaries between the columns, as **whole pixels**.
+    ///
+    /// A week is seven columns of whatever the window left over, which is
+    /// almost never divisible by seven. Drawn from the fractional width alone,
+    /// each column rounds its own left edge and its own width independently and
+    /// the row comes out 148 / 150 / 148 / 149 — measured, and visible as a
+    /// wobble in the day separators that nothing in the design asks for.
+    ///
+    /// Rounding the *edges* instead makes the widths differ by at most one
+    /// pixel and spreads the remainder evenly across the row rather than
+    /// dumping it on the last column, and it makes `xForColumn` and
+    /// `columnWidthAt` agree by construction: column `i` is exactly
+    /// `edges[i]` to `edges[i + 1]`, with no gap and no overlap anywhere.
+    function columnEdges(gutterWidth: real, gridWidth: real, count: int): var {
+        const n = Math.round(count);
+        const w = grid.columnWidth(gutterWidth, gridWidth, count);
+        if (isNaN(w))
+            return [];
+        const out = [];
+        for (let i = 0; i <= n; i++)
+            out.push(Math.round(gutterWidth + i * w));
+        return out;
+    }
+
+    /// The drawn width of one column — its own two edges, subtracted. `NaN`
+    /// for an index outside the view, the same way `xForColumn` answers.
+    function columnWidthAt(index: int, gutterWidth: real, gridWidth: real, count: int): real {
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
+        if (edges.length === 0 || index < 0 || index >= Math.round(count))
+            return NaN;
+        return edges[index + 1] - edges[index];
+    }
+
+    /// Which column a point is in, or **-1**: in the gutter, off either edge,
+    /// or a grid too narrow to have columns at all. A view uses the -1 to
+    /// refuse a drag rather than to start one at column 0.
+    ///
+    /// The index is reconciled against `xForColumn`'s own edges rather than
+    /// trusted from the division. `(x - gutter) / w` and `gutter + i * w` are
+    /// two different roundings of the same number, and on a column width that
+    /// does not divide evenly — which is every real window, since a week is
+    /// seven columns of whatever is left over — they disagree by an ulp. That
+    /// puts a click on a column's own left edge in the column *before* it: an
+    /// event created one day out, from a grid that looks correct. Stepping to
+    /// the edge makes the two functions exact inverses at every width (measured
+    /// over ~34k width/count/index combinations: 3284 disagreed before, none
+    /// after). The loops run at most one step each.
+    function columnForX(x: real, gutterWidth: real, gridWidth: real, count: int): int {
+        const n = Math.round(count);
+        const w = grid.columnWidth(gutterWidth, gridWidth, count);
+        if (isNaN(w) || !isFinite(x) || x < gutterWidth || x >= gridWidth)
+            return -1;
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
+        let i = Math.max(0, Math.min(n - 1, Math.floor((x - gutterWidth) / w)));
+        while (i > 0 && x < edges[i])
+            i--;
+        while (i < n - 1 && x >= edges[i + 1])
+            i++;
+        return i;
+    }
+
+    /// The left edge of a column. `NaN` for an index outside the view, so a bad
+    /// index parks nothing at x=0 where it would look deliberate.
+    function xForColumn(index: int, gutterWidth: real, gridWidth: real, count: int): real {
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
+        if (edges.length === 0 || index < 0 || index >= Math.round(count))
+            return NaN;
+        return edges[index];
+    }
+
+    /// A point on the grid -> `{iso, minutes}`, snapped, or `null` if the point
+    /// is not on a column.
+    ///
+    /// `columns` is the array `dayColumns` returned, which is what the view
+    /// already has bound to its `Repeater`; passing it rather than re-deriving
+    /// the days here means a drag can never disagree with the columns it is
+    /// being dragged across.
+    ///
+    /// Snap first, then clamp: snapping runs to the nearest line and clamping
+    /// keeps the result inside the day, so a drag near midnight lands on 1440
+    /// rather than being rounded past it and then wrapped into tomorrow.
+    function gridPointToStamp(x, y, columns, gutterWidth, gridWidth, hourHeight, step) {
+        if (!columns || columns.length === undefined || columns.length === 0)
+            return null;
+        const col = grid.columnForX(x, gutterWidth, gridWidth, columns.length);
+        if (col < 0)
+            return null;
+        const minutes = grid.clampMinutes(grid.snap(grid.yToMinutes(y, hourHeight), step));
+        if (isNaN(minutes))
+            return null;
+        return { "iso": columns[col].iso, "minutes": minutes };
+    }
+
+    /// Where the view scrolls to on open: the top of `startHour`, so the
+    /// working day is on screen and the night is above it.
+    ///
+    /// With a `viewportHeight` the answer is clamped so the last hour of the
+    /// day still sits at the bottom of the view; without one it is unclamped,
+    /// because a `Flickable` that does not yet know its own height would
+    /// otherwise be told to scroll to zero.
+    /// How far above the opening hour's rule the view actually parks.
+    ///
+    /// Zero put the rule flush with the top of the viewport, and the gutter
+    /// label is *centred* on its rule — so `7 AM` opened cut in half by the
+    /// all-day band's floor. Half a pt(11) line is 8px; 10 gives the label its
+    /// own descender back.
+    readonly property int openingInset: 10
+
+    function visibleScrollY(startHour, hourHeight, viewportHeight) {
+        const h = grid.hourPixels(hourHeight);
+        const hour = (startHour === undefined || startHour === null) ? grid.defaultStartHour : startHour;
+        const y = grid.minutesToY(Math.max(0, Math.min(24, hour)) * 60, h) - grid.openingInset;
+        if (viewportHeight === undefined || viewportHeight === null || !isFinite(viewportHeight))
+            return Math.max(0, y);
+        return Math.max(0, Math.min(y, grid.dayHeight(h) - viewportHeight));
+    }
+
+    /// Which minutes of the day a scrolled viewport is showing:
+    /// `{startMinutes, endMinutes}`, clamped into the day, or `null` for a
+    /// viewport with no height and a grid with no hour.
+    ///
+    /// The inverse of `visibleScrollY`, and the question anything that wants to
+    /// act on what is *on screen* asks — scrolling the now-line into view,
+    /// deciding whether an event needs to be scrolled to at all. Clamped
+    /// because a `Flickable` overshoots at both ends, and "the view is showing
+    /// minute -40" is a fact about a bounce rather than about the day.
+    ///
+    /// `WeekView.nowLineVisible` is the caller, and it deliberately moves
+    /// nothing: the opening scroll still parks on
+    /// `visibleScrollY(defaultStartHour, ...)`, because a grid that chased the
+    /// clock would open somewhere different every hour. What the range buys
+    /// there is the log line — today on screen with its now-line off it.
+    function visibleRange(scrollY: real, viewportHeight: real, hourHeight): var {
+        const h = grid.hourPixels(hourHeight);
+        if (isNaN(h) || !isFinite(scrollY) || !isFinite(viewportHeight) || viewportHeight < 0)
+            return null;
+        return {
+            "startMinutes": grid.clampMinutes(grid.yToMinutes(scrollY, h)),
+            "endMinutes": grid.clampMinutes(grid.yToMinutes(scrollY + viewportHeight, h))
+        };
+    }
+
+    // --- events ---------------------------------------------------------------
+
+    /// Where an event sits in one day's column: `{y, h, continuesAbove,
+    /// continuesBelow}`, or `null` if it does not appear on that day at all.
+    ///
+    /// An event that crosses midnight is **clipped to the day**, not moved and
+    /// not dropped: a 22:00-02:00 event is drawn twice, as the last two hours
+    /// of one column and the first two of the next, which is what a week view
+    /// shows. The two flags say which end was cut, so the view can mark the
+    /// edge rather than pretending the event began at 00:00.
+    ///
+    /// `end` is exclusive (EventPolicy's rule), so an event ending at midnight
+    /// fills its own day to the bottom and does not put a zero-height sliver on
+    /// the next one.
+    function eventRect(start: string, end: string, dayIso: string, hourHeight) {
+        if (!grid.time.isDay(dayIso) || !grid.time.isStamp(start) || !grid.time.isStamp(end))
+            return null;
+        const midnight = grid.time.formatStamp(dayIso, 0);
+        const from = grid.time.diffMinutes(midnight, start);
+        const to = grid.time.diffMinutes(midnight, end);
+        if (!(to > from) || to <= 0 || from >= 1440)
+            return null;
+        const top = Math.max(0, from);
+        const bottom = Math.min(1440, to);
+        const h = grid.hourPixels(hourHeight);
+        return {
+            "y": grid.minutesToY(top, h),
+            "h": grid.minutesToY(bottom - top, h),
+            "continuesAbove": from < 0,
+            "continuesBelow": to > 1440
+        };
+    }
+}

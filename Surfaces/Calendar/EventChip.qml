@@ -1,0 +1,774 @@
+// One event, drawn on the time grid.
+//
+// The chip owns no arithmetic. Where it goes and how big it is were decided by
+// `TimeGridPolicy.eventRect` and `EventLayoutPolicy.layout` before it was
+// built; which hue it wears was decided by `HuePolicy`; what may be printed
+// inside the box those two chose was decided by
+// `EventLayoutPolicy.chipContent`. What is left here is the picture: a hue bar,
+// a tinted fill, one or two lines of text, and the two states a pointer can put
+// it in.
+//
+// ## The one thing the chip measures for itself
+//
+// `chipContent` cannot answer "how many glyphs fit" — that is a font metric,
+// and a policy that could read a font could not be tested offscreen. So the
+// chip measures its own title with `TextMetrics` and hands the *number* back to
+// `clipTitle`, which decides what to do with it. The decision (cut at the last
+// whole word) stays pure; only the measurement is here. This is what turns
+// `D…` into `Design…` in a packed column — `Text.ElideRight` alone cuts
+// mid-glyph and names nothing.
+//
+// ## Why the ring is a sibling and not a border
+//
+// The body clips — a 20px chip with a 15-character title has to elide inside
+// its own rounded corners, and `clip` is what makes the corners real. A
+// selection ring drawn as that body's `border` would then sit *inside* the
+// chip and eat two pixels of the fill, and on a chip packed against its
+// neighbour those two pixels are the gap. Drawn as a sibling at
+// `anchors.margins: -1` it sits one pixel outside instead, in the gutter the
+// packing already leaves, and the chip does not change size when it is picked.
+pragma ComponentBehavior: Bound
+import QtQuick
+import qs.Core
+
+Item {
+    id: chip
+
+    /// The event record: `{id, title, start, end, ...}`.
+    required property var event
+
+    /// Its hue index, resolved through `CalendarTokens`.
+    property int hue: 0
+
+    /// **Is it over?** — set by the view from `HuePolicy.eventIsPast`, never
+    /// worked out here. The chip has no clock and must not grow one: two chips
+    /// asking `new Date()` a frame apart is how a grid gets a seam through the
+    /// middle of it, and a frozen `nowStamp` is the only reason two captures of
+    /// the same fixture are the same picture.
+    ///
+    /// Everything it changes is a colour — bar, fill, ink, hairline, monogram —
+    /// so the geometry of a past chip is the geometry of a future one and the
+    /// week's shape does not shift as the day moves through it.
+    property bool past: false
+
+    /// `GuestPolicy.summary` for this event, resolved by the view that has the
+    /// contact book. `null` — the default — is a chip with nothing to say about
+    /// guests, which is every chip in a week column: the guest line is a thing
+    /// a *wide* chip earns, and `chipContent.showGuests` is the gate.
+    property var guests: null
+
+    readonly property int guestCount:
+        (chip.guests && chip.guests.count) ? chip.guests.count : 0
+
+    /// The event's real duration in minutes. Passed in rather than derived from
+    /// `height`, because `chipMinH` floors a short event's height and the
+    /// content rule needs the duration that was floored, not the floor.
+    property real minutes: 60
+
+    /// How many cascade steps into an overlap cluster this chip is — 0 for a
+    /// chip that shares its column side by side, higher for one drawn over a
+    /// neighbour. `EventLayoutPolicy.layout` decides it; the chip only reads it
+    /// as "am I a card lying on another card", which is a picture and so lives
+    /// here.
+    property int depth: 0
+
+    /// How many pixels of this chip a cascaded neighbour leaves visible.
+    /// `Infinity` — the default — is "all of them", which is every chip nothing
+    /// is drawn over.
+    property real clearHeight: Infinity
+
+    property bool selected: false
+
+    /// 12h or 24h, from the shell's one clock-format knob.
+    property bool use24: false
+
+    /// Set when the event runs past this day's top or bottom edge.
+    property bool continuesAbove: false
+    property bool continuesBelow: false
+
+    property CalendarFormat format: CalendarFormat {}
+
+    property EventLayoutPolicy layoutPolicy: EventLayoutPolicy {}
+
+    // --- settling ----------------------------------------------------------------
+    //
+    // A chip that has just been dragged does not jump to where the store put
+    // it: it eases there over `motionSettle`, position and size together, from
+    // wherever the ghost's last proposal left it.
+    //
+    // **The animation is armed rather than always on**, and that is the whole
+    // design. `x`, `y`, `width` and `height` are laid out by
+    // `EventLayoutPolicy` and move for a dozen reasons that are not a drag — a
+    // window resize, a neighbour appearing, the day view opening — and a chip
+    // that slid every time any of those happened would make the grid feel loose
+    // under a scroll. So the Behaviors below are live only in the window
+    // between a drag of *this* chip ending and its settle finishing, which is
+    // the one moment the motion carries information: it says the box you let go
+    // of and the slot it took are the same object.
+
+    /// True for one settle after a drag of this chip commits.
+    property bool settling: false
+
+    /// Whether a drag of this chip is what the `ghosted` flag falling refers
+    /// to. Without it every chip on the grid would settle each time any drag
+    /// anywhere ended.
+    property bool settleArmed: false
+
+    onGhostedChanged: {
+        if (chip.ghosted) {
+            chip.settleArmed = true;
+            chip.settling = false;
+            settleWindow.stop();
+        } else if (chip.settleArmed) {
+            chip.settleArmed = false;
+            chip.settling = true;
+            settleWindow.restart();
+        }
+    }
+
+    Timer {
+        id: settleWindow
+
+        interval: Theme.duration(CalendarTokens.motionSettle) + 60
+        onTriggered: chip.settling = false
+    }
+
+    Behavior on y {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on x {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on height {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on width {
+        enabled: Theme.animateTransforms && chip.settling
+        NumberAnimation {
+            duration: Theme.duration(CalendarTokens.motionSettle)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    /// What the pointer says over each part of a chip. Pure and tested next
+    /// door (`tests/tst_cursorpolicy.qml`); this file only reads the answer and
+    /// logs it.
+    property CursorPolicy cursors: CursorPolicy {}
+
+    readonly property bool hovered: pointer.containsMouse
+
+    /// Everything the box's own size decides: which lines print, at what size,
+    /// with how much padding. One object, so the chip can never take its title
+    /// rule from one branch and its padding from another.
+    readonly property var content:
+        chip.layoutPolicy.chipContent(chip.width, chip.height, chip.minutes,
+                                      chip.clearHeight)
+
+    readonly property string rawTitle:
+        chip.event ? (chip.event.title || "Untitled") : ""
+
+    // --- the drag ------------------------------------------------------------
+    //
+    // The chip reports a gesture in *its own* coordinates and decides nothing
+    // about it. The view maps those two numbers into the grid and hands them to
+    // `DragPolicy`, which is where "this is a move", "this is a resize" and
+    // "this was only a click" are actually settled — the chip cannot know, and
+    // a chip that guessed would be a second copy of the state machine.
+
+    /// The state machine, for the two questions a chip *can* answer on its own:
+    /// which zone the pointer is in, and which cursor that zone asks for.
+    /// Handed down by the view where there is one, so a whole column of chips
+    /// shares its instance.
+    property DragPolicy dragPolicy: DragPolicy {}
+
+    /// How deep the resize strips are at each end. `DragPolicy.edgeDepth` never
+    /// lets them eat more than a third of a short chip, so this is a wish and
+    /// `stripDepth` is what the chip actually gets.
+    property real edgeZone: 6
+
+    readonly property real stripDepth:
+        chip.dragPolicy.edgeDepth(chip.height, chip.edgeZone)
+
+    /// The zone the press landed in, latched for the length of the gesture.
+    property string dragZone: "body"
+
+    /// Set by the view while this chip is the one being dragged: the copy under
+    /// the finger lifts, and the one left behind fades to a placeholder. They
+    /// are separate flags because on a cross-day move they are two different
+    /// chips — the ghost is drawn by the view and this is the origin.
+    property bool dragging: false
+    property bool ghosted: false
+
+    signal activated(string id)
+    signal dragBegin(string zone, real x, real y)
+    signal dragMoved(real x, real y)
+    signal dragReleased
+    signal dragCancelled
+
+    implicitHeight: CalendarTokens.chipMinH
+
+    /// Dimmed because *something else* is being dragged. Not the same state as
+    /// `ghosted` and not the same number: a neighbour steps back so the gesture
+    /// is legible over it, it does not leave a hole.
+    property bool dimmed: false
+
+    /// **0.62 for a neighbour, not 0.45.** This is the chip's whole opacity, and
+    /// it moves for one reason: something *else* is being dragged. What the
+    /// dragged chip itself does to its own rectangle is `ghostInk` below, which
+    /// is a different question with a different answer.
+    ///
+    /// 0.45 was chosen so the gesture would read *over* the week, and it bought
+    /// that by half-erasing the week: a blind read of the drag capture reported
+    /// the remaining chips as text floating outside their own fills, because a
+    /// tint at 0.45 falls under the column it sits on before its title does.
+    /// The drag no longer needs the room — it now carries a washed destination
+    /// column, a stroked slot and a labelled origin, none of which a neighbour
+    /// competes with — so the week gets its legibility back.
+    opacity: chip.dimmed ? 0.62 : 1
+
+    /// **The origin of a move is this chip, hollowed — not a hole.**
+    ///
+    /// Three answers have been tried at this exact rectangle. The chip faded to
+    /// 0.35 measured 1.02:1 against its column and its title 1.57:1, which is a
+    /// smear rather than a placeholder. Hiding it outright and drawing a
+    /// separate dashed slot over the top fixed the contrast and broke something
+    /// worse: an unlabelled rectangle drawn *above* a column that still has two
+    /// cascaded meetings in it had its bottom edge cross one of their titles,
+    /// and a blind read called that a strikethrough. Giving that slot a label
+    /// only moved the collision onto the label.
+    ///
+    /// The collision was never really about z. The origin belongs to *one lane
+    /// of one column*, it has to be occluded by whatever cascades over it, and
+    /// it already has a title and a time set in the right place — because it is
+    /// a chip. So it stays a chip and gives up only its fill: hollow body,
+    /// dashed hue outline, rail and ink quieted. Every neighbour draws over it
+    /// exactly as it drew over the real card a moment ago, which is the one
+    /// arrangement no reader has to be taught.
+    ///
+    /// `WeekView` still draws its own outline for a **resize**, where the ghost
+    /// lands on this rectangle and would bury it.
+    readonly property real ghostInk:
+        chip.ghosted ? (chip.originCovered ? 0 : 0.62) : 1
+
+    /// **Set while the ghost is landing on this very rectangle**, which is only
+    /// ever a resize: one edge is pinned, so the proposal and the origin share
+    /// a corner and the lifted card is drawn straight over these two lines of
+    /// text. Two titles and two times a few pixels apart composite into a
+    /// smear, and it photographs as a rendering fault rather than as a state.
+    ///
+    /// So the words go and the rectangle stays. Nothing is lost by it: the card
+    /// on top is printing the same title and the live duration, and the dashed
+    /// outline `WeekView` draws above the pair is the only fact the chip was
+    /// still carrying — where the edge started.
+    property bool originCovered: false
+
+    Behavior on opacity {
+        enabled: Theme.animateTransforms
+        NumberAnimation {
+            duration: Theme.duration(Theme.motionFast)
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    /// The selection ring. See the header for why it is not a border.
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: -1
+        radius: Theme.radiusSm + 1
+        color: "transparent"
+        border.width: Theme.rail
+        border.color: CalendarTokens.barFor(chip.hue, chip.past)
+        visible: chip.selected
+    }
+
+    /// The lift under a cascaded chip.
+    ///
+    /// A chip drawn over another needs an edge that is not the other chip's
+    /// fill, or the two tints run together and the stack reads as one chip with
+    /// a scratch down it. This is that edge and it is deliberately *one* pixel
+    /// of the page colour: the reference's own answer to the same problem is a
+    /// rail, a sliver of the chip beneath and a pale shadow gap stacked up to
+    /// about twelve pixels of decoration, which is a stripe pattern rather than
+    /// a shadow. One dark pixel outside the corner reads as a card lying on a
+    /// card and costs the chip underneath nothing.
+    Rectangle {
+        visible: chip.depth > 0
+        anchors.fill: parent
+        anchors.margins: -1
+        radius: (chip.content.tight ? 3 : Theme.radiusSm) + 1
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.alpha(Theme.bgBase, 0.85)
+    }
+
+    Rectangle {
+        id: body
+
+        anchors.fill: parent
+        clip: true
+        // A 6px radius on a 40px chip eats the top and bottom of the accent
+        // bar clipped inside it, and the bar then reads as a floating tick
+        // rather than the chip's own edge. The packed tier corners at 3, which
+        // is still a corner and leaves the bar whole.
+        radius: chip.content.tight ? 3 : Theme.radiusSm
+        color: chip.ghosted ? CalendarTokens.vacatedFill(chip.hue)
+             : chip.hovered ? CalendarTokens.fillHoverFor(chip.hue, chip.past)
+             : CalendarTokens.fillFor(chip.hue, chip.past)
+        border.width: 1
+        border.color: chip.ghosted ? "transparent"
+                                   : CalendarTokens.chipBorderFor(chip.hue, chip.past)
+
+        Behavior on color {
+            enabled: Theme.animateTransforms
+            ColorAnimation { duration: Theme.duration(Theme.motionFast) }
+        }
+
+        /// The accent bar. Full height and hard-edged against the rounded
+        /// corners the body clips it into, which is what makes the hue readable
+        /// at a glance on a chip too small for anything else.
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: chip.content.bar
+            color: chip.ghosted
+                   ? Qt.alpha(CalendarTokens.barFor(chip.hue, chip.past), 0.45)
+                   : CalendarTokens.barFor(chip.hue, chip.past)
+        }
+
+        /// Title over time — the roomy case, and every packed chip tall enough
+        /// to have a second line.
+        Item {
+            id: stacked
+
+            visible: chip.content.mode === "stacked"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            // Bounded by the visible box for the reason the one-line row below
+            // is, even though both its children hang off the top edge.
+            height: Math.min(parent.height, chip.clearHeight)
+            anchors.leftMargin: chip.content.padLeft
+            anchors.rightMargin: chip.content.padRight
+            anchors.topMargin: chip.content.padTop
+
+            Text {
+                id: stackedTitle
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                text: chip.clippedTitle
+                // Wrapping is the packed column's whole answer: four glyphs on
+                // a line is `Des…` however it is cut, and the same chip has
+                // vertical room its duration already paid for.
+                // `Text.Wrap`, not `WordWrap`: word boundaries first, and a
+                // break inside a word only where no boundary can fit. Under
+                // `WordWrap` a word wider than the box overhangs and is clipped
+                // by the body with no ellipsis to say so — a silent lie about
+                // the title, where `Wrap` at least admits the cut.
+                wrapMode: chip.content.titleLines > 1 ? Text.Wrap : Text.NoWrap
+                elide: Text.ElideRight
+                maximumLineCount: chip.content.titleLines
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(chip.content.titleSize)
+                font.weight: Theme.weightMedium
+            }
+
+            Text {
+                id: stackedTime
+
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: stackedTitle.bottom
+                // The banner tier has already spent its slack on the second
+                // line; a leading of even one pixel is the pixel that would
+                // clip its descenders against the card below.
+                anchors.topMargin:
+                    (chip.content.narrow || chip.content.banner) ? 0 : 1
+                visible: chip.content.showTime
+                text: chip.timeLabel
+                // A time that elides is not a time. Where the last pixel or two
+                // is missing the glyphs shrink instead — the one place on this
+                // surface where type is not on the scale, and cheaper than
+                // printing `10:3…`.
+                fontSizeMode: Text.HorizontalFit
+                minimumPointSize: Theme.pt(8)
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                font.features: CalendarTokens.tabularFigures
+                // Full strength, not the 0.78 the spec asked for. Measured with
+                // `tools/measure-contrast.py`'s arithmetic: the eight dark texts
+                // on their own fills are 4.56-5.43:1 at alpha 1 and **3.44-4.00
+                // at 0.78** — so the fade the spec wanted for hierarchy was
+                // spending the one ratio a chip is not allowed to spend. Size
+                // and weight carry the hierarchy instead; they cost nothing
+                // legibility owns.
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(chip.content.timeSize)
+                // Regular carries the hierarchy at the roomy sizes; at the
+                // banner and tight tiers it stops carrying anything. A pt(9)
+                // stem is under a pixel wide, so half its coverage is
+                // antialiasing and the *measured* ratio off a capture drops
+                // roughly a point below the computed one. Medium puts the ink
+                // back without moving the size, and at 9 against a 10.5 title
+                // the size difference is still the hierarchy.
+                font.weight: (chip.content.banner || chip.content.tight)
+                    ? Theme.weightMedium : Theme.weightRegular
+            }
+
+            /// The guest line — the third thing a wide chip says, and the one
+            /// the day view exists to have room for.
+            ///
+            /// Avatars in the chip's **own hue** rather than in a per-person
+            /// colour. A guest palette would put four unrelated colours inside
+            /// one tinted box and the chip would stop reading as one event; the
+            /// initials are what tell people apart, and the hue is what tells
+            /// events apart. `GuestPolicy.colourFor` stays for the picker,
+            /// where a row *is* a person.
+            Row {
+                id: guestRow
+
+                visible: chip.content.showGuests && chip.guestCount > 0
+                // Left edge only: a `Row` sizes itself from its children, and
+                // anchoring both sides would fight that. The body clips, which
+                // is the backstop if a name ever runs the width.
+                anchors.left: parent.left
+                anchors.top: stackedTime.bottom
+                anchors.topMargin: 3
+                spacing: Theme.space1
+
+                Repeater {
+                    model: (guestRow.visible && chip.guests) ? chip.guests.shown : []
+
+                    // 18 across, and `CalendarTokens.monogramPt` floors the
+                    // type at 9.5 for it: two glyphs at 8.5 are 9px of type
+                    // inside an 18px disc — the disc reads and the letters do
+                    // not, which is the worst of both.
+                    delegate: AvatarChip {
+                        id: avatar
+
+                        required property var modelData
+
+                        size: 18
+                        initials: avatar.modelData.initials
+                        fill: CalendarTokens.monogramFillFor(chip.hue, chip.past)
+                        ink: CalendarTokens.monogramInkFor(chip.hue, chip.past)
+                    }
+                }
+
+                /// The guests, named rather than counted — the discs beside it
+                /// already say how many there are, and a `2 guests` after two
+                /// discs is the same fact twice. See `GuestPolicy.nameLine`.
+                Text {
+                    id: guestLabel
+
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: guestLabel.text !== ""
+                    text: chip.guests ? (chip.guests.line || "") : ""
+                    elide: Text.ElideRight
+                    color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(chip.content.guestSize)
+                    font.weight: Theme.weightRegular
+                }
+            }
+        }
+
+        /// One line — a half-hour meeting, or a chip too short for two. The
+        /// time is right-aligned when there is one, so a column of them lines
+        /// its times up down the right edge instead of ragging after titles of
+        /// different lengths.
+        Item {
+            id: single
+
+            visible: chip.content.mode !== "stacked"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            // **The box is the visible box, not the chip.** A one-line chip
+            // centres its line, and a cascaded chip covered 30 minutes into a
+            // 90-minute box centres it 42px down — behind the card that covers
+            // it. Bounding the row by the clear band puts the line where it can
+            // be read; on every chip nothing covers, `clearHeight` is infinite
+            // and this is the chip's own height, as it was.
+            height: Math.min(parent.height, chip.clearHeight)
+            anchors.leftMargin: chip.content.padLeft
+            anchors.rightMargin: chip.content.padRight
+
+            Text {
+                id: inlineTime
+
+                visible: chip.content.showTime && chip.inlineTimeShown
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: chip.timeLabel
+                // Full strength, for the reason the stacked time above is.
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
+                font.features: CalendarTokens.tabularFigures
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(chip.content.timeSize)
+                font.weight: Theme.weightRegular
+            }
+
+            Text {
+                anchors.left: parent.left
+                anchors.right: inlineTime.visible ? inlineTime.left : parent.right
+                // `space1` and not `space2`: on a one-line chip the gap is the
+                // only thing standing between a whole title and `Stand…`, and
+                // four pixels of air already separate two runs of type at
+                // different weights.
+                anchors.rightMargin: inlineTime.visible ? Theme.space1 : 0
+                anchors.verticalCenter: parent.verticalCenter
+                text: chip.clippedTitle
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(chip.content.titleSize)
+                font.weight: Theme.weightMedium
+            }
+        }
+
+        /// The resize grip: a 24x3 pill on the bottom edge, in the chip's hue.
+        ///
+        /// **Under the pointer only**, and it took a capture to settle which
+        /// way round. Drawn always it was meant to say "this edge can be taken
+        /// hold of"; what it actually did on a still page was put a faint
+        /// centred dash inside every chip, and the reading that came back was
+        /// not "handle" but "rendering fault" — a mark with no edge, no
+        /// gradient and nothing to grab. An affordance that has to be explained
+        /// is decoration. It appears when the pointer is on the chip, which is
+        /// the only moment a hand can act on it, and brightens again on the
+        /// resize strip itself.
+        ///
+        /// Which chips get one is `EventLayoutPolicy.showsGrip` — a height and a
+        /// clear height, so a half-hour chip and a chip buried under a cascaded
+        /// neighbour both keep their one clean line.
+        /// The at-rest half of the same affordance, and the reason the pill above
+        /// is allowed to stay hidden.
+        ///
+        /// The standing note on this surface was that the week *reads read-only*:
+        /// nothing on a still page says a chip can be taken hold of, so the
+        /// picture looks like a report rather than a calendar. The centred dash
+        /// failed at that job for the reason written above — it is a mark with no
+        /// geometry of its own. This is the opposite move: the chip's own bottom
+        /// edge, drawn as an edge, running the full width from the accent bar to
+        /// the right side at a fraction of the hue. It cannot read as a fault
+        /// because it is exactly where a card's edge belongs, and it says the one
+        /// true thing the hover pill says — *this line is the end of the event and
+        /// it is the thing that moves*.
+        ///
+        /// **Future chips only.** A past event's end is a fact rather than a
+        /// handle, and drawing the edge on all of them would put the loudest new
+        /// mark on the grid on precisely the chips the past/future ladder just
+        /// spent its effort quieting.
+        Rectangle {
+            visible: !chip.past && !chip.hovered
+                     && chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+            anchors.left: parent.left
+            anchors.leftMargin: chip.content.bar
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 2
+            color: Qt.alpha(CalendarTokens.barFor(chip.hue, false), 0.30)
+        }
+
+        Rectangle {
+            visible: chip.hovered
+                     && chip.layoutPolicy.showsGrip(chip.height, chip.clearHeight)
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 3
+            width: 24
+            height: 3
+            radius: 1.5
+            color: CalendarTokens.barFor(chip.hue, chip.past)
+            opacity: pointer.hoverZone === "bottom" ? 0.95 : 0.7
+
+            Behavior on opacity {
+                enabled: Theme.duration(Theme.motionFast) > 0
+                NumberAnimation {
+                    duration: Theme.duration(Theme.motionFast)
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+    }
+
+    /// The dashes that say the card has been lifted off this rectangle.
+    ///
+    /// Drawn as a sibling *over* the body rather than as its border, for the
+    /// same reason the selection ring is: the body clips, and an outline inside
+    /// it would eat the two pixels a packed chip needs for its gap. Broken and
+    /// not solid because a broken line is read as an absence and a continuous
+    /// one as an object — a solid outline here reads as a second, selected
+    /// event sitting where the first one used to be.
+    DashedRect {
+        anchors.fill: parent
+        visible: chip.ghosted
+        ink: CalendarTokens.vacatedEdge(chip.hue)
+        halo: CalendarTokens.vacatedHalo
+    }
+
+    // --- the two strings, and the one measurement behind them -----------------
+
+    /// The time, in the form the width can carry: the whole range where it
+    /// fits, the start alone where it does not, and an arrow where the event
+    /// runs off an edge of the day.
+    readonly property string timeLabel: chip.event
+        ? chip.format.chipTimeLabel(chip.event.start, chip.event.end, chip.use24, {
+            "form": chip.content.timeForm,
+            "meridiem": chip.content.timeMeridiem,
+            "continuesAbove": chip.continuesAbove,
+            "continuesBelow": chip.continuesBelow
+        })
+        : ""
+
+    TextMetrics {
+        id: titleMetrics
+
+        font.family: Theme.fontUi
+        font.pointSize: Theme.pt(chip.content.titleSize)
+        font.weight: Theme.weightMedium
+        text: chip.rawTitle
+    }
+
+    /// The title, cut to fit at a word boundary. The width available is the
+    /// text box the content rule sized, less whatever an inline time is taking
+    /// off the end of the same line.
+    /// Whether the one-line row keeps its time. The two measurements are the
+    /// chip's; the rule is `EventLayoutPolicy.inlineTimeFits`.
+    readonly property bool inlineTimeShown:
+        chip.content.mode !== "inline"
+        || chip.layoutPolicy.inlineTimeFits(chip.content.textWidth,
+                                            titleMetrics.width,
+                                            inlineTime.implicitWidth,
+                                            Theme.space1)
+
+    readonly property string clippedTitle: {
+        // Wrapping already breaks at word boundaries and elides the last line,
+        // so the hand-cut form is only for the chips held to one.
+        if (chip.content.titleLines > 1)
+            return chip.rawTitle;
+        const inlineCost = (chip.content.mode === "inline" && chip.inlineTimeShown)
+            ? inlineTime.implicitWidth + Theme.space1 : 0;
+        const avail = chip.content.textWidth - inlineCost;
+        if (chip.rawTitle.length === 0 || titleMetrics.width <= avail)
+            return chip.rawTitle;
+        const advance = titleMetrics.width / chip.rawTitle.length;
+        return chip.layoutPolicy.clipTitle(chip.rawTitle, Math.floor(avail / advance));
+    }
+
+    /// The chip's whole pointer surface — one area, three zones.
+    ///
+    /// It was two areas: a body that clicked and a 6px strip at the bottom that
+    /// only changed the cursor. Two is what a *hover* needs and one is what a
+    /// *drag* needs, because the zone has to be latched at the press and then
+    /// stay latched: a resize that started on the bottom edge and travelled
+    /// through the body must keep resizing, and with two areas the second one
+    /// never sees the motion at all. So the zone is `DragPolicy.hitEdge` of the
+    /// press point, the zone in force decides the cursor, and the strip that used
+    /// to be an area is now a number the policy owns.
+    MouseArea {
+        id: pointer
+
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton
+
+        /// **The grid is a `Flickable`, and a vertical drag on a chip is the
+        /// same gesture as a flick.** Without this the flick wins at the
+        /// standard 10px drag threshold, the press is taken away mid-gesture,
+        /// and the chip's own `onCanceled` cancels the drag — measured at seam
+        /// 2 (`tools/calendar-harness.sh`): a resize logged `drag begin
+        /// resizeBottom` and then `drag cancel` 93ms later, having scrolled the
+        /// grid a few pixels instead. A chip is a grab target, so it keeps the
+        /// press; the grid still flicks everywhere a chip is not.
+        preventStealing: true
+
+        /// Where the pointer is *now*. Only the grip's own brightness reads it
+        /// — the cursor is the two strips below, and the *gesture* reads the
+        /// zone latched at the press.
+        readonly property string hoverZone: pointer.containsMouse
+            ? chip.dragPolicy.hitEdge(pointer.mouseY, chip.height, chip.edgeZone)
+            : ""
+
+        /// The hand, flat. A chip is clickable everywhere, and the two edges
+        /// say otherwise by being covered — see the strips below.
+        cursorShape: Qt.PointingHandCursor
+
+        /// Seam 2's reading of that. The nested compositor cannot present a
+        /// frame, so no harness will ever photograph a cursor here; what it can
+        /// do is compare the word the shell logged against the shape the
+        /// protocol carried, which is why `CursorPolicy` owns both. Logged on
+        /// the *change* only — a hover that crosses a chip is one line, not one
+        /// per mouse move.
+        onHoverZoneChanged: {
+            if (pointer.hoverZone === "")
+                return;
+            const zone = pointer.hoverZone === "body" ? "chip" : "chip-edge";
+            Logger.log("calendar", "cursor " + chip.cursors.name(zone));
+        }
+
+        onPressed: mouse => {
+            chip.dragZone = chip.dragPolicy.hitEdge(mouse.y, chip.height, chip.edgeZone);
+            chip.dragBegin(chip.dragZone, mouse.x, mouse.y);
+        }
+        onPositionChanged: mouse => {
+            if (pointer.pressed)
+                chip.dragMoved(mouse.x, mouse.y);
+        }
+        onReleased: chip.dragReleased()
+        onCanceled: chip.dragCancelled()
+    }
+
+    /// The two resize strips: a cursor each and nothing else.
+    ///
+    /// `HoverHandler` and not a second `MouseArea`, and this is the shape the
+    /// cursor seam was built around (#185): a hover handler carries a cursor
+    /// without taking a press, so the press still reaches the one area above
+    /// that runs the gesture. Two `MouseArea`s would split the drag in half —
+    /// the strip would see the press and the body would see the motion — which
+    /// is the bug the single area above exists to avoid.
+    ///
+    /// Their depth is `DragPolicy.edgeDepth`, the same number `hitEdge` splits
+    /// the zones at, so the cursor never promises a handle where the press
+    /// finds a body.
+    Item {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: chip.stripDepth
+        visible: chip.stripDepth > 0
+
+        HoverHandler { cursorShape: Qt.SizeVerCursor }
+    }
+
+    Item {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: chip.stripDepth
+        visible: chip.stripDepth > 0
+
+        HoverHandler { cursorShape: Qt.SizeVerCursor }
+    }
+}

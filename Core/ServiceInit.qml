@@ -25,6 +25,7 @@ import qs.Services.Screenshot
 import qs.Services.Recorder
 import qs.Services.Weather
 import qs.Services.Theming
+import qs.Services.Calendar
 
 Singleton {
     id: root
@@ -180,7 +181,15 @@ Singleton {
         // looks unavailable on a machine that has it. Theming constructs it
         // today by listening to it, but a service that probes at startup has to
         // be named here whether or not something else happens to touch it.
+        // CalendarStore is here for ShellState's reason and one sharper than
+        // it: its file is read asynchronously, so a store first touched by the
+        // IPC call that wants to *write* to it answers out of an empty list —
+        // and `EventPolicy.nextId` over an empty list is `evt-1`, on top of a
+        // calendar that already has eleven events. Measured: the first
+        // `ipc call calendar create` against a lazily-constructed store logged
+        // `create evt-1` and the file's own evt-1 was still in it.
         report("deferred", [ShellState, Themes, Theming, Matugen, Notifications, Compositor,
+                            CalendarStore,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude, Clipboard,
                             PowerProfiles, NightLight, Vpn,

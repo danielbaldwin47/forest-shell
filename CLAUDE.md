@@ -49,6 +49,15 @@ its clicks by writing the bar's module layout into the scratch config and
 reading the bar's own rect out of `hyprctl layers` rather than guessing at icon
 widths.
 
+**A drag is drivable too, and `tools/calendar-harness.sh` is the worked
+example.** `nested_drag` presses, travels and releases through the same virtual
+pointer, so a create, a move and a resize are assertions on the store's own log
+lines. It aims them the way the bar harness aims clicks: `nested_window_rect`
+gives the toplevel's rect, the surface logs its grid geometry, and a day column
+and a minute become coordinates. A key sent *into* a held drag — Escape
+cancelling one — is `NESTED_DRAG_HOLD_MS` plus a background `nested_drag`, which
+turns that timing into a wait rather than a race.
+
 **The cursor is drivable here too, and it is a protocol read rather than a
 picture** (#185). A cursor shape is not something the client draws — it is a
 `wp_cursor_shape_device_v1.set_shape` request it sends — so `WAYLAND_DEBUG=1` in

@@ -14,3 +14,6 @@ __pycache__/
 # (integration/shell-switch/registration.env is data, not credentials — tracked on purpose.)
 .env
 !integration/shell-switch/registration.env
+
+# built by tools/nested-session.sh from tools/nested-click.c
+tools/nested-click

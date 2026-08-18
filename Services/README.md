@@ -17,13 +17,19 @@ domain ([architecture #12](https://github.com/danielbaldwin47/forest-shell/issue
 | `Recorder/` | Screen recording over the two encoders, and the fallback between them (#52) |
 | `Theming/` | The three palette modes behind `Core/Theme.qml` — fixed forest, the constrained accent (#58) and the full matugen palette (#59); see [Theming/README.md](Theming/README.md) |
 | `Claude/` | The Claude CLI subprocess and its session state |
+| `Calendar/` | The event store and its arithmetic behind the calendar window (#12 §3) |
 
 Two rules that hold across all of them:
 
 - A service that runs unconditionally must be named in `Core/ServiceInit.qml` —
   a singleton nothing references is never constructed.
 - A service that only one surface uses is not a service: it lives with its
-  surface (`Surfaces/Drawers/Launcher/services/`), not here.
+  surface (`Surfaces/Drawers/Launcher/services/`), not here. `Calendar/` reads
+  like a breach of that and is not: the calendar window is a `LazyLoader`, so it
+  is absent most of the time, while `ipc call calendar create` has to work with
+  no window open and the file it writes has to be there when one opens. A store
+  whose lifetime is the surface's would lose both, which is why it is named in
+  `Core/ServiceInit.qml` and lives here.
 
 A third rule, added by #36, because two of these services collide by name with
 the upstream module they wrap:

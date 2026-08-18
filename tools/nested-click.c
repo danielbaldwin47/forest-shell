@@ -18,13 +18,45 @@
 // neither the bar button under it nor the drawer's dismiss catcher, and an
 // instrument that bypasses the compositor's own routing cannot see it.
 //
-// Position is deliberately not this program's job. `hyprctl dispatch
-// movecursor` warps the cursor in *global* coordinates and re-runs hit
-// testing, which is both simpler than binding an output for
-// `motion_absolute` and the one form that spans several outputs. This sends
-// the button wherever the cursor already is.
+// Position is deliberately not this program's job for a *click*. `hyprctl
+// dispatch movecursor` warps the cursor in *global* coordinates and re-runs hit
+// testing, which is both simpler than binding an output for `motion_absolute`
+// and the one form that spans several outputs. A plain invocation sends the
+// button wherever the cursor already is.
+//
+// A **drag** cannot be assembled that way, and that is why the second mode
+// exists. The virtual pointer is created, used and destroyed inside one
+// process, so a press in one invocation and a release in another cannot hold a
+// button down — the device dies in between, and the compositor drops the grab
+// with it. So the whole gesture happens here: press, a run of motions, release.
+//
+// The motions are **absolute** (`motion_absolute`, against the output's own
+// extents) and not relative. Relative motion goes through pointer acceleration,
+// so how far the cursor actually travelled stops being arithmetic and the
+// landing coordinate becomes a property of the machine's libinput profile. A
+// drag whose end point is not exactly where the caller asked is a drag that
+// cannot be asserted on.
+//
+// Each step is its own `frame()` with a few milliseconds after it, for the same
+// reason the press and release below are two flushed batches: motions sent
+// together arrive as one event, and a surface that tracks a drag would see a
+// teleport rather than a gesture.
 //
 //     usage: nested-click [left|right|middle|<linux button code>]
+//            nested-click <button> --drag x1 y1 x2 y2 w h [steps] [--hold-ms N]
+//
+// `--hold-ms` is how long the button stays down at the destination before it is
+// released — 60ms by default, which is only a beat for the surface to read the
+// last motion. A caller that wants to do something *during* the drag asks for
+// more: a drag is atomic from the shell's point of view, so cancelling one from
+// the keyboard means sending the key while this process is still holding the
+// button, and the hold is the window that makes that a wait rather than a race
+// (tools/calendar-harness.sh's Escape-cancels-a-drag check).
+//
+// `w` and `h` are the extents the coordinates are stated against — the
+// *output's* size, which the caller reads from the compositor rather than
+// assuming. Single-output sessions only: `motion_absolute` is scoped to one
+// output, and this binds none.
 //
 // Built on demand by `nested_click` in tools/nested-session.sh, from the
 // protocol vendored at tools/protocols/. Not part of the shell.
@@ -63,6 +95,11 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = handle_global_remove,
 };
 
+static void settle(long ms) {
+    struct timespec gap = {.tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000 * 1000};
+    nanosleep(&gap, NULL);
+}
+
 static uint32_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -72,6 +109,62 @@ static uint32_t now_ms(void) {
 int main(int argc, char **argv) {
     const char *want = argc > 1 ? argv[1] : "left";
     uint32_t button;
+
+    // The drag arguments, or the flag left off entirely.
+    int dragging = 0;
+    uint32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0, extent_w = 0, extent_h = 0;
+    int steps = 12;
+    int hold_ms = 60;
+
+    // Scanned rather than positional, so the optional `steps` before it stays
+    // optional and every existing caller keeps its own argument order.
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--hold-ms") != 0)
+            continue;
+        if (i + 1 >= argc) {
+            fprintf(stderr, "nested-click: --hold-ms wants a count in milliseconds\n");
+            return 2;
+        }
+        {
+            char *end = NULL;
+            long parsed = strtol(argv[i + 1], &end, 10);
+            // `atoi` reads "60ms" as 60 and "--hold-ms bogus" as 0, both
+            // silently — the endptr check is what tells a real count apart
+            // from a typo that would otherwise run the drag anyway.
+            if (end == argv[i + 1] || *end != '\0') {
+                fprintf(stderr,
+                        "usage: nested-click [left|right|middle|<linux button code>]\n"
+                        "       nested-click <button> --drag x1 y1 x2 y2 w h [steps] [--hold-ms N]\n");
+                return 2;
+            }
+            hold_ms = parsed < 0 ? 0 : (int)parsed;
+        }
+        break;
+    }
+
+    if (argc > 2 && strcmp(argv[2], "--drag") == 0) {
+        if (argc < 9) {
+            fprintf(stderr, "nested-click: --drag wants x1 y1 x2 y2 w h [steps]\n");
+            return 2;
+        }
+        dragging = 1;
+        x1 = (uint32_t)strtoul(argv[3], NULL, 10);
+        y1 = (uint32_t)strtoul(argv[4], NULL, 10);
+        x2 = (uint32_t)strtoul(argv[5], NULL, 10);
+        y2 = (uint32_t)strtoul(argv[6], NULL, 10);
+        extent_w = (uint32_t)strtoul(argv[7], NULL, 10);
+        extent_h = (uint32_t)strtoul(argv[8], NULL, 10);
+        // `--hold-ms` may sit where `steps` would: a flag read as a step count
+        // is `atoi("--hold-ms")` = 0, which is one teleport instead of twelve.
+        if (argc > 9 && strncmp(argv[9], "--", 2) != 0)
+            steps = atoi(argv[9]);
+        if (steps < 1)
+            steps = 1;
+        if (extent_w == 0 || extent_h == 0) {
+            fprintf(stderr, "nested-click: --drag needs non-zero output extents\n");
+            return 2;
+        }
+    }
 
     if (strcmp(want, "left") == 0)
         button = BTN_LEFT;
@@ -104,6 +197,17 @@ int main(int argc, char **argv) {
     struct zwlr_virtual_pointer_v1 *pointer =
         zwlr_virtual_pointer_manager_v1_create_virtual_pointer(manager, seat);
 
+    // The cursor is put on the start point before the button goes down, so the
+    // press is hit-tested where the caller aimed rather than wherever the
+    // pointer happened to be left by the last run.
+    if (dragging) {
+        zwlr_virtual_pointer_v1_motion_absolute(pointer, now_ms(), x1, y1,
+                                                extent_w, extent_h);
+        zwlr_virtual_pointer_v1_frame(pointer);
+        wl_display_roundtrip(display);
+        settle(40);
+    }
+
     // Press and release as two flushed batches with a real gap between them.
     // Sent together they are one arrival at the compositor, and a surface that
     // distinguishes a click from a press-and-hold — a long-press, a drag —
@@ -113,8 +217,27 @@ int main(int argc, char **argv) {
     zwlr_virtual_pointer_v1_frame(pointer);
     wl_display_roundtrip(display);
 
-    struct timespec gap = {.tv_sec = 0, .tv_nsec = 30 * 1000 * 1000};
-    nanosleep(&gap, NULL);
+    settle(30);
+
+    // The travel. The final step lands exactly on (x2, y2) by construction —
+    // it is not interpolated — because the whole value of absolute motion is
+    // that the end point is the one that was asked for.
+    if (dragging) {
+        for (int i = 1; i <= steps; i++) {
+            uint32_t x = (uint32_t)((long)x1 + ((long)x2 - (long)x1) * i / steps);
+            uint32_t y = (uint32_t)((long)y1 + ((long)y2 - (long)y1) * i / steps);
+            zwlr_virtual_pointer_v1_motion_absolute(pointer, now_ms(), x, y,
+                                                    extent_w, extent_h);
+            zwlr_virtual_pointer_v1_frame(pointer);
+            wl_display_roundtrip(display);
+            settle(12);
+        }
+        // A beat with the button still down at the destination: a surface that
+        // commits on release reads the last position it was told about, and a
+        // release in the same breath as the final motion can beat it there.
+        // `--hold-ms` widens that beat into a window a caller can act inside.
+        settle(hold_ms);
+    }
 
     zwlr_virtual_pointer_v1_button(pointer, now_ms(), button,
                                    WL_POINTER_BUTTON_STATE_RELEASED);

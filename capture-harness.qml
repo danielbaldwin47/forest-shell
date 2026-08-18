@@ -55,9 +55,11 @@ import qs.Surfaces.Background
 import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
+import qs.Surfaces.Calendar
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
 import qs.Surfaces.Screenshot
+import qs.Services.Calendar
 import qs.Services.Launcher
 import qs.Services.Notifications
 import qs.Services.System
@@ -103,6 +105,24 @@ ShellRoot {
     /// happened to be, and could not run offscreen at all, since the freeze is
     /// a `grim` capture of a session this mode does not have.
     readonly property string pickState: Quickshell.env("CAPTURE_PICK") || "region"
+
+    /// The calendar's pose. `--cal-view` picks day, week or month; `--cal-date`
+    /// is the day the view is built around; `--cal-state` names an overlay or
+    /// an interaction to pose: `drag-create`, `drag-move` and `resize` pose a
+    /// gesture on the week grid; `command` (empty query) and `command-filtered`
+    /// (`to` typed) and `shortcuts` open the two
+    /// keyboard overlays. (`guests` and `popover` are named and refused by
+    /// tools/capture-harness.sh until they exist, so the knob never renders a
+    /// plain view and calls it a pose.)
+    ///
+    /// `CAL_NOW` is the one that is not a convenience. The now-line is drawn
+    /// from the wall clock, so without a frozen one no two captures of this
+    /// surface are ever the same picture and a diff between two runs is
+    /// unreadable — exactly the argument `--lock-state` makes for posing PAM.
+    readonly property string calView: Quickshell.env("CAL_VIEW") || "week"
+    readonly property string calState: Quickshell.env("CAL_STATE") ?? ""
+    readonly property string calDate: Quickshell.env("CAL_DATE") || "2026-08-18"
+    readonly property string calNow: Quickshell.env("CAL_NOW") || "2026-08-18T13:40"
 
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
@@ -158,6 +178,14 @@ ShellRoot {
 
     readonly property bool isSettings: root.surfaceName === "settings"
 
+    /// The calendar is the settings window's shape and not the bar's: a
+    /// `FloatingWindow` of its own, so it is built as itself and its content is
+    /// moved onto the backing below rather than returned from the switch. See
+    /// `calendarLoader` for why grabbing it where it was built cannot work.
+    readonly property bool isCalendar: root.surfaceName === "calendar"
+
+    readonly property bool isWindowSurface: root.isSettings || root.isCalendar
+
     /// One line describing what was rendered, appended to the saved= log line.
     /// The harness script parses `bar=` out of it, and a human reading a failed
     /// run wants to know which picture failed.
@@ -192,9 +220,11 @@ ShellRoot {
 
             Loader {
                 anchors.fill: parent
-                active: !root.isSettings
+                active: !root.isWindowSurface
                 sourceComponent: {
                     switch (root.surfaceName) {
+                    // `settings` and `calendar` are absent on purpose: both are
+                    // toplevels of their own and neither can be a child here.
                     case "lock":     return lockScene;
                     case "bar-full": return barFullScene;
                     case "drawer":   return drawerScene;
@@ -219,6 +249,18 @@ ShellRoot {
                 id: settingsBacking
                 anchors.fill: parent
                 visible: root.isSettings
+                color: Theme.bgBase
+            }
+
+            /// The same, for the calendar window. A second rectangle rather
+            /// than one shared with the settings' because each is the fill of a
+            /// different window, and a window that later paints something other
+            /// than `bgBase` would otherwise quietly change the other's
+            /// picture.
+            Rectangle {
+                id: calendarBacking
+                anchors.fill: parent
+                visible: root.isCalendar
                 color: Theme.bgBase
             }
         }
@@ -1210,6 +1252,235 @@ ShellRoot {
                                       + (at > 0 ? "+scroll=" + Math.round(at) : "");
             };
             root.sceneDescription = "tab=" + settingsLoader.item.currentTab;
+        }
+    }
+
+    /// The first descendant of `item` with this `objectName`, or null.
+    ///
+    /// The calendar poses are set on the *week grid*, which `CalendarView` owns
+    /// under an id no other file can reach — and the harness is deliberately
+    /// not allowed to reach into that file. So the grid names itself
+    /// (`objectName: "calendarWeekGrid"`) and this walks the tree for it. A
+    /// missing grid is a warning and a plain picture, never an exception: a
+    /// TypeError here would read as a broken harness rather than as a pose that
+    /// did not apply.
+    function findByObjectName(item: var, name: string): var {
+        if (!item)
+            return null;
+        if (item.objectName === name)
+            return item;
+        const kids = item.children;
+        for (let i = 0; i < kids.length; i++) {
+            const found = root.findByObjectName(kids[i], name);
+            if (found)
+                return found;
+        }
+        return null;
+    }
+
+    /// The three drag poses, as a day and a minute at each end.
+    ///
+    /// Not a synthetic pointer: `DragPolicy` is pure, so `begin` and `update`
+    /// can be called with grid coordinates and the picture is the same one a
+    /// real drag would be showing at that instant — deterministic, and with no
+    /// compositor anywhere near it. The events named are the fixture's own
+    /// (`tools/fixtures/calendar-events.json`).
+    readonly property var calendarPoses: ({
+        "drag-create": {
+            "mode": "create",
+            "eventId": "",
+            "fromIso": "2026-08-19", "fromMin": 900,
+            "toIso": "2026-08-19", "toMin": 990
+        },
+        "drag-move": {
+            "mode": "move",
+            "eventId": "evt-3",
+            "fromIso": "2026-08-18", "fromMin": 600,
+            "toIso": "2026-08-19", "toMin": 660
+        },
+        "resize": {
+            "mode": "resizeBottom",
+            "eventId": "evt-6",
+            // **Not a whole hour.** This landed on 1020 — 5 PM exactly — and
+            // the picture that came back was a chip whose top and bottom both
+            // sat on hour rules, which is what a chip that is not being resized
+            // looks like. A resize is only legible as one when the edge under
+            // the finger is somewhere no rule is: 16:45 puts the bottom three
+            // quarters down the 4 PM band, and the duration beside the range
+            // reads 1h 45m rather than a round number the grid could have
+            // produced on its own.
+            "fromIso": "2026-08-18", "fromMin": 945,
+            "toIso": "2026-08-18", "toMin": 1005
+        }
+    })
+
+    function poseCalendarDrag(page: var): void {
+        const pose = root.calendarPoses[root.calState];
+        if (!pose)
+            return;
+        const week = root.findByObjectName(page, "calendarWeekGrid");
+        if (!week) {
+            console.warn("capture: no calendarWeekGrid to pose — the picture is the plain view");
+            return;
+        }
+        week.posedDrag = pose;
+    }
+
+    /// The quick-create panel, on an event this function makes — the picture at
+    /// the *end* of a drag-create rather than during one, which is the moment
+    /// the panel exists for.
+    ///
+    /// It is the `drag-create` pose's own coordinates, so the two states are
+    /// two frames of one gesture: the same Wednesday afternoon slot, drawn
+    /// mid-drag by `posedDrag` and named-and-panelled by this.
+    ///
+    /// A predicate rather than a one-shot, because the panel is anchored to a
+    /// chip rectangle and there is no chip rectangle until the grid has a
+    /// width: `openQuickCreate` refuses a column it cannot find, silently and
+    /// correctly, and at `onLoaded` it cannot find one. Returning false makes
+    /// the grab wait and try again instead of photographing the plain week.
+    function poseCalendarPopover(page: var): bool {
+        const week = root.findByObjectName(page, "calendarWeekGrid");
+        if (!week) {
+            console.warn("capture: no calendarWeekGrid to pose the popover on");
+            return false;
+        }
+        // Already open, one whole retry ago: the panel scales and fades in from
+        // `Component.onCompleted`, so a grab taken on the pass that opened it
+        // photographs a shadow with nothing inside (measured). The wait is the
+        // animation's, and `false` below is what buys it.
+        if (week.quickCreateId.length > 0)
+            return true;
+        if (week.width <= 0)
+            return false;
+
+        const pose = root.calendarPoses["drag-create"];
+        const id = CalendarStore.createEvent(pose.fromIso, pose.fromMin,
+                                             pose.toMin - pose.fromMin, "");
+        if (!id) {
+            // Said out loud rather than posed around: a popover the store
+            // refused to build is a failed capture, not a plain view.
+            console.warn("capture: the store would not create the popover's event");
+            return false;
+        }
+        const event = CalendarStore.policy.byId(CalendarStore.events, id);
+        if (!event) {
+            console.warn("capture: created " + id + " and could not read it back");
+            return false;
+        }
+        week.openQuickCreate(id, pose.fromIso, event.start, event.end);
+        if (week.quickCreateId.length === 0) {
+            console.warn("capture: " + pose.fromIso + " is not a column on screen —"
+                         + " the popover has nothing to anchor to");
+            return false;
+        }
+        return false;
+    }
+
+    /// The calendar window (#calendar), on the same terms as the settings one
+    /// above and for the same reason: `CalendarView` is a `FloatingWindow`, so
+    /// it is built as itself and its content is then moved onto
+    /// `calendarBacking`, where the scene can be grabbed like any other
+    /// surface. Grabbing it where it was built gives a transparent page — the
+    /// fill is the window's `color` — and runs into Quickshell's
+    /// `ProxyWindowContentItem`, which `grabToImage` refuses outright.
+    ///
+    /// The pose is handed in as properties rather than driven, which is what
+    /// keeps this mode compositor-free: `nowOverride` in particular is what
+    /// makes two runs the same picture.
+    ///
+    /// Posed on `CalendarWindow` and not on the view: the window is the
+    /// surface's only clock, so freezing it there is what keeps `ipc call
+    /// calendar today` agreeing with this picture instead of a second clock
+    /// on the view drifting from it.
+    Binding {
+        target: CalendarWindow
+        property: "nowOverride"
+        value: root.isCalendar ? root.calNow : ""
+    }
+
+    Loader {
+        id: calendarLoader
+
+        active: root.isCalendar
+        sourceComponent: CalendarView {
+            view: root.calView
+            anchorDate: root.calDate
+
+            // The clock a real window is handed by `CalendarWindow`, which is
+            // the surface's only clock (see the `Binding` below): under
+            // `--cal-now` it is the frozen stamp, otherwise the wall clock the
+            // shell itself is reading — one clock either way.
+            shellStamp: CalendarWindow.nowStamp
+
+            // The two keyboard overlays are posed as properties rather than
+            // driven with a key, for the same reason the drag is posed rather
+            // than dragged: this mode has no compositor to deliver either.
+            //
+            // Two poses, and `command` is the **empty** one.
+            //
+            // It was the typed one, on the argument that a picture of an empty
+            // field says nothing about whether filtering works. True, and it
+            // bought that at the cost of the picture being a menu at all: the
+            // one query left one row under the field, and a card that is 74%
+            // chrome around a single command is a photograph of a search result,
+            // not of a command menu. What has to be judgeable here is the thing
+            // this surface is for — the whole keymap, grouped, with its rail of
+            // shortcuts down the right — so the default pose opens with nothing
+            // typed and every command showing.
+            //
+            // Filtering keeps its own picture rather than losing one:
+            // `command-filtered` is the old pose under its own name.
+            commandOpen: root.calState === "command"
+                      || root.calState === "command-filtered"
+            commandQuery: root.calState === "command-filtered" ? "to" : ""
+            shortcutsOpen: root.calState === "shortcuts"
+
+            // The guests pose, on the same terms and for the same reason: the
+            // editor is opened on a *named* fixture event — the Tuesday 10:00
+            // "Design review", which already has two guests on it so the panel
+            // shows both halves of the control at once — and the picker is
+            // posed **with a query typed and its list down**. An editor
+            // photographed with an empty field would say nothing about whether
+            // searching, ranking or the invite row work.
+            //
+            // `"a"` and not `"mi"`: one letter matches almost everybody, so
+            // the picture carries a full dropdown with the prefix match on top
+            // (Amina) and the word-prefix one under it (Alvarez), which is the
+            // ranking rule made visible.
+            editorId: root.calState === "guests" ? "evt-3" : ""
+            editorQuery: root.calState === "guests" ? "a" : ""
+            editorListOpen: root.calState === "guests"
+        }
+
+        onLoaded: {
+            const content = calendarLoader.item.contentItem;
+            if (content.children.length !== 1) {
+                // The move below takes one child. If the window ever grows a
+                // second, a silent half-capture is the worst outcome available.
+                console.warn("capture: calendar content has "
+                             + content.children.length + " children, expected 1");
+            }
+            if (content.children.length < 1) {
+                // And with none there is nothing to move at all — reaching for
+                // children[0] here would turn the warning above into a
+                // TypeError, which reads like a broken harness rather than an
+                // empty window. Leaving the backing bare fails the run at the
+                // "not blank" check instead, which is the true diagnosis.
+                console.warn("capture: nothing to reparent — the capture will be blank");
+                return;
+            }
+            const page = content.children[0];
+            page.parent = calendarBacking;
+            page.anchors.fill = calendarBacking;
+
+            root.poseCalendarDrag(page);
+            if (root.calState === "popover")
+                root.sceneReady = () => root.poseCalendarPopover(page);
+
+            root.sceneDescription = "view=" + root.calView + "+date=" + root.calDate
+                                  + "+now=" + root.calNow
+                                  + (root.calState.length > 0 ? "+state=" + root.calState : "");
         }
     }
 

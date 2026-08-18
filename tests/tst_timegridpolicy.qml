@@ -228,6 +228,38 @@ TestCase {
         verify(isNaN(grid.xForColumn(-1, testCase.gutter, testCase.gridWidth, 7)));
     }
 
+    function test_the_column_edges_are_whole_pixels_that_meet() {
+        const edges = grid.columnEdges(testCase.gutter, testCase.gridWidth, 7);
+        compare(edges.length, 8);
+        compare(edges[0], 60);
+        compare(edges[7], 760);
+        for (let i = 0; i < 8; i++)
+            compare(edges[i], Math.round(edges[i]));
+        compare(grid.columnEdges(60, 60, 7).length, 0);
+        compare(grid.columnEdges(60, 760, 0).length, 0);
+    }
+
+    function test_a_week_that_does_not_divide_spreads_its_remainder() {
+        // The measured drift: 148/150/148/149 across one week, four widths for
+        // one design. Rounding the edges instead bounds the spread at one pixel
+        // and leaves no gap and no overlap anywhere in the row.
+        const widths = [];
+        let total = 0;
+        for (let i = 0; i < 7; i++) {
+            const w = grid.columnWidthAt(i, 56, 932, 7);   // the capture's own numbers
+            widths.push(w);
+            total += w;
+            // Every column starts exactly where the one before it ended.
+            compare(grid.xForColumn(i, 56, 932, 7),
+                    i === 0 ? 56 : grid.xForColumn(i - 1, 56, 932, 7) + widths[i - 1]);
+        }
+        compare(total, 932 - 56);
+        compare(Math.max.apply(null, widths) - Math.min.apply(null, widths), 1);
+
+        verify(isNaN(grid.columnWidthAt(7, 56, 932, 7)));
+        verify(isNaN(grid.columnWidthAt(-1, 56, 932, 7)));
+    }
+
     // --- a point on the grid --------------------------------------------------
 
     function test_a_grid_point_is_a_day_and_a_snapped_minute() {
@@ -262,9 +294,14 @@ TestCase {
 
     // --- opening scroll -------------------------------------------------------
 
-    function test_the_view_opens_on_the_working_day() {
-        compare(grid.visibleScrollY(), 420);            // 7am at a 60 px hour
-        compare(grid.visibleScrollY(7, 80), 560);
+    function test_the_view_opens_a_little_above_the_working_day() {
+        // `openingInset` above the rule, not flush with it: the gutter label is
+        // centred on its own rule, so parking at 420 opened `7 AM` cut in half
+        // by the all-day band's floor.
+        compare(grid.openingInset, 10);
+        compare(grid.visibleScrollY(), 410);            // 7am at a 60 px hour
+        compare(grid.visibleScrollY(7, 80), 550);
+        // Midnight cannot back off above the top of the day.
         compare(grid.visibleScrollY(0, 60), 0);
     }
 
@@ -272,8 +309,8 @@ TestCase {
         // With a viewport the last hour still has to be reachable.
         compare(grid.visibleScrollY(20, 60, 400), 1040);   // 1440 - 400
         compare(grid.visibleScrollY(7, 60, 2000), 0);      // taller than the day
-        compare(grid.visibleScrollY(7, 60, 400), 420);     // no clamp needed
-        compare(grid.visibleScrollY(7, 60), 420);          // unclamped without one
+        compare(grid.visibleScrollY(7, 60, 400), 410);     // no clamp needed
+        compare(grid.visibleScrollY(7, 60), 410);          // unclamped without one
     }
 
     // --- events ---------------------------------------------------------------
@@ -402,7 +439,7 @@ TestCase {
     }
 
     function test_the_opening_scroll_clamps_an_hour_outside_the_day() {
-        compare(grid.visibleScrollY(30, 60), 1440);
+        compare(grid.visibleScrollY(30, 60), 1430);
         compare(grid.visibleScrollY(-5, 60), 0);
         compare(grid.visibleScrollY(24, 60, 400), 1040);
     }

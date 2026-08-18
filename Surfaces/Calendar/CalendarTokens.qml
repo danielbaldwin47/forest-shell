@@ -50,8 +50,14 @@ Singleton {
     readonly property int allDayLaneH: 20
     readonly property int allDayLaneGap: 2
 
-    /// The accent bar down a timed chip's left edge.
-    readonly property int chipBar: 3
+    /// The accent bar down a chip's left edge — timed *and* all-day, since
+    /// there is only one chip language now.
+    readonly property int chipBar: 4
+
+    /// The air between two chips packed side by side in one column, and at the
+    /// column's own edges. 2px: one pixel reads as a rendering artefact of the
+    /// day separator, three starts to look like a gap in the schedule.
+    readonly property int chipGap: 2
 
     /// The shortest a chip is ever drawn, whatever its duration says. A 15
     /// minute event is 14px of grid and 14px of chip is not a hit target.
@@ -89,13 +95,23 @@ Singleton {
     /// wash *lifts* instead — `Theme.surface`, the panel colour, at low alpha.
     /// Same intent, opposite direction, because the direction was never the
     /// point.
+    /// The measured value moved once more. `Theme.surface` at 0.45 over
+    /// `bgBase` is 1.05:1 — captured, and still indistinguishable from a
+    /// weekday at arm's length. The wash lifts to `surfaceOverlay` (`#243029`)
+    /// at 0.55, which is 1.28:1: the same step light mode gets from `bgSunken`,
+    /// and the first value at which Sat/Sun read as a pair without the columns
+    /// looking disabled.
     readonly property color weekendWash: Theme.dark
-        ? Qt.alpha(Theme.surface, 0.45)
-        : Qt.alpha(Theme.bgSunken, 0.5)
+        ? Qt.alpha(Theme.surfaceOverlay, 0.55)
+        : Qt.alpha(Theme.bgSunken, 0.75)
 
-    /// Today's column. 5% accent works in both modes because it is a hue
-    /// against a neutral rather than a lightness against a lightness.
-    readonly property color todayWash: Qt.alpha(Theme.accentPrimary, 0.05)
+    /// Today's column. A hue against a neutral rather than a lightness against
+    /// a lightness, so one alpha works in both modes.
+    /// 0.11 and not 0.05, because the weekend wash moved: measured off the
+    /// capture, today at 0.05 was *dimmer* than a Saturday, which inverts the
+    /// two signals. Today has to be at least as loud as the column it may
+    /// itself be.
+    readonly property color todayWash: Qt.alpha(Theme.accentPrimary, 0.11)
 
     // --- the hues -------------------------------------------------------------
 
@@ -103,10 +119,20 @@ Singleton {
     /// object only owns the colours it resolves to.
     readonly property HuePolicy hues: HuePolicy {}
 
-    /// `bar` is the accent bar and the solid all-day fill; `fill` is the timed
-    /// chip's background; `text` is what is legible on that fill. Every
-    /// text/fill pair here is ≥4.5:1 in its own mode — the seam that verifies
-    /// that is `tools/measure-contrast.py`, not an eyeball.
+    /// `bar` is the accent bar down every chip's left edge; `fill` is the chip
+    /// body; `text` is what is legible on that fill.
+    ///
+    /// **Two ratios are gated here, not one, and the second is the one the
+    /// first table missed.** Text-on-fill was ≥7:1 across the board and the
+    /// chips were still hard to find, because the number nobody had measured
+    /// was *fill against the page*: `#2d3527` on `#0b100d` is **1.51:1**, so
+    /// the olive chip was a title floating on the grid with no body under it.
+    /// A chip is an object; an object needs an edge. The dark fills are
+    /// re-tinted (33–41% of the hue over `Theme.surface`) to land at **≥2.2:1
+    /// against `bgBase`**, and the light ones at ≥1.28:1 against paper — the
+    /// same step light mode's `bgSunken` gets, which is the lightest wash that
+    /// still reads as a filled shape. Text is then re-solved against the new
+    /// fills and holds ≥4.5:1 in both modes.
     ///
     /// The two tables are written out rather than computed with `Qt.tint`
     /// because a computed tint is only as good as the base it is computed
@@ -114,19 +140,23 @@ Singleton {
     /// hold their contrast ratio wherever they land.
     readonly property var barsDark: ["#6fbec4", "#8fbf6a", "#d8ac81", "#e07a5f",
                                      "#5b9dd9", "#afbd7a", "#b295cf", "#9d9e8d"]
-    readonly property var fillsDark: ["#233533", "#283524", "#333228", "#352a22",
-                                      "#1f3036", "#2d3527", "#2d2e34", "#2a302a"]
-    readonly property var textsDark: ["#a5d3d3", "#b6d3a3", "#dec9af", "#e3ad9d",
+    readonly property var fillsDark: ["#325150", "#3d5132", "#554b3a", "#684235",
+                                      "#304f65", "#464f37", "#50495d", "#484d44"]
+    readonly property var textsDark: ["#a5d3d3", "#b6d3a3", "#dec9af", "#e5b2a3",
                                       "#9ac1e0", "#c6d2ac", "#c9bcda", "#bec1b6"]
 
     readonly property var barsLight: ["#0c757b", "#4a7d35", "#8a5a2f", "#b0512f",
                                       "#23608f", "#59682c", "#6b4a8f", "#68695b"]
-    readonly property var fillsLight: ["#dbe9e6", "#e2eade", "#eae6dd", "#eee5dd",
-                                       "#dde7e9", "#e4e8dd", "#e6e4e9", "#e6e8e3"]
+    readonly property var fillsLight: ["#bfd9d8", "#cad9c3", "#ded4c7", "#e6d1c5",
+                                       "#c8d7df", "#d1d6c5", "#d8d2df", "#d5d6d0"]
 
-    /// Light mode's text is its bar — the same saturated ink on a pale wash,
-    /// which is what keeps a light chip from needing a fourth column of hex.
-    readonly property var textsLight: tokens.barsLight
+    /// Light mode's text used to *be* its bar. It cannot be any more: the
+    /// fills darkened to make a chip a shape, and the bar hues are now 3.3–4.7:1
+    /// on them. These are the same inks stepped down until every one clears
+    /// 4.6:1 — still recognisably the hue, which is what a colour-coded
+    /// calendar is for.
+    readonly property var textsLight: ["#0a6469", "#39612a", "#7c522b", "#8f4227",
+                                       "#215b88", "#515e28", "#6b4a8f", "#595a4e"]
 
     readonly property var bars: Theme.dark ? tokens.barsDark : tokens.barsLight
     readonly property var fills: Theme.dark ? tokens.fillsDark : tokens.fillsLight
@@ -145,11 +175,13 @@ Singleton {
     function fill(index: int): color { return tokens.fills[tokens.wrap(index)]; }
     function text(index: int): color { return tokens.texts[tokens.wrap(index)]; }
 
-    /// The hairline inside a dark chip, so two chips of the same hue side by
-    /// side still read as two. In light mode the fill is already lighter than
-    /// the surface and the border only muddies it, so there is none.
+    /// The hairline inside a chip, so two chips of the same hue packed side by
+    /// side still read as two — and, at the new fill strengths, so a chip has a
+    /// crisp edge rather than fading into the grid rule it abuts. Both modes
+    /// get one now: the light fills darkened far enough that an undrawn edge
+    /// was the same problem there.
     function chipBorder(index: int): color {
-        return Theme.dark ? Qt.alpha(tokens.bar(index), 0.18) : "transparent";
+        return Qt.alpha(tokens.bar(index), Theme.dark ? 0.28 : 0.22);
     }
 
     /// A chip under the pointer, lifted 12% toward the overlay — the same

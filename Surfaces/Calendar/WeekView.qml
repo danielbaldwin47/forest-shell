@@ -143,9 +143,22 @@ Item {
                 return i;
         return -1;
     }
+    /// The three column questions, all answered from `TimeGridPolicy`'s whole-
+    /// pixel edges rather than from `columnW`. Multiplying a fractional width
+    /// out per column drifted 148/150/148/149 across a week — the same design
+    /// drawn four different widths — so the edges are rounded once and every
+    /// x and width here is a difference between two of them.
     function columnX(index: int): real {
         const x = view.grid.xForColumn(index, view.gutterW, view.width, view.columns.length);
         return isNaN(x) ? 0 : x;
+    }
+    function columnWidthFor(index: int): real {
+        const w = view.grid.columnWidthAt(index, view.gutterW, view.width,
+                                          view.columns.length);
+        return isNaN(w) ? 0 : w;
+    }
+    function columnRight(index: int): real {
+        return view.columnX(index) + view.columnWidthFor(index);
     }
 
     /// One column's chips, joined from the two policies that decided them:
@@ -175,8 +188,7 @@ Item {
                 "continuesBelow": rect.continuesBelow,
                 "xFrac": slot.xFrac,
                 "wFrac": slot.wFrac,
-                "compact": view.layoutPolicy.isCompact(
-                    view.layoutPolicy.time.diffMinutes(event.start, event.end)),
+                "minutes": view.layoutPolicy.time.diffMinutes(event.start, event.end),
                 "hue": CalendarTokens.hues.forEvent(event)
             });
         }
@@ -200,7 +212,7 @@ Item {
             required property int index
 
             x: view.columnX(index)
-            width: view.columnW
+            width: view.columnWidthFor(index)
             y: 0
             height: view.height
             // Today wins over the weekend, and does not add to it: a Saturday
@@ -234,7 +246,7 @@ Item {
                 readonly property var header: view.format.dayHeader(dayHead.modelData.iso)
 
                 x: view.columnX(dayHead.index)
-                width: view.columnW
+                width: view.columnWidthFor(dayHead.index)
                 height: headerBand.height
 
                 Column {
@@ -303,22 +315,26 @@ Item {
         anchors.top: headerBand.bottom
         height: view.bandHeight
 
-        /// Two lines, because "ALL DAY" tracked at `capsTrackingEm` is 68px and
-        /// the gutter is 56. A `Text` wider than its own `width` with
-        /// `AlignRight` hangs off the left edge rather than clipping, so the
-        /// one-line form silently printed into the sidebar.
+        /// One line, vertically centred in the band — the same convention as
+        /// every other label in this gutter.
+        ///
+        /// It was two lines, because "ALL DAY" tracked at `capsTrackingEm` is
+        /// 68px and the gutter is 56. Two lines then overflowed a 28px band and
+        /// were cut in half by the rule under it, which is worse than the
+        /// problem it solved. The tracking is what does not fit, so the tracking
+        /// goes: caps at `capsSize` are legible untracked at this size, and one
+        /// uncut line says more than two cut ones.
         Text {
             x: 0
             width: view.gutterW - Theme.space2
-            anchors.top: parent.top
-            anchors.topMargin: Theme.space1 - 1
-            text: "ALL\nDAY"
-            lineHeight: 0.95
+            anchors.verticalCenter: parent.verticalCenter
+            text: "ALL DAY"
             horizontalAlignment: Text.AlignRight
+            elide: Text.ElideRight
             color: Theme.textMuted
             font.family: Theme.fontUi
-            font.pointSize: Theme.pt(Theme.capsSize)
-            font.letterSpacing: Theme.pt(Theme.capsSize) * Theme.capsTrackingEm
+            font.pointSize: Theme.pt(10)
+            font.weight: Theme.weightMedium
         }
 
         Repeater {
@@ -335,9 +351,15 @@ Item {
             }
         }
 
-        /// The bars. Solid in the hue with `bgBase` text — the inverse of a
-        /// timed chip, which is what keeps a one-day all-day bar from reading
-        /// as a very short meeting.
+        /// The bars, in **the same chip language as the grid** — accent bar,
+        /// tinted fill, text in the hue.
+        ///
+        /// They used to be solid in the hue with `bgBase` text, on the argument
+        /// that the inversion stops a one-day all-day bar reading as a very
+        /// short meeting. Captured, that argument lost: a week showed two
+        /// unrelated visual languages a centimetre apart, saturated blocks above
+        /// tinted ones, and the row they belong to already says which is which.
+        /// One language, one row that reads as one calendar.
         Repeater {
             model: view.bandLanes
 
@@ -349,24 +371,37 @@ Item {
                 readonly property var event: view.eventById(modelData.id)
                 readonly property int hue: CalendarTokens.hues.forEvent(bandBar.event)
 
-                x: view.columnX(modelData.startCol) + 2
-                width: Math.max(0, view.columnW * modelData.span - 4)
+                x: view.columnX(modelData.startCol) + CalendarTokens.chipGap
+                width: Math.max(0, view.columnRight(modelData.startCol + modelData.span - 1)
+                                   - view.columnX(modelData.startCol)
+                                   - CalendarTokens.chipGap * 2)
                 y: Theme.space1 + modelData.lane
                    * (CalendarTokens.allDayLaneH + CalendarTokens.allDayLaneGap)
                 height: CalendarTokens.allDayLaneH
-                radius: 4
-                color: CalendarTokens.bar(bandBar.hue)
+                radius: Theme.radiusSm - 2
+                clip: true
+                color: CalendarTokens.fill(bandBar.hue)
+                border.width: 1
+                border.color: CalendarTokens.chipBorder(bandBar.hue)
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: CalendarTokens.chipBar
+                    color: CalendarTokens.bar(bandBar.hue)
+                }
 
                 Text {
                     anchors.fill: parent
-                    anchors.leftMargin: Theme.space2
+                    anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
                     anchors.rightMargin: Theme.space2
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                     text: (modelData.continuesLeft ? "← " : "")
                           + (bandBar.event ? (bandBar.event.title || "Untitled") : "")
                           + (modelData.continuesRight ? " →" : "")
-                    color: Theme.bgBase
+                    color: CalendarTokens.text(bandBar.hue)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
                     font.weight: Theme.weightMedium
@@ -459,9 +494,17 @@ Item {
                 }
             }
 
-            /// The gutter. The label sits *above* its own rule rather than
-            /// astride it, so the number reads as the name of the band starting
-            /// there and not as a label for the line itself.
+            /// The gutter. **The label is centred on its own rule**, which is
+            /// the one convention this gutter has.
+            ///
+            /// It used to sit 3px above the rule, on the argument that the
+            /// number names the band starting there. The live-time stamp, which
+            /// replaces whichever label it lands on, was centred on the now-line
+            /// — so the gutter ran two conventions at once and the eye had to
+            /// decide, per label, whether a number meant the line beside it or
+            /// the space under it. A stamp that *replaces* a label has to sit
+            /// where that label sat, so both are centred and the substitution is
+            /// invisible.
             Repeater {
                 model: view.grid.hourLabels(view.use24, view.hourRow)
 
@@ -470,7 +513,7 @@ Item {
 
                     x: 0
                     width: view.gutterW - Theme.space2
-                    y: Math.round(modelData.y) - height - 3
+                    y: Math.round(modelData.y - height / 2)
                     horizontalAlignment: Text.AlignRight
                     text: modelData.label
                     // Suppressed where the live time is printing over it —
@@ -510,7 +553,7 @@ Item {
                     required property int index
 
                     x: view.columnX(index)
-                    width: view.columnW
+                    width: view.columnWidthFor(column.index)
                     height: content.height
 
                     Repeater {
@@ -519,17 +562,26 @@ Item {
                         delegate: EventChip {
                             required property var modelData
 
-                            // One pixel of air at the column's edges and between
-                            // two packed chips, which is what the selection ring
-                            // hangs in.
-                            x: 1 + modelData.xFrac * (column.width - 2)
-                            width: Math.max(1, modelData.wFrac * (column.width - 2) - 1)
+                            // `chipGap` of air at the column's own edges and
+                            // between two packed chips — the gutter the
+                            // selection ring hangs in, and the thing that makes
+                            // three concurrent events read as three chips
+                            // rather than one striped block. Rounded, so two
+                            // neighbours never leave a half-pixel seam.
+                            readonly property real track:
+                                column.width - CalendarTokens.chipGap * 2
+
+                            x: Math.round(CalendarTokens.chipGap + modelData.xFrac * track)
+                            width: Math.max(CalendarTokens.chipGap,
+                                            Math.round(modelData.wFrac * track)
+                                                - CalendarTokens.chipGap)
                             y: Math.round(modelData.y)
-                            height: Math.round(modelData.h) - 1
+                            height: Math.max(CalendarTokens.chipMinH,
+                                             Math.round(modelData.h) - 1)
 
                             event: modelData.event
                             hue: modelData.hue
-                            compact: modelData.compact
+                            minutes: modelData.minutes
                             continuesAbove: modelData.continuesAbove
                             continuesBelow: modelData.continuesBelow
                             use24: view.use24
@@ -546,7 +598,7 @@ Item {
 
                 visible: view.nowColumn >= 0
                 x: view.nowColumn >= 0 ? view.columnX(view.nowColumn) : 0
-                width: view.columnW
+                width: view.columnWidthFor(view.nowColumn)
                 y: Math.round(view.nowY)
                 z: 10
 

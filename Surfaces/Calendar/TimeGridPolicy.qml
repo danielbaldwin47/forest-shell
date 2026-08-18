@@ -208,6 +208,39 @@ QtObject {
         return (n > 0 && isFinite(w) && w > 0) ? w : NaN;
     }
 
+    /// The `count + 1` boundaries between the columns, as **whole pixels**.
+    ///
+    /// A week is seven columns of whatever the window left over, which is
+    /// almost never divisible by seven. Drawn from the fractional width alone,
+    /// each column rounds its own left edge and its own width independently and
+    /// the row comes out 148 / 150 / 148 / 149 — measured, and visible as a
+    /// wobble in the day separators that nothing in the design asks for.
+    ///
+    /// Rounding the *edges* instead makes the widths differ by at most one
+    /// pixel and spreads the remainder evenly across the row rather than
+    /// dumping it on the last column, and it makes `xForColumn` and
+    /// `columnWidthAt` agree by construction: column `i` is exactly
+    /// `edges[i]` to `edges[i + 1]`, with no gap and no overlap anywhere.
+    function columnEdges(gutterWidth: real, gridWidth: real, count: int): var {
+        const n = Math.round(count);
+        const w = grid.columnWidth(gutterWidth, gridWidth, count);
+        if (isNaN(w))
+            return [];
+        const out = [];
+        for (let i = 0; i <= n; i++)
+            out.push(Math.round(gutterWidth + i * w));
+        return out;
+    }
+
+    /// The drawn width of one column — its own two edges, subtracted. `NaN`
+    /// for an index outside the view, the same way `xForColumn` answers.
+    function columnWidthAt(index: int, gutterWidth: real, gridWidth: real, count: int): real {
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
+        if (edges.length === 0 || index < 0 || index >= Math.round(count))
+            return NaN;
+        return edges[index + 1] - edges[index];
+    }
+
     /// Which column a point is in, or **-1**: in the gutter, off either edge,
     /// or a grid too narrow to have columns at all. A view uses the -1 to
     /// refuse a drag rather than to start one at column 0.
@@ -227,10 +260,11 @@ QtObject {
         const w = grid.columnWidth(gutterWidth, gridWidth, count);
         if (isNaN(w) || !isFinite(x) || x < gutterWidth || x >= gridWidth)
             return -1;
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
         let i = Math.max(0, Math.min(n - 1, Math.floor((x - gutterWidth) / w)));
-        while (i > 0 && x < gutterWidth + i * w)
+        while (i > 0 && x < edges[i])
             i--;
-        while (i < n - 1 && x >= gutterWidth + (i + 1) * w)
+        while (i < n - 1 && x >= edges[i + 1])
             i++;
         return i;
     }
@@ -238,10 +272,10 @@ QtObject {
     /// The left edge of a column. `NaN` for an index outside the view, so a bad
     /// index parks nothing at x=0 where it would look deliberate.
     function xForColumn(index: int, gutterWidth: real, gridWidth: real, count: int): real {
-        const w = grid.columnWidth(gutterWidth, gridWidth, count);
-        if (isNaN(w) || index < 0 || index >= Math.round(count))
+        const edges = grid.columnEdges(gutterWidth, gridWidth, count);
+        if (edges.length === 0 || index < 0 || index >= Math.round(count))
             return NaN;
-        return gutterWidth + index * w;
+        return edges[index];
     }
 
     /// A point on the grid -> `{iso, minutes}`, snapped, or `null` if the point
@@ -274,12 +308,20 @@ QtObject {
     /// day still sits at the bottom of the view; without one it is unclamped,
     /// because a `Flickable` that does not yet know its own height would
     /// otherwise be told to scroll to zero.
+    /// How far above the opening hour's rule the view actually parks.
+    ///
+    /// Zero put the rule flush with the top of the viewport, and the gutter
+    /// label is *centred* on its rule — so `7 AM` opened cut in half by the
+    /// all-day band's floor. Half a pt(11) line is 8px; 10 gives the label its
+    /// own descender back.
+    readonly property int openingInset: 10
+
     function visibleScrollY(startHour, hourHeight, viewportHeight) {
         const h = grid.hourPixels(hourHeight);
         const hour = (startHour === undefined || startHour === null) ? grid.defaultStartHour : startHour;
-        const y = grid.minutesToY(Math.max(0, Math.min(24, hour)) * 60, h);
+        const y = grid.minutesToY(Math.max(0, Math.min(24, hour)) * 60, h) - grid.openingInset;
         if (viewportHeight === undefined || viewportHeight === null || !isFinite(viewportHeight))
-            return y;
+            return Math.max(0, y);
         return Math.max(0, Math.min(y, grid.dayHeight(h) - viewportHeight));
     }
 

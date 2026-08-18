@@ -2,10 +2,21 @@
 //
 // The chip owns no arithmetic. Where it goes and how big it is were decided by
 // `TimeGridPolicy.eventRect` and `EventLayoutPolicy.layout` before it was
-// built; which hue it wears was decided by `HuePolicy`; whether it has room for
-// two lines was decided by `EventLayoutPolicy.isCompact`. What is left here is
-// the picture: a hue bar, a tinted fill, two lines of text, and the two states
-// a pointer can put it in.
+// built; which hue it wears was decided by `HuePolicy`; what may be printed
+// inside the box those two chose was decided by
+// `EventLayoutPolicy.chipContent`. What is left here is the picture: a hue bar,
+// a tinted fill, one or two lines of text, and the two states a pointer can put
+// it in.
+//
+// ## The one thing the chip measures for itself
+//
+// `chipContent` cannot answer "how many glyphs fit" — that is a font metric,
+// and a policy that could read a font could not be tested offscreen. So the
+// chip measures its own title with `TextMetrics` and hands the *number* back to
+// `clipTitle`, which decides what to do with it. The decision (cut at the last
+// whole word) stays pure; only the measurement is here. This is what turns
+// `D…` into `Design…` in a packed column — `Text.ElideRight` alone cuts
+// mid-glyph and names nothing.
 //
 // ## Why the ring is a sibling and not a border
 //
@@ -23,26 +34,23 @@ import qs.Core
 Item {
     id: chip
 
-    /// The event, as the store holds it. Read rather than destructured into
-    /// six properties because every caller has the whole thing in hand and a
-    /// delegate with six bindings is six chances to bind one to the wrong row.
+    /// The event record: `{id, title, start, end, ...}`.
     required property var event
 
-    /// Which of the eight hues, already resolved.
+    /// Its hue index, resolved through `CalendarTokens`.
     property int hue: 0
 
-    /// One line rather than two, with the time set after the title. The layout
-    /// policy decides it; the chip only obeys.
-    property bool compact: false
+    /// The event's real duration in minutes. Passed in rather than derived from
+    /// `height`, because `chipMinH` floors a short event's height and the
+    /// content rule needs the duration that was floored, not the floor.
+    property real minutes: 60
 
     property bool selected: false
 
-    /// A 24-hour clock, from `Core/TimeFormat.qml` by way of the view. Passed
-    /// down rather than read here so one calendar cannot show two clocks.
+    /// 12h or 24h, from the shell's one clock-format knob.
     property bool use24: false
 
-    /// The event carries on above or below this column — it crosses a midnight.
-    /// The chip squares off the cut end so it does not read as a start.
+    /// Set when the event runs past this day's top or bottom edge.
     property bool continuesAbove: false
     property bool continuesBelow: false
 
@@ -52,18 +60,20 @@ Item {
 
     readonly property bool hovered: pointer.containsMouse
 
-    /// Whether there is room for the time under the title. Asked of the chip's
-    /// own width, so a chip narrowed by a three-way overlap drops the line the
-    /// moment the packing decides it, with no second threshold in the view.
-    readonly property bool showsTime: chip.layoutPolicy.showsTimeLine(chip.width)
+    /// Everything the box's own size decides: which lines print, at what size,
+    /// with how much padding. One object, so the chip can never take its title
+    /// rule from one branch and its padding from another.
+    readonly property var content:
+        chip.layoutPolicy.chipContent(chip.width, chip.height, chip.minutes)
+
+    readonly property string rawTitle:
+        chip.event ? (chip.event.title || "Untitled") : ""
 
     signal activated(string id)
 
     implicitHeight: CalendarTokens.chipMinH
 
-    /// The selection ring: one pixel outside the body, two thick, in the hue.
-    /// Radius one larger than the body's so the two curves stay concentric —
-    /// an offset ring at the same radius reads as a printing misregistration.
+    /// The selection ring. See the header for why it is not a border.
     Rectangle {
         anchors.fill: parent
         anchors.margins: -1
@@ -89,36 +99,30 @@ Item {
             ColorAnimation { duration: Theme.duration(Theme.motionFast) }
         }
 
-        /// The hue bar, full height. It is drawn inside the clipped body, so
-        /// the body's own rounded corners are what round its ends — which is
-        /// why it needs no radius of its own and no special case at a midnight
-        /// cut.
+        /// The accent bar. Full height and hard-edged against the rounded
+        /// corners the body clips it into, which is what makes the hue readable
+        /// at a glance on a chip too small for anything else.
         Rectangle {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            width: CalendarTokens.chipBar
+            width: chip.content.bar
             color: CalendarTokens.bar(chip.hue)
         }
 
-        /// Two lines, or one, both anchored and neither in a positioner.
-        ///
-        /// A `Row` or `Column` sized by `anchors.left`/`right` whose children
-        /// read `parent.width` back is a binding loop — QML breaks it by
-        /// dropping the child's width, and a title with width 0 elides to
-        /// nothing and disappears, leaving a chip that shows only its time.
-        /// Measured on the first capture of this file, on exactly that Row.
+        /// Title over time — the roomy case, and every packed chip tall enough
+        /// to have a second line.
         Item {
             id: stacked
 
-            visible: !chip.compact
+            visible: chip.content.mode === "stacked"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
-            anchors.rightMargin: Theme.space2
-            anchors.topMargin: Theme.space1
+            anchors.leftMargin: chip.content.padLeft
+            anchors.rightMargin: chip.content.padRight
+            anchors.topMargin: chip.content.padTop
 
             Text {
                 id: stackedTitle
@@ -126,12 +130,16 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                text: chip.event ? (chip.event.title || "Untitled") : ""
+                text: chip.clippedTitle
+                // Wrapping is the packed column's whole answer: four glyphs on
+                // a line is `Des…` however it is cut, and the same chip has
+                // vertical room its duration already paid for.
+                wrapMode: chip.content.titleLines > 1 ? Text.WordWrap : Text.NoWrap
                 elide: Text.ElideRight
-                maximumLineCount: 1
+                maximumLineCount: chip.content.titleLines
                 color: CalendarTokens.text(chip.hue)
                 font.family: Theme.fontUi
-                font.pointSize: Theme.pt(12.5)
+                font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
             }
 
@@ -139,71 +147,107 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: stackedTitle.bottom
-                anchors.topMargin: 1
-                // Dropped on a chip too narrow to hold a time: see
-                // `EventLayoutPolicy.showsTimeLine`.
-                visible: chip.showsTime
+                anchors.topMargin: chip.content.narrow ? 0 : 1
+                visible: chip.content.showTime
                 text: chip.timeLabel
+                // A time that elides is not a time. Where the last pixel or two
+                // is missing the glyphs shrink instead — the one place on this
+                // surface where type is not on the scale, and cheaper than
+                // printing `10:3…`.
+                fontSizeMode: Text.HorizontalFit
+                minimumPointSize: Theme.pt(8)
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.72)
+                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.78)
                 font.family: Theme.fontUi
-                font.pointSize: Theme.pt(11)
+                font.pointSize: Theme.pt(chip.content.timeSize)
                 font.weight: Theme.weightRegular
             }
         }
 
+        /// One line — a half-hour meeting, or a chip too short for two. The
+        /// time is right-aligned when there is one, so a column of them lines
+        /// its times up down the right edge instead of ragging after titles of
+        /// different lengths.
         Item {
-            visible: chip.compact
+            id: single
+
+            visible: chip.content.mode !== "stacked"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
-            anchors.rightMargin: Theme.space2
+            anchors.leftMargin: chip.content.padLeft
+            anchors.rightMargin: chip.content.padRight
 
             Text {
                 id: inlineTime
 
+                visible: chip.content.showTime
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.timeLabel
-                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.72)
+                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.78)
                 font.family: Theme.fontUi
-                font.pointSize: Theme.pt(11)
+                font.pointSize: Theme.pt(chip.content.timeSize)
                 font.weight: Theme.weightRegular
             }
 
-            // The title yields to the time rather than the other way round:
-            // "Standup" elided to "Stand…" is still legible, "9a" elided to
-            // "9" is a different time.
             Text {
                 anchors.left: parent.left
-                anchors.right: inlineTime.left
-                anchors.rightMargin: Theme.space2
-                anchors.baseline: inlineTime.baseline
-                text: chip.event ? (chip.event.title || "Untitled") : ""
+                anchors.right: inlineTime.visible ? inlineTime.left : parent.right
+                anchors.rightMargin: inlineTime.visible ? Theme.space2 : 0
+                anchors.verticalCenter: parent.verticalCenter
+                text: chip.clippedTitle
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 color: CalendarTokens.text(chip.hue)
                 font.family: Theme.fontUi
-                font.pointSize: Theme.pt(12.5)
+                font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
             }
         }
     }
 
-    /// `"10 – 11:30a"` on a chip that begins where it looks like it does, and
-    /// the start alone on one continuing from yesterday — a chip whose top edge
-    /// is a midnight cut must not print a start time it does not have.
+    // --- the two strings, and the one measurement behind them -----------------
+
+    /// The time, in the form the width can carry: the whole range where it
+    /// fits, the start alone where it does not, and an arrow where the event
+    /// runs off an edge of the day.
     readonly property string timeLabel: {
         if (!chip.event)
             return "";
         if (chip.continuesAbove)
             return "→ " + chip.format.chipTime(chip.event.end, chip.use24);
-        if (chip.compact || chip.continuesBelow)
+        if (chip.continuesBelow || chip.content.timeForm === "start")
             return chip.format.chipTime(chip.event.start, chip.use24);
         return chip.format.timeRange(chip.event.start, chip.event.end, chip.use24);
+    }
+
+    TextMetrics {
+        id: titleMetrics
+
+        font.family: Theme.fontUi
+        font.pointSize: Theme.pt(chip.content.titleSize)
+        font.weight: Theme.weightMedium
+        text: chip.rawTitle
+    }
+
+    /// The title, cut to fit at a word boundary. The width available is the
+    /// text box the content rule sized, less whatever an inline time is taking
+    /// off the end of the same line.
+    readonly property string clippedTitle: {
+        // Wrapping already breaks at word boundaries and elides the last line,
+        // so the hand-cut form is only for the chips held to one.
+        if (chip.content.titleLines > 1)
+            return chip.rawTitle;
+        const inlineCost = chip.content.mode === "inline"
+            ? inlineTime.implicitWidth + Theme.space2 : 0;
+        const avail = chip.content.textWidth - inlineCost;
+        if (chip.rawTitle.length === 0 || titleMetrics.width <= avail)
+            return chip.rawTitle;
+        const advance = titleMetrics.width / chip.rawTitle.length;
+        return chip.layoutPolicy.clipTitle(chip.rawTitle, Math.floor(avail / advance));
     }
 
     MouseArea {

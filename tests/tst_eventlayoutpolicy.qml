@@ -715,20 +715,125 @@ TestCase {
         verify(!layoutPolicy.isCompact(NaN));
     }
 
-    function test_showsTimeLine_threshold() {
-        compare(layoutPolicy.timeLineMinWidth, 92);
-        verify(layoutPolicy.showsTimeLine(92));
-        verify(layoutPolicy.showsTimeLine(300));
-        verify(!layoutPolicy.showsTimeLine(91));
+    // --- what fits inside one chip --------------------------------------------
 
-        // The measured case: the fixture's three-way overlap on 2026-08-18, in
-        // a 1180px window with a 248px sidebar and a 56px gutter, gives each
-        // chip a third of a 125px column.
+    function test_a_roomy_hour_long_chip_stacks_title_over_a_full_range() {
+        const c = layoutPolicy.chipContent(186, 56, 60);
+        compare(c.mode, "stacked");
+        verify(c.showTime);
+        compare(c.timeForm, "range");
+        verify(!c.narrow);
+        compare(c.titleSize, 12.5);
+        compare(c.bar, 4);
+        compare(c.padLeft, 12);   // bar + space2
+    }
+
+    function test_a_half_hour_chip_sets_its_time_inline_however_wide_it_is() {
+        // 28px of chip has one line in it. Wide, that line carries both; the
+        // duration decides, not the height, or a taller `hourRow` would let a
+        // 15-minute event sprout a second line its 30-minute neighbour lacks.
+        const c = layoutPolicy.chipContent(186, 28, 30);
+        compare(c.mode, "inline");
+        verify(c.showTime);
+        compare(c.timeForm, "start");
+    }
+
+    function test_the_packed_tuesday_still_prints_a_start_time() {
+        // The critic's case, in its own numbers: three concurrent events in a
+        // 1180px window with a 248px sidebar and a 56px gutter share one
+        // ~125px column, so each is ~41px wide — and at 90 minutes each is
+        // 84px tall. That has to be a title *and* a start time, not `D…`.
         const columnW = (1180 - 248 - 56) / 7;
-        verify(!layoutPolicy.showsTimeLine(columnW / 3));
-        // And a day alone in its hour keeps its time.
-        verify(layoutPolicy.showsTimeLine(columnW));
+        const c = layoutPolicy.chipContent(columnW / 3 - 2, 84, 90);
+        compare(c.mode, "stacked");
+        verify(c.showTime);
+        compare(c.timeForm, "start");
+        verify(c.narrow);
+        compare(c.bar, 3);
+        compare(c.padLeft, 6);
+        compare(c.titleSize, 11);
+    }
 
-        verify(!layoutPolicy.showsTimeLine(NaN));
+    function test_a_tall_chip_spends_its_height_on_wrapping_the_title() {
+        compare(layoutPolicy.chipContent(90, 84, 90).titleLines, 3);
+        compare(layoutPolicy.chipContent(90, 56, 60).titleLines, 2);
+        // A chip with only its two lines of room keeps the second for the time
+        // rather than giving it to the title.
+        compare(layoutPolicy.chipContent(90, 32, 45).titleLines, 1);
+        // Never past three: a chip is a label, not a paragraph.
+        compare(layoutPolicy.chipContent(90, 400, 480).titleLines, 3);
+    }
+
+    function test_a_chip_too_narrow_to_wrap_between_words_does_not_wrap() {
+        // The reversal this floor records: wrapping the packed 38px chip broke
+        // `Design review` inside its words — `Desig / n / rev…` — which reads
+        // worse than the one elided line it replaced, however much height the
+        // chip had going spare.
+        compare(layoutPolicy.wrapMinWidth, 72);
+        compare(layoutPolicy.chipContent(38, 84, 90).titleLines, 1);
+        compare(layoutPolicy.chipContent(71, 84, 90).titleLines, 1);
+        compare(layoutPolicy.chipContent(72, 84, 90).titleLines, 3);
+    }
+
+    function test_one_line_modes_never_wrap() {
+        compare(layoutPolicy.chipContent(186, 28, 30).titleLines, 1);   // inline
+        compare(layoutPolicy.chipContent(30, 84, 90).titleLines, 1);    // titleOnly
+    }
+
+    function test_a_sliver_too_narrow_for_any_time_gives_the_title_the_chip() {
+        const c = layoutPolicy.chipContent(30, 84, 90);
+        compare(c.mode, "titleOnly");
+        verify(!c.showTime);
+    }
+
+    function test_the_two_line_floor_is_a_height_and_it_is_32() {
+        compare(layoutPolicy.twoLineMinHeight, 32);
+        compare(layoutPolicy.chipContent(60, 31, 45).mode, "titleOnly");
+        compare(layoutPolicy.chipContent(60, 32, 45).mode, "stacked");
+    }
+
+    function test_the_time_form_steps_down_before_it_disappears() {
+        // Three bands, in order: range, start, nothing. A width that lost the
+        // range straight to nothing is the bug this replaced.
+        compare(layoutPolicy.chipContent(104, 56, 60).timeForm, "range");
+        compare(layoutPolicy.chipContent(103, 56, 60).timeForm, "start");
+        verify(layoutPolicy.chipContent(36, 56, 60).showTime);
+        verify(!layoutPolicy.chipContent(35, 56, 60).showTime);
+    }
+
+    function test_chip_content_survives_a_delegate_mid_rebuild() {
+        // A delegate asks with `NaN` width for one frame. It must get an
+        // answer, not `undefined` — which is a chip that paints nothing.
+        const c = layoutPolicy.chipContent(NaN, NaN, NaN);
+        compare(c.mode, "titleOnly");
+        compare(c.textWidth, 0);
+        verify(c.narrow);
+    }
+
+    function test_a_title_is_clipped_after_a_whole_word() {
+        compare(layoutPolicy.clipTitle("Design review", 7), "Design…");
+        compare(layoutPolicy.clipTitle("Design review", 20), "Design review");
+        compare(layoutPolicy.clipTitle("Design review", 13), "Design review");
+        // The boundary itself: 12 glyphs cannot hold all 13, so back to the space.
+        compare(layoutPolicy.clipTitle("Design review", 12), "Design…");
+    }
+
+    function test_a_first_word_too_long_for_the_box_falls_back_to_a_hard_cut() {
+        // Better a fragment than an empty chip.
+        compare(layoutPolicy.clipTitle("Retrospective", 5), "Retr…");
+        compare(layoutPolicy.clipTitle("Retrospective", 1), "…");
+        compare(layoutPolicy.clipTitle("Retrospective", 0), "");
+    }
+
+    function test_clip_title_takes_whatever_a_half_built_chip_hands_it() {
+        compare(layoutPolicy.clipTitle("", 8), "");
+        // `title` is `var` and not `string` for exactly this: a `string`
+        // parameter coerces null into the four-glyph title "null", which is
+        // what a chip on a half-built model would then print.
+        compare(layoutPolicy.clipTitle(null, 8), "");
+        compare(layoutPolicy.clipTitle(undefined, 8), "");
+        compare(layoutPolicy.clipTitle("Standup", NaN), "");
+        // Leading space trimmed first, or the cut lands inside the padding.
+        compare(layoutPolicy.clipTitle(" Standup meeting", 3), "St…");
     }
 }

@@ -325,15 +325,33 @@ QtObject {
         });
     }
 
-    // --- how tall a chip may be -----------------------------------------------
+    // --- what fits inside one chip --------------------------------------------
+    //
+    // A chip is a box of a size the *grid* chose — its height is its duration
+    // and its width is however many neighbours it is sharing the hour with —
+    // and what may be printed inside it is arithmetic on those two numbers.
+    // Getting it wrong is not a subtle failure: the three-way Tuesday overlap
+    // rendered `D…`, `V…`, `P…` and no times at all, which is three chips that
+    // have given up saying anything.
+    //
+    // The decision is one function, `chipContent(width, height, minutes)`, and
+    // it answers in one object so a chip can never take the title rule from one
+    // branch and the padding from another.
 
-    /// At or under this many minutes a chip has no room for two lines.
+    /// Below this many pixels of chip *height* there is no second line.
     ///
-    /// 30 and not 20: at `hourRow` 56 a half-hour chip is 28px tall, and two
-    /// lines of pt(12.5) and pt(11) with `space1` of top padding need 34. The
-    /// number is here rather than in the chip because it is the same question
-    /// the layout is already answering — how much room does this event get —
-    /// and because a threshold with no test is a threshold that drifts.
+    /// 32 and not 34: at `hourRow` 56 a half-hour chip is 28px, a 45-minute one
+    /// is 42. Two lines of pt(12.5) and pt(11) at the tight metrics below
+    /// measure 31, so 32 is the first height that fits them with a pixel over —
+    /// and it is the height the critic named, which matters more than the
+    /// arithmetic agreeing to the pixel: a 45-minute meeting showing no start
+    /// time is the complaint.
+    readonly property int twoLineMinHeight: 32
+
+    /// At or under this many minutes a chip is *never* given two lines, however
+    /// tall the grid happens to draw it. `chipMinH` floors a 15-minute event at
+    /// 20px, and a taller `hourRow` would otherwise let a 15-minute event
+    /// sprout a second line while the 30-minute one beside it did not.
     readonly property int compactMinutes: 30
 
     /// Whether a chip of this many minutes collapses to one line, with its time
@@ -342,20 +360,154 @@ QtObject {
         return isFinite(minutes) && minutes <= policy.compactMinutes;
     }
 
-    /// Under this many pixels of chip width, the time line is dropped and the
-    /// title gets the chip to itself.
+    /// Under this many pixels a chip is *narrow*: the accent bar loses a pixel,
+    /// the padding halves, and the type steps down one notch. This is the
+    /// packed-overlap case — three chips in one column of a 1180px window — and
+    /// the alternative measured worse than ugly: 11px of padding out of 40px of
+    /// chip left 22px for a title, which is one glyph and an ellipsis.
     ///
-    /// The number comes off the picture rather than out of the air. A
-    /// three-way overlap on a 1180px window gives each chip 41px, of which 19
-    /// is padding and the accent bar — and `"10 – 11:30a"` in 22px is `"1…"`,
-    /// which is not a time, is not a title, and is the only thing on the
-    /// second line. 92px is where `"10 – 11:30a"` stops eliding at pt(11).
-    readonly property int timeLineMinWidth: 92
+    /// 100 and not 125: a chip that has a whole week column to itself is not
+    /// narrow, and stepping its type down would shrink the common case to fix
+    /// the rare one.
+    readonly property int narrowWidth: 100
 
-    /// Whether a chip this wide has room to say when it is as well as what it
-    /// is. A chip that cannot is not wrong — it is a chip in a busy hour, and
-    /// its neighbours' edges already say where it starts and stops.
-    function showsTimeLine(width: real): bool {
-        return isFinite(width) && width >= policy.timeLineMinWidth;
+    /// The floor for printing a time at all, and the floor for printing it as a
+    /// *range*. Between them the time is the start alone (`10:30a`), which is
+    /// the half of it a neighbouring chip's edges cannot already tell you.
+    ///
+    /// 36 is the measured packed case and not a round number: a 1180px window
+    /// with a 248px sidebar and a 56px gutter gives a week column 125px, a
+    /// three-way overlap takes a third of that, and 2px of gap leaves ~40 —
+    /// so any floor above 40 means the case this whole section exists for
+    /// never prints a time. `"10:30a"` at pt(10) is 30px and the narrow
+    /// padding is 8, which is where 36 stops being arbitrary. 104 is
+    /// `"10:30 – 11:45 AM"` at pt(11) — 90px — plus the roomy padding, measured
+    /// against the same capture: a floor of 128 silently demoted every chip in
+    /// a 125px week column to a bare start time.
+    readonly property int timeMinWidth: 36
+    readonly property int timeRangeMinWidth: 104
+
+    /// The floor for setting a one-line chip's time *inline* after its title.
+    /// Lower than `timeRangeMinWidth` because the inline time is only ever the
+    /// *start* — `9a`, not a range — so it costs the title about 20px rather
+    /// than 90. Under this, the title is squeezed to nothing to make room for a
+    /// time it would have been better off without.
+    readonly property int inlineTimeMinWidth: 96
+
+    /// Everything a chip needs to know about its own contents:
+    ///
+    ///   - `mode` — `"stacked"` (title over time), `"inline"` (title then time
+    ///     on one line) or `"titleOnly"`.
+    ///   - `showTime` / `timeForm` — whether a time is printed, and whether it
+    ///     is the `"range"` or just the `"start"`.
+    ///   - `titleSize` / `timeSize` — point sizes, to hand to `Theme.pt`.
+    ///   - `titleLines` — how many lines the title may wrap over. **This is
+    ///     what makes a packed column readable.** A 38px chip has room for
+    ///     four glyphs on a line, so a one-line rule prints `Des…` whatever
+    ///     else is done to it; the same chip is 84px tall, and `Design` /
+    ///     `review` over `10a` uses the space the event's own duration already
+    ///     bought. Notion wraps narrow chips for exactly this reason.
+    ///   - `bar`, `padLeft`, `padRight`, `padTop` — the chip's own metrics, so
+    ///     the narrow case tightens every one of them together or none.
+    ///
+    /// `width` and `height` are the drawn box; `minutes` is the event's real
+    /// duration, which is not recoverable from the height once `chipMinH` has
+    /// floored it.
+    function chipContent(width: real, height: real, minutes: real): var {
+        const w = isFinite(width) ? width : 0;
+        const h = isFinite(height) ? height : 0;
+        const narrow = w < policy.narrowWidth;
+
+        const bar = narrow ? 3 : 4;
+        const gap = narrow ? 3 : policy.roomyGap;
+        const padRight = narrow ? 2 : gap;
+        const padTop = narrow ? 1 : 3;
+        const textW = Math.max(0, w - bar - gap - padRight);
+
+        const showTime = w >= policy.timeMinWidth;
+        const timeForm = w >= policy.timeRangeMinWidth ? "range" : "start";
+
+        let mode = "titleOnly";
+        if (!policy.isCompact(minutes) && h >= policy.twoLineMinHeight && showTime)
+            mode = "stacked";
+        else if (showTime && w >= policy.inlineTimeMinWidth)
+            mode = "inline";
+
+        const titleSize = narrow ? 11 : 12.5;
+        const timeSize = narrow ? 10 : 11;
+
+        // A line box is its point size and a bit; the exact metric belongs to
+        // the font and the surface measures it, but the *count* is a decision
+        // and has to be the same on every screen, so it is taken from the sizes
+        // this function chose rather than from anything rendered.
+        const titleLine = Math.round(titleSize * policy.lineFactor);
+        const timeLine = mode === "stacked" ? Math.round(timeSize * policy.lineFactor) : 0;
+        const room = h - padTop - timeLine - 2;
+        const titleLines = (mode === "stacked" && w >= policy.wrapMinWidth)
+            ? Math.max(1, Math.min(policy.maxTitleLines, Math.floor(room / titleLine)))
+            : 1;
+
+        return {
+            "mode": mode,
+            "showTime": mode !== "titleOnly",
+            "timeForm": mode === "inline" ? "start" : timeForm,
+            "narrow": narrow,
+            "titleSize": titleSize,
+            "timeSize": timeSize,
+            "titleLines": titleLines,
+            "bar": bar,
+            "padLeft": bar + gap,
+            "padRight": padRight,
+            "padTop": padTop,
+            "textWidth": textW
+        };
+    }
+
+    /// Line box over point size, and the ceiling on wrapping. Three lines is
+    /// where a chip stops being a label and starts being a paragraph — past
+    /// that the title is long enough that the editor is the place to read it.
+    readonly property real lineFactor: 1.35
+    readonly property int maxTitleLines: 3
+
+    /// Under this width a chip does **not** wrap, whatever height it has.
+    ///
+    /// Measured, and the measurement reversed a decision. Wrapping a 38px chip
+    /// looked like the answer — Notion wraps narrow chips — until it was
+    /// captured: a line that cannot hold one whole word breaks inside words,
+    /// and `Design review` came out `Desig / n / rev…`, which is worse to read
+    /// than the single elided line it replaced. 72 is about two short words at
+    /// pt(11) less the narrow padding, i.e. the narrowest chip on which a wrap
+    /// lands between words rather than through one.
+    readonly property int wrapMinWidth: 72
+
+    /// The padding a chip that is not narrow gets on each side of its text —
+    /// `Theme.space2`, written out because this file is loaded by
+    /// `qmltestrunner`, which cannot import `qs.Core`.
+    readonly property int roomyGap: 8
+
+    /// A title cut to fit, **at a word boundary wherever one exists**.
+    ///
+    /// `Text.ElideRight` cuts mid-glyph: `"Design review"` in a packed column
+    /// becomes `"D…"`, which names nothing. Cutting at the last whole word that
+    /// fits gives `"Design…"` in the same pixels — the same information the eye
+    /// wanted, and the reason a packed Tuesday is still readable.
+    ///
+    /// `maxChars` is how many glyphs fit, which only the surface can measure;
+    /// this decides what to do with the number. A first word already too long
+    /// for the box falls back to a hard cut, because a chip that printed
+    /// nothing would be worse than one that printed a fragment.
+    function clipTitle(title: var, maxChars: int): string {
+        const t = (title === undefined || title === null) ? "" : String(title).trim();
+        const n = Math.floor(maxChars);
+        if (!isFinite(n) || n < 1)
+            return "";
+        if (t.length <= n)
+            return t;
+
+        const cut = t.slice(0, n);
+        const space = cut.lastIndexOf(" ");
+        if (space > 0)
+            return cut.slice(0, space) + "…";
+        return (n > 1 ? t.slice(0, n - 1) : "") + "…";
     }
 }

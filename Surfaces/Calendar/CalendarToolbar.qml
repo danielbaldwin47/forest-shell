@@ -18,10 +18,12 @@
 //
 // ## Today is a button that knows when it is pointless
 //
-// It goes to `opacityInert` and stops taking clicks when today is already on
-// screen. Notion leaves it live, which teaches the hand to press a button that
-// does nothing — and a control that sometimes does nothing is worse than one
-// that is visibly unavailable.
+// It stops taking clicks when today is already on screen. Notion leaves it
+// live, which teaches the hand to press a button that does nothing — and a
+// control that sometimes does nothing is worse than one that visibly has
+// nowhere to go. What it does *not* do is dim itself out of legibility: the
+// first pass used `opacityInert` and the button read as broken rather than as
+// dormant. See the button itself for the two states it has instead.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -110,14 +112,20 @@ Item {
         font.weight: Theme.weightDisplay
     }
 
+    /// The year, and the two things that made it read as a stray token rather
+    /// than as part of the title: it was `textMuted`, three steps down from the
+    /// month beside it, and `space2` after a `Text` whose own right side
+    /// bearing already carries a couple of pixels — measured at a 1.5-space
+    /// gap. `textSecondary` and `space1` keep it subordinate without detaching
+    /// it.
     Text {
         id: yearText
 
         anchors.left: leadText.right
-        anchors.leftMargin: Theme.space2
+        anchors.leftMargin: Theme.space1
         anchors.baseline: leadText.baseline
         text: toolbar.titleParts.year
-        color: Theme.textMuted
+        color: Theme.textSecondary
         font.family: Theme.fontUi
         font.pointSize: Theme.pt(20)
         font.weight: Theme.weightRegular
@@ -145,25 +153,42 @@ Item {
             }
         }
 
-        /// Today.
+        /// Today. **Two states, both of them legible.**
+        ///
+        /// It was a transparent box with a hairline round it at
+        /// `Theme.opacityInert`, which measured 1.9:1 for the label and read as
+        /// a *disabled* control sitting next to the lit Week segment — a primary
+        /// action that looks broken. The distinction the design wants is
+        /// prominence, not visibility: live, it is a filled `surfaceRaised`
+        /// button with a `borderStrong` edge and a `textPrimary` label, the most
+        /// solid thing on the bar; dormant, it keeps a real fill and drops to
+        /// `textSecondary`, so it still reads as a button that currently has
+        /// nowhere to go rather than as one that failed to render.
         Rectangle {
             id: todayButton
+
+            readonly property bool live: !toolbar.showsToday
 
             width: todayLabel.implicitWidth + Theme.space4
             height: CalendarTokens.controlH
             radius: Theme.radiusSm
-            color: todayPointer.containsMouse && toolbar.showsToday === false
-                   ? Theme.surfaceOverlay : "transparent"
+            color: todayPointer.containsMouse && todayButton.live
+                   ? Theme.surfaceOverlay
+                   : (todayButton.live ? Theme.surfaceRaised : Theme.surface)
             border.width: 1
-            border.color: Theme.borderSubtle
-            opacity: toolbar.showsToday ? Theme.opacityInert : 1.0
+            border.color: todayButton.live ? Theme.borderStrong : Theme.borderSubtle
+
+            Behavior on color {
+                enabled: Theme.animateTransforms
+                ColorAnimation { duration: Theme.duration(Theme.motionFast) }
+            }
 
             Text {
                 id: todayLabel
 
                 anchors.centerIn: parent
                 text: "Today"
-                color: Theme.textSecondary
+                color: todayButton.live ? Theme.textPrimary : Theme.textSecondary
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(12.5)
                 font.weight: Theme.weightMedium

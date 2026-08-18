@@ -28,6 +28,9 @@
 #   nested_hyprctl dispatch workspace 2       # drive the compositor, not the shell
 #   nested_await "$NESTED_SHELL_LOG" 'the line that proves it' 15
 #   nested_key escape                      # a keystroke, into the focused window
+#   nested_click 640 400                   # a real button press, hit-tested
+#   nested_drag 640 300 640 460            # press, travel, release — one gesture
+#   nested_window_rect 'forest-shell — cal' # a toplevel's rect, to aim at
 #
 # Sourcing installs an EXIT trap that tears the nested session down. See
 # tools/lock-harness.sh and tools/settings-harness.sh for the worked examples.
@@ -436,6 +439,82 @@ nested_click() {
     # in the same breath as the enter and the client has not laid out yet.
     sleep 0.2
     nested_env "$NESTED_CLICK_BIN" "$button" || return 1
+}
+
+## Drag inside the nested session, from one point in the compositor's global
+## coordinates to another: `nested_drag 100 200 100 400`, with an optional step
+## count as a fifth argument.
+##
+## Why this is not two `nested_click`s. tools/nested-click.c creates its virtual
+## pointer, uses it and destroys it inside one process, so a press in one
+## invocation and a release in another cannot hold a button down — the device
+## dies in between and the compositor drops the grab with it. The whole gesture
+## therefore happens inside one run of the tool, which is what `--drag` is.
+##
+## The motion is **absolute**, against the output's own extents, which is why
+## this reads them rather than taking them on trust: relative motion goes
+## through pointer acceleration and the landing coordinate stops being
+## arithmetic. `motion_absolute` is scoped to one output and the tool binds
+## none, so this is a **single-output helper** — under NESTED_MONITORS with more
+## than one output it aims at the first, and a harness that needs a drag on the
+## second output needs a different instrument.
+##
+## The extents are the **logical** ones, not the mode `hyprctl` prints. Both
+## endpoints are compositor-global coordinates — the same space the opening
+## `movecursor` warp is in — and that space is scaled, so dividing a logical x
+## by a physical width is a fraction that is wrong by exactly the scale. At
+## scale 1 the two agree and nothing shows; at 1.5 the drag lands two thirds of
+## the way to where it was aimed and no instrument says so.
+##
+## The opening warp is `hyprctl dispatch movecursor`, exactly as `nested_click`
+## does it and for the same reason: it is a compositor-side event the surface
+## under it has to be told about before a button lands on it.
+nested_drag() {
+    local x1="$1" y1="$2" x2="$3" y2="$4" steps="${5:-12}" button="${6:-left}"
+    nested_click_tool || return 1
+
+    local output extents w h
+    output=$(nested_outputs | head -n 1)
+    [[ -n "$output" ]] || { echo "no output to drag on" >&2; return 1; }
+    extents=$(nested_output_logical "$output")
+    w="${extents%x*}"; h="${extents#*x}"
+    [[ -n "$w" && -n "$h" && "$w" != "$extents" ]] || {
+        echo "could not read the logical extents of $output" >&2; return 1; }
+
+    nested_hyprctl dispatch movecursor "$x1" "$y1" > /dev/null || return 1
+    sleep 0.2
+    nested_env "$NESTED_CLICK_BIN" "$button" --drag "$x1" "$y1" "$x2" "$y2" \
+        "$w" "$h" "$steps" || return 1
+}
+
+## A toplevel's rect as `<x> <y> <w> <h>`, found by a substring of its title, or
+## nothing at all if no window matches.
+##
+## `hyprctl layers` is the wrong instrument for this and answers nothing: a
+## `FloatingWindow` is a toplevel, so it is in `clients` and not in `layers`.
+## And its size is read rather than assumed — under a nested Hyprland an
+## ordinary window is tiled to the output, so whatever `implicitWidth` the QML
+## declared is not what is on screen.
+##
+## First match wins, in the order Hyprland lists them; a harness that opens two
+## windows with the same words in their titles should ask for something more
+## specific.
+nested_window_rect() {
+    local want="$1"
+    nested_hyprctl -j clients | python3 -c '
+import json, sys
+want = sys.argv[1]
+try:
+    clients = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for client in clients:
+    if want in (client.get("title") or ""):
+        at = client.get("at") or [0, 0]
+        size = client.get("size") or [0, 0]
+        print(at[0], at[1], size[0], size[1])
+        break
+' "$want"
 }
 
 ## The bar's layer surface as `<monitor> <x> <y> <w> <h>`, or nothing at all if

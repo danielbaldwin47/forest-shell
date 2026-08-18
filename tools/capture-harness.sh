@@ -30,6 +30,10 @@
 #   tools/capture-harness.sh out.png --surface osd --session --osd mic:60:muted
 #   tools/capture-harness.sh out.png --surface screenshot           # the region picker
 #   tools/capture-harness.sh out.png --surface screenshot --pick window
+#   tools/capture-harness.sh out.png --surface calendar             # the week
+#   tools/capture-harness.sh out.png --surface calendar --cal-view month
+#   tools/capture-harness.sh out.png --surface calendar --cal-date 2026-08-18 \
+#       --cal-now 2026-08-18T13:40
 #   tools/capture-harness.sh out.png --surface launcher --session --query '?' \
 #       --transcript 'you|why is the sky blue~claude|Rayleigh scattering.'  # Ask Claude
 #   tools/capture-harness.sh out.png --surface launcher --contrast --min-ratio 4.5
@@ -147,6 +151,18 @@
 # tools/blur-measure.sh, which photographs a real session with grim; layer
 # stacking and frame pacing are still unmeasured.
 #
+# The calendar knobs pose that surface. `--cal-view` is `day`, `week` or
+# `month`; `--cal-date` is the day the view is built around; `--cal-state` names
+# an overlay to pose (nothing accepts it yet — the knob is here so later pieces
+# add a state rather than a flag). Its events and contacts come from
+# tools/fixtures/calendar-*.json, copied into the scratch XDG dirs, so the
+# picture is the same on every machine.
+#
+# `--cal-now` is the one that is not a convenience: the now-line is drawn from
+# the wall clock, so without freezing it no two captures of this surface are the
+# same picture and a diff between two runs is unreadable. It defaults to
+# 2026-08-18T13:40, inside the fixture week.
+#
 # --clock writes `weatherTime.clock.format` into the scratch config: `auto`,
 # `12h` or `24h`. #93 was the bar and the lock reading the same minute two ways,
 # and the check that it is one decision now is two captures side by side — a
@@ -179,6 +195,10 @@ DRILL=""
 OSD_STATE="volume:45"
 OSD_SET=0
 PICK=""
+CAL_VIEW="week"
+CAL_STATE=""
+CAL_DATE="2026-08-18"
+CAL_NOW="2026-08-18T13:40"
 WALLPAPER_FOLDER=""
 DELAY_MS=600
 REDUCED=0
@@ -206,13 +226,17 @@ while (( $# )); do
         --pick)
             PICK="${2:-}"; shift 2 ;;
         --osd)         OSD_STATE="$2"; OSD_SET=1; shift 2 ;;
+        --cal-view)    CAL_VIEW="$2"; shift 2 ;;
+        --cal-state)   CAL_STATE="$2"; shift 2 ;;
+        --cal-date)    CAL_DATE="$2"; shift 2 ;;
+        --cal-now)     CAL_NOW="$2"; shift 2 ;;
         --wallpaper-folder) WALLPAPER_FOLDER="$2"; shift 2 ;;
         --delay-ms)    DELAY_MS="$2"; shift 2 ;;
         --clock)       CLOCK="$2"; shift 2 ;;
         --palette)     PALETTE="$2"; shift 2 ;;
         --reduced)     REDUCED=1; shift ;;
         --unclamped)   UNCLAMPED=1; shift ;;
-        --help|-h)     sed -n '2,117p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --help|-h)     sed -n '2,174p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*)            echo "unknown option: $1" >&2; exit 2 ;;
         *)             OUT="$1"; shift ;;
     esac
@@ -264,6 +288,31 @@ if [[ -n "$PICK" ]]; then
     esac
 fi
 
+# `--cal-view` names a view the surface knows, and the date knobs are checked
+# for shape here rather than in the QML: a `--cal-date 18-08-2026` would
+# otherwise render the default day and the picture would look right.
+case "$CAL_VIEW" in
+    day|week|month) ;;
+    *) echo "unknown calendar view: $CAL_VIEW (day, week, month)" >&2; exit 2 ;;
+esac
+[[ "$CAL_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
+    echo "--cal-date wants YYYY-MM-DD, got: $CAL_DATE" >&2; exit 2; }
+[[ "$CAL_NOW" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]] || {
+    echo "--cal-now wants YYYY-MM-DDTHH:MM, got: $CAL_NOW" >&2; exit 2; }
+
+# `--cal-state` is checked the same way and against a list that is currently
+# empty: the knob and its plumbing landed up front so later pieces append rather
+# than restructure, but no pose is built yet. A named state that silently
+# rendered the plain view is the exact failure the comment above describes, so
+# the ones still to come are refused by name rather than ignored.
+case "$CAL_STATE" in
+    "") ;;
+    drag-create|drag-move|resize|guests|popover|shortcuts|command)
+        echo "--cal-state $CAL_STATE is not posed yet — no calendar state" \
+             "renders differently from the plain view" >&2; exit 2 ;;
+    *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
+esac
+
 # The three words Core/SettingsSchema.qml's `clockFormats` accepts. Checked here
 # rather than left to the shell because `--clock 12` would otherwise be coerced
 # back to the default and photographed as if it were the thing asked for.
@@ -275,15 +324,22 @@ if [[ -n "$CLOCK" ]]; then
 fi
 
 case "$SURFACE" in
-    bar|bar-full|lock|settings|drawer|launcher|center|controlcenter|dashboard|osd|screenshot) ;;
-    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, drawer, launcher, center, controlcenter, dashboard, osd, screenshot)" \
+    bar|bar-full|lock|settings|calendar|drawer|launcher|center|controlcenter|dashboard|osd|screenshot) ;;
+    *) echo "unknown surface: $SURFACE (bar, bar-full, lock, settings, calendar, drawer, launcher, center, controlcenter, dashboard, osd, screenshot)" \
            >&2; exit 2 ;;
 esac
 
 # The settings window is 900x660 by its own declaration; capturing it at the
 # bar's 1280x800 would be measuring a size the shell never opens.
+# Each window surface is captured at the size it actually opens at — capturing
+# the settings window at the bar's 1280x800, or the calendar at either, would be
+# measuring a shape the shell never shows.
 if [[ -z "$SIZE" ]]; then
-    [[ "$SURFACE" == settings ]] && SIZE="900x660" || SIZE="1280x800"
+    case "$SURFACE" in
+        settings) SIZE="900x660" ;;
+        calendar) SIZE="1180x760" ;;
+        *)        SIZE="1280x800" ;;
+    esac
 fi
 W="${SIZE%x*}"; H="${SIZE#*x}"
 
@@ -402,6 +458,21 @@ if [[ "$SURFACE" == launcher && "$LAUNCHER_QUERY" == \;* ]]; then
     fi
 fi
 
+# The calendar renders from `CalendarStore`, which reads XDG_DATA_HOME for the
+# events and XDG_CONFIG_HOME for the contacts — so a capture without these two
+# copies would photograph whatever is in the caller's own calendar, and would
+# photograph something different tomorrow. The fixtures are the week of
+# 2026-08-18, which is the week `--cal-date` defaults into.
+#
+# Only for the surface that reads them: every other run leaves the scratch
+# XDG_DATA_HOME empty, so a `CalendarStore` constructed by something else is
+# visibly working from nothing rather than from a fixture nobody asked for.
+if [[ "$SURFACE" == calendar ]]; then
+    mkdir -p "$SCRATCH/data/forest-shell/calendar"
+    cp tools/fixtures/calendar-events.json "$SCRATCH/data/forest-shell/calendar/events.json"
+    cp tools/fixtures/calendar-contacts.json "$SCRATCH/config/forest-shell/contacts.json"
+fi
+
 CAPTURE_ENV=(
     XDG_CONFIG_HOME="$SCRATCH/config" XDG_STATE_HOME="$SCRATCH/state"
     XDG_CACHE_HOME="$SCRATCH/cache"
@@ -413,6 +484,9 @@ CAPTURE_ENV=(
     CAPTURE_DELAY_MS="$DELAY_MS" CAPTURE_LAUNCHER_QUERY="$LAUNCHER_QUERY"
     CAPTURE_CLAUDE_TRANSCRIPT="$CLAUDE_TRANSCRIPT" CAPTURE_DRILL="$DRILL"
     CAPTURE_OSD="$OSD_STATE" CAPTURE_PICK="$PICK"
+    CAL_VIEW="$CAL_VIEW" CAL_STATE="$CAL_STATE"
+    CAL_DATE="$CAL_DATE" CAL_NOW="$CAL_NOW"
+    XDG_DATA_HOME="$SCRATCH/data"
 )
 if (( SESSION )); then
     # Nothing unset: the session's own Wayland socket is the point.

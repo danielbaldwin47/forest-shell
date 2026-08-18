@@ -24,6 +24,23 @@ Singleton {
     // repo, which is the same claim `settings.json` makes.
     readonly property string themesDir: configDir + "/themes"
 
+    // Documents the shell writes on the user's behalf — not settings, not
+    // ephemera. The calendar's events are the first of them: losing them is not
+    // "the shell forgot a tab", it is the user losing something they typed, so
+    // they live under XDG_DATA_HOME where a backup tool already looks.
+    readonly property string dataDir:
+        (Quickshell.env("XDG_DATA_HOME") || (home + "/.local/share")) + "/forest-shell"
+
+    // The calendar's own file (#calendar). A directory of its own under dataDir
+    // so a later attachment or recurrence cache lands beside it rather than
+    // beside every other document the shell may come to own.
+    readonly property string calendarFile: dataDir + "/calendar/events.json"
+
+    // The people the calendar can invite. Config and not data, deliberately: a
+    // contact list is hand-written and hand-copied between machines, which is
+    // the same claim settings.json makes, so it sits beside it.
+    readonly property string contactsFile: configDir + "/contacts.json"
+
     // Ephemera (last tab, session ids, DND) — never mixed into settings.json.
     readonly property string stateDir: Quickshell.stateDir
     readonly property string stateFile: stateDir + "/state.json"

@@ -55,6 +55,7 @@ import qs.Surfaces.Background
 import qs.Surfaces.Bar
 import qs.Surfaces.Lock
 import qs.Surfaces.Settings
+import qs.Surfaces.Calendar
 import qs.Surfaces.Drawers
 import qs.Surfaces.Osd
 import qs.Surfaces.Screenshot
@@ -103,6 +104,21 @@ ShellRoot {
     /// happened to be, and could not run offscreen at all, since the freeze is
     /// a `grim` capture of a session this mode does not have.
     readonly property string pickState: Quickshell.env("CAPTURE_PICK") || "region"
+
+    /// The calendar's pose. `--cal-view` picks day, week or month; `--cal-date`
+    /// is the day the view is built around; `--cal-state` names an overlay or
+    /// an interaction to pose (`drag-create`, `guests`, `shortcuts` — none of
+    /// them exist yet, and the knob is here so that when they do, no harness
+    /// signature changes).
+    ///
+    /// `CAL_NOW` is the one that is not a convenience. The now-line is drawn
+    /// from the wall clock, so without a frozen one no two captures of this
+    /// surface are ever the same picture and a diff between two runs is
+    /// unreadable — exactly the argument `--lock-state` makes for posing PAM.
+    readonly property string calView: Quickshell.env("CAL_VIEW") || "week"
+    readonly property string calState: Quickshell.env("CAL_STATE") ?? ""
+    readonly property string calDate: Quickshell.env("CAL_DATE") || "2026-08-18"
+    readonly property string calNow: Quickshell.env("CAL_NOW") || "2026-08-18T13:40"
 
     readonly property int sceneWidth: parseInt(Quickshell.env("CAPTURE_W") || "1280")
     readonly property int sceneHeight: parseInt(Quickshell.env("CAPTURE_H") || "800")
@@ -158,6 +174,14 @@ ShellRoot {
 
     readonly property bool isSettings: root.surfaceName === "settings"
 
+    /// The calendar is the settings window's shape and not the bar's: a
+    /// `FloatingWindow` of its own, so it is built as itself and its content is
+    /// moved onto the backing below rather than returned from the switch. See
+    /// `calendarLoader` for why grabbing it where it was built cannot work.
+    readonly property bool isCalendar: root.surfaceName === "calendar"
+
+    readonly property bool isWindowSurface: root.isSettings || root.isCalendar
+
     /// One line describing what was rendered, appended to the saved= log line.
     /// The harness script parses `bar=` out of it, and a human reading a failed
     /// run wants to know which picture failed.
@@ -192,9 +216,11 @@ ShellRoot {
 
             Loader {
                 anchors.fill: parent
-                active: !root.isSettings
+                active: !root.isWindowSurface
                 sourceComponent: {
                     switch (root.surfaceName) {
+                    // `settings` and `calendar` are absent on purpose: both are
+                    // toplevels of their own and neither can be a child here.
                     case "lock":     return lockScene;
                     case "bar-full": return barFullScene;
                     case "drawer":   return drawerScene;
@@ -219,6 +245,18 @@ ShellRoot {
                 id: settingsBacking
                 anchors.fill: parent
                 visible: root.isSettings
+                color: Theme.bgBase
+            }
+
+            /// The same, for the calendar window. A second rectangle rather
+            /// than one shared with the settings' because each is the fill of a
+            /// different window, and a window that later paints something other
+            /// than `bgBase` would otherwise quietly change the other's
+            /// picture.
+            Rectangle {
+                id: calendarBacking
+                anchors.fill: parent
+                visible: root.isCalendar
                 color: Theme.bgBase
             }
         }
@@ -1207,6 +1245,54 @@ ShellRoot {
                                       + (at > 0 ? "+scroll=" + Math.round(at) : "");
             };
             root.sceneDescription = "tab=" + settingsLoader.item.currentTab;
+        }
+    }
+
+    /// The calendar window (#calendar), on the same terms as the settings one
+    /// above and for the same reason: `CalendarView` is a `FloatingWindow`, so
+    /// it is built as itself and its content is then moved onto
+    /// `calendarBacking`, where the scene can be grabbed like any other
+    /// surface. Grabbing it where it was built gives a transparent page — the
+    /// fill is the window's `color` — and runs into Quickshell's
+    /// `ProxyWindowContentItem`, which `grabToImage` refuses outright.
+    ///
+    /// The pose is handed in as properties rather than driven, which is what
+    /// keeps this mode compositor-free: `nowOverride` in particular is what
+    /// makes two runs the same picture.
+    Loader {
+        id: calendarLoader
+
+        active: root.isCalendar
+        sourceComponent: CalendarView {
+            view: root.calView
+            anchorDate: root.calDate
+            nowOverride: root.calNow
+        }
+
+        onLoaded: {
+            const content = calendarLoader.item.contentItem;
+            if (content.children.length !== 1) {
+                // The move below takes one child. If the window ever grows a
+                // second, a silent half-capture is the worst outcome available.
+                console.warn("capture: calendar content has "
+                             + content.children.length + " children, expected 1");
+            }
+            if (content.children.length < 1) {
+                // And with none there is nothing to move at all — reaching for
+                // children[0] here would turn the warning above into a
+                // TypeError, which reads like a broken harness rather than an
+                // empty window. Leaving the backing bare fails the run at the
+                // "not blank" check instead, which is the true diagnosis.
+                console.warn("capture: nothing to reparent — the capture will be blank");
+                return;
+            }
+            const page = content.children[0];
+            page.parent = calendarBacking;
+            page.anchors.fill = calendarBacking;
+
+            root.sceneDescription = "view=" + root.calView + "+date=" + root.calDate
+                                  + "+now=" + root.calNow
+                                  + (root.calState.length > 0 ? "+state=" + root.calState : "");
         }
     }
 

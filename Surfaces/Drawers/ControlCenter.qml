@@ -133,10 +133,38 @@ FocusScope {
     ///
     /// One tile and not the grid: the grid is mostly unlit surface, so its mean
     /// is the panel's fill again and measuring dark ink against it reads 1.9:1
-    /// — a number about the tiles the ink is *not* on. Claimed by the first lit
-    /// delegate to complete, which is the first in `tileOrder` because the
-    /// repeater builds in order.
+    /// — a number about the tiles the ink is *not* on.
+    ///
+    /// Which tile is `litTileId`'s decision, and the delegate holding that id
+    /// hands itself over. It used to be whichever lit delegate completed
+    /// first, claimed in a `Component.onCompleted` — which runs once, so the
+    /// answer was frozen at whatever was lit when the panel opened, and stayed
+    /// null on a panel that lit its first tile a moment later. #195 is where
+    /// that was noticed; the claim is a binding now, so it follows the state.
     property Item litTileItem: null
+
+    /// Called by a tile delegate whose claim on `litTileId` just changed, and
+    /// once for each as it is built.
+    ///
+    /// The release is conditional on still being the holder, which is what
+    /// makes the two handlers order-independent: when the lit tile moves from
+    /// one delegate to another, the loser either releases before the winner
+    /// claims or finds the claim already taken and leaves it alone.
+    ///
+    /// A delegate that is *destroyed* while holding the claim needs no release
+    /// and gets none: `litTileItem` is a typed `Item` property, so QML nulls
+    /// it when the object behind it goes. That is why there is no
+    /// `onItemRemoved` next to the `onItemAdded` below.
+    ///
+    /// `var` and not `Item`, deliberately: what this reads is `claimsLit`, a
+    /// property of the delegate rather than of `Item`, so the honest type is
+    /// the one that does not promise otherwise.
+    function claimLitTile(item: var): void {
+        if (item.claimsLit)
+            root.litTileItem = item;
+        else if (root.litTileItem === item)
+            root.litTileItem = null;
+    }
 
     // --- the machine, as one object ------------------------------------------
     //
@@ -185,16 +213,20 @@ FocusScope {
                    timeRemaining: Power.timeRemaining }
     })
 
-    readonly property var tiles: root.policy.tiles(root.facts)
-    readonly property var tileRows: root.policy.rows(root.tiles)
     readonly property string batteryLine: root.policy.batteryLine(root.facts.battery)
 
-    // --- the slider model, latched (#192) ------------------------------------
+    // --- the two Repeater models, latched (#192, #195) -----------------------
     //
-    // Everything else here is bound straight off `facts`, and for the grid that
-    // is fine. For the sliders it was the bug: `facts` is a new object on every
-    // service tick, so `policy.sliders(facts)` was a new array of new rows on
-    // every tick, and a JS array with a new identity is a model *reset* — every
+    // Everything else here is bound straight off `facts`, and for a label or a
+    // colour that is fine. Neither `Repeater` may be fed that way: both are
+    // latched, the sliders since #192 and the grid since #195. What each latch
+    // is *for* differs, and the tile one says so below rather than borrowing
+    // this account.
+    //
+    // The sliders first, because they are where it was visible. `facts` is a
+    // new object on every service tick, so `policy.sliders(facts)` was a new
+    // array of new rows on every tick, and a JS array with a new identity is a
+    // model *reset* — every
     // delegate destroyed and re-created. A re-created ControlSlider starts with
     // a zero-width fill, and its `Behavior` does not run during creation, so
     // the first layout pass afterwards animates the fill from empty to the
@@ -226,18 +258,92 @@ FocusScope {
                    + (next.length > 0 ? next.join(", ") : "(none)"));
     }
 
-    onFactsChanged: root.refreshSliderIds()
+    // The grid, latched the same way (#195), and the ticket's account of why
+    // is worth correcting where it is written down. Measured on
+    // tools/drawer-harness.sh: reassigning a `Repeater` a same-length JS array
+    // updates the delegates in place — eight reassignments produced no extra
+    // `ControlTile` construction — so the grid was *not* rebuilding ten tiles
+    // a tick, and the fade was not snapping. What was actually wrong is the
+    // opposite of a rebuild, and both halves of it are fixed here:
+    //
+    // - `litTileItem` was claimed in a `Component.onCompleted` that ran once
+    //   and was never revisited, so the tile #79's contrast floor is measured
+    //   on was whichever one happened to be lit when the panel opened, frozen.
+    // - `rows(tiles(facts))` read `tileOrder` and `columns` one call deep, so
+    //   neither reached the binding (#50): #55's reorder only arrived on the
+    //   next service tick, and a column-count edit arrived never.
+    //
+    // The latch is still the right shape for it, and not only for consistency
+    // with the sliders: delegates surviving a same-length reassignment is an
+    // undocumented property of QQmlDelegateModel rather than a promise, and a
+    // model that is reassigned only when it actually changed does not need it.
+    //
+    // The cost went the *wrong* way and the ticket expected the opposite, so
+    // it is written down rather than left to be discovered. A tick used to
+    // resolve the grid once, in `tiles()`. It now resolves it three times: once
+    // in `refreshTileIds` to latch the ids, once per delegate in `tileRow`, and
+    // once more in `firstLitId` — which alone is cheap, since it stops at the
+    // first lit tile and that is usually the first one. Roughly two extra
+    // walks of ten small objects, paid only while the panel is open, which is
+    // why it is not an idle-budget (#22 §5) regression: DrawerSlot.qml builds
+    // the panel on open and drops it on close, so a shut drawer walks nothing.
+    // Nothing here measured it beyond that reasoning.
+    ///
+    /// `null` until the first latch, then a list, for `sliderIds`' reason: a
+    /// grid the user emptied from the Control Center tab latches `[]`, and
+    /// that has to be distinguishable from "not latched yet".
+    property var tileIds: null
 
-    // The latch's *other* input, and it is not optional. `sliders()` reads
-    // `policy.sliderOrder`, which is #55's setting — bound to
-    // `Config.values.controlCenter.sliders`, so the Control Center tab can
-    // reorder the sliders or take one out. Before the latch, that arrived on
-    // its own because the model was bound straight to `sliders()`; now nothing
-    // recomputes unless something asks, and a reorder that waited for the next
-    // service tick to appear would be a settings edit that looks ignored.
+    /// The latched ids in rows of `columns`. Chunked here rather than in the
+    /// `Repeater`, so a row's array identity is as stable as the id list is —
+    /// the outer `Repeater` resets when this changes, and a fresh chunking on
+    /// every tick would rebuild the rows even with the ids held still.
+    ///
+    /// `columns` is passed rather than left to `rows()` to read off the
+    /// policy: it is #55's setting, and a dependency read a call deep does not
+    /// reliably reach a binding (#50). Named here, a column count edited on
+    /// the Control Center tab re-chunks the grid.
+    readonly property var tileIdRows:
+        root.policy.rows(root.tileIds ?? [], root.policy.columns)
+
+    /// The tile the contrast floor is measured on, decided rather than raced
+    /// for; see `litTileItem`.
+    readonly property string litTileId:
+        root.policy.firstLitId(root.tileIds ?? [], root.facts)
+
+    // Two latches of the same eight lines, and that is the ceiling: a third
+    // would be the point to give the shape a name rather than a third copy.
+    // Kept apart for now because each logs its own line and seam 2 asserts on
+    // them separately — merging them would either log one line for two models
+    // or take a name and a format string to log two.
+    function refreshTileIds(): void {
+        const next = root.policy.tileIds(root.facts);
+        if (root.tileIds !== null && root.policy.sameIds(root.tileIds, next))
+            return;
+        root.tileIds = next;
+        // Seam 2's line, and the same claim as the sliders': drive a toggle
+        // and this must not repeat.
+        Logger.log("control-centre", "tile set: "
+                   + (next.length > 0 ? next.join(", ") : "(none)"));
+    }
+
+    onFactsChanged: {
+        root.refreshSliderIds();
+        root.refreshTileIds();
+    }
+
+    // The latches' *other* input, and it is not optional. `sliders()` reads
+    // `policy.sliderOrder` and `tiles()` reads `policy.tileOrder`, which are
+    // #55's settings — bound to `Config.values.controlCenter.*`, so the
+    // Control Center tab can reorder either list or take an entry out. Before
+    // the latches, that arrived on its own because each model was bound
+    // straight to its function; now nothing recomputes unless something asks,
+    // and a reorder that waited for the next service tick to appear would be a
+    // settings edit that looks ignored.
     Connections {
         target: root.policy
         function onSliderOrderChanged(): void { root.refreshSliderIds(); }
+        function onTileOrderChanged(): void { root.refreshTileIds(); }
     }
 
     // --- what a press does ---------------------------------------------------
@@ -366,7 +472,7 @@ FocusScope {
                 spacing: Theme.space2
 
                 Repeater {
-                    model: root.tileRows
+                    model: root.tileIdRows
 
                     RowLayout {
                         required property var modelData
@@ -377,30 +483,68 @@ FocusScope {
                         Repeater {
                             model: parent.modelData
 
+                            // The claim on `litTileItem`, made once per
+                            // delegate as it appears. A delegate cannot make
+                            // it from a `Component.onCompleted` of its own —
+                            // ControlTile.qml already declares one for its
+                            // seam-2 line, and a second at the use site is the
+                            // same attached handler written twice.
+                            onItemAdded: (index, item) => root.claimLitTile(item)
+
                             ControlTile {
                                 id: tile
 
-                                required property var modelData
+                                // The id, not the row: see `tileIds` above.
+                                // The row is a binding of this delegate's own,
+                                // so a toggle flipping reaches it without the
+                                // model moving and the `Behavior on color`
+                                // gets to run.
+                                //
+                                // `root.facts` is read here, in the binding,
+                                // and not inside a function this calls — #50
+                                // measured that a binding does not reliably
+                                // pick up a dependency read one call deep, and
+                                // a tile that captured nothing would sit lit
+                                // or unlit at whatever it was built with,
+                                // which is this bug wearing the opposite face.
+                                required property string modelData
+                                readonly property var row:
+                                    root.policy.tileRow(modelData, root.facts)
+
+                                /// Whether this delegate is the one the
+                                /// contrast floor is measured on.
+                                readonly property bool claimsLit:
+                                    root.litTileId === tile.modelData
+                                onClaimsLitChanged: root.claimLitTile(tile)
 
                                 Layout.fillWidth: true
-                                model: modelData
+                                // A tile whose hardware went away is a
+                                // delegate on its way out — the latch drops it
+                                // in the same `factsChanged`. Hidden rather
+                                // than drawn, because the placeholder has no
+                                // icon and no label.
+                                //
+                                // Hiding it in a `RowLayout` takes its slot
+                                // away too, so its neighbours stretch for that
+                                // turn rather than leaving a gap. That is the
+                                // right way round: the gap is what a tile
+                                // still there would look like, and this one is
+                                // not. It is at most one frame either way —
+                                // whether the model reassignment lands before
+                                // or after this binding is not ordered.
+                                visible: tile.row.present
+                                model: tile.row
 
-                                onActivated: ControlCenterActions.press(modelData.id)
+                                onActivated: ControlCenterActions.press(tile.modelData)
                                 // The chevron, on the three tiles that are a
                                 // switch and a door at once. The wallpaper tile
                                 // raises this from its whole body instead, and
                                 // `press` routes that one — one path, so a tile
                                 // that is only a door still logs the press its
                                 // eight neighbours do.
-                                onDrillRequested: modelData.doorOnly
-                                    ? ControlCenterActions.press(modelData.id)
-                                    : ControlCenterActions.drill(modelData.drillIn)
-
-                                // For tools/capture-harness.sh only; see
-                                // `litTileItem` above.
-                                Component.onCompleted:
-                                    if (tile.lit && root.litTileItem === null)
-                                        root.litTileItem = tile;
+                                onDrillRequested: tile.row.doorOnly
+                                    ? ControlCenterActions.press(tile.modelData)
+                                    : ControlCenterActions.drill(tile.row.drillIn)
                             }
                         }
 
@@ -688,13 +832,15 @@ FocusScope {
         // moment the drawer appears is the one that mattered.
         Backlight.watch();
         // A backstop, not the usual path: `facts` evaluating its binding
-        // during creation normally fires `onFactsChanged` and fills the model
-        // before this runs. `refreshSliderIds` reassigns nothing when the set
-        // has not moved, so calling it twice costs a comparison and guarantees
-        // the panel never completes with an empty slider column.
+        // during creation normally fires `onFactsChanged` and fills both
+        // models before this runs. Neither refresh reassigns anything when its
+        // set has not moved, so calling them twice costs a comparison each and
+        // guarantees the panel never completes with an empty column or an
+        // empty grid.
         root.refreshSliderIds();
+        root.refreshTileIds();
         Logger.log("control-centre",
-            root.tiles.length + " tile(s), "
+            (root.tileIds ?? []).length + " tile(s), "
             + (root.sliderIds ?? []).length + " slider(s)");
     }
 }

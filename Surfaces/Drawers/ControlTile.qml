@@ -57,6 +57,21 @@ Rectangle {
 
     readonly property bool lit: tile.model.on === true
 
+    // This tile being built, once (#195). The grid's `Repeater` is latched to
+    // the *identities* of the tiles rather than to their state, and this is
+    // each delegate saying it appeared — tools/drawer-harness.sh asserts the
+    // line at panel open and its silence across a service sweep.
+    //
+    // The silence is the weaker half of that pair and the harness says so:
+    // measured there, reassigning a same-length model updates delegates in
+    // place rather than re-creating them, so an unlatched grid is silent here
+    // too. The line earns its keep at panel open and against a model whose
+    // *length* thrashes, which does re-create — and a re-created tile snaps to
+    // its colour, because the `Behavior on color` below does not animate
+    // during component creation.
+    Component.onCompleted: Logger.log("control-centre",
+                                      "tile " + tile.model.id + " built")
+
     // Tall enough for the glyph, a two-line label and the detail — a fixed
     // height rather than an implicit one, because nine tiles that each sized
     // themselves would make a grid with three different row heights in it.

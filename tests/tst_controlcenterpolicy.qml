@@ -442,6 +442,154 @@ TestCase {
         compare(policy.sliderIds(facts), []);
     }
 
+    // --- the tile model's identity (#195) ------------------------------------
+    //
+    // The grid's model was `rows(tiles(facts))` — a new array of new rows
+    // every service tick. The surface now latches `tileIds` through `sameIds`
+    // the way it latches the sliders, for the reasons written next to the
+    // latch itself; what seam 1 owns is the decision underneath: which facts
+    // move the id list, and which — the ones that arrive on every tick — must
+    // not, because a list that moved would reassign the model for nothing.
+
+    function test_the_tile_id_list_is_the_grid_in_order() {
+        compare(policy.tileIds(fullFacts()),
+                ["wifi", "bluetooth", "dnd", "nightlight", "keepawake",
+                 "mode", "powerprofile", "vpn", "wallpaper", "recording"]);
+    }
+
+    function test_a_toggle_flipping_does_not_change_the_tile_id_list() {
+        // The load-bearing one. Every fact below moves on an ordinary tick,
+        // and none of them may reassign the model — a reassignment is ten
+        // delegates rebuilt and a fade that never runs.
+        const before = policy.tileIds(fullFacts());
+        const flipped = fullFacts();
+        flipped.wifi.on = false;
+        flipped.dnd.on = true;
+        flipped.dark = false;
+        flipped.vpn.on = true;
+        verify(policy.sameIds(before, policy.tileIds(flipped)));
+        const labelled = fullFacts();
+        labelled.wifi.label = "OTHERNET";
+        labelled.bluetooth.label = "2 devices";
+        labelled.powerprofile.profile = "performance";
+        verify(policy.sameIds(before, policy.tileIds(labelled)));
+        // The one that fires once a second while recording, which is where
+        // #195 was measured.
+        const ticking = fullFacts();
+        ticking.recording.on = true;
+        ticking.recording.detail = "GPU · 00:07";
+        verify(policy.sameIds(before, policy.tileIds(ticking)));
+    }
+
+    function test_hardware_arriving_or_going_does_change_the_tile_id_list() {
+        const full = policy.tileIds(fullFacts());
+        const noRadio = fullFacts();
+        noRadio.bluetooth.present = false;
+        verify(!policy.sameIds(full, policy.tileIds(noRadio)));
+        verify(policy.sameIds(full, policy.tileIds(fullFacts())));
+    }
+
+    function test_a_latched_tile_delegate_gets_its_own_row() {
+        const row = policy.tileRow("wifi", fullFacts());
+        compare(row.id, "wifi");
+        compare(row.on, true);
+        compare(row.label, "Wi-Fi");
+        compare(row.present, true);
+    }
+
+    function test_a_tile_whose_hardware_went_says_it_is_not_there() {
+        // The turn between the hardware going and the latch catching up. The
+        // surface hides this row rather than drawing it, so the placeholder
+        // only has to be safe to bind against, not to look like anything.
+        const facts = fullFacts();
+        facts.bluetooth.present = false;
+        const row = policy.tileRow("bluetooth", facts);
+        compare(row.present, false);
+        compare(row.id, "bluetooth");
+        compare(row.on, false);
+        compare(row.drillIn, "");
+        compare(row.doorOnly, false);
+    }
+
+    function test_a_tile_id_this_shell_never_heard_of_is_not_there_either() {
+        const row = policy.tileRow("nonesuch", fullFacts());
+        compare(row.present, false);
+        compare(row.id, "nonesuch");
+    }
+
+    function test_the_rows_chunk_ids_the_way_they_chunked_tiles() {
+        // `rows` is what the surface now chunks the *latched ids* with, so it
+        // has to be as generic as it looks.
+        compare(policy.rows(["a", "b", "c", "d"]), [["a", "b", "c"], ["d"]]);
+        compare(policy.rows([]), []);
+        compare(policy.rows(null), []);
+    }
+
+    function test_the_row_width_can_be_passed_in_and_defaults_to_columns() {
+        // The surface passes it so its binding names the dependency (#50); an
+        // omitted or nonsensical width is the setting, and never zero — a zero
+        // step is a loop that never ends.
+        compare(policy.rows(["a", "b", "c", "d"], 2),
+                [["a", "b"], ["c", "d"]]);
+        compare(policy.rows(["a", "b", "c", "d"], undefined),
+                [["a", "b", "c"], ["d"]]);
+        compare(policy.rows(["a", "b"], 0), [["a"], ["b"]]);
+    }
+
+    // --- which tile is the lit one (#79, #195) -------------------------------
+    //
+    // tools/capture-harness.sh measures the contrast of `bgBase` ink on an
+    // `accentDeep` fill, a pairing that exists nowhere in the shell but a lit
+    // tile, and it needs one lit delegate to measure. That used to be "the
+    // first lit tile to finish building" — claimed in a `Component.onCompleted`
+    // that ran once, so a panel that lit a tile a moment later kept measuring
+    // whatever was lit when it opened, or nothing. So the choice is a decision
+    // now, and it lives here: first in the order, not first to complete.
+
+    function litId(facts) {
+        return policy.firstLitId(policy.tileIds(facts), facts);
+    }
+
+    function test_the_lit_tile_is_the_first_one_in_order_that_is_on() {
+        compare(litId(fullFacts()), "wifi");
+    }
+
+    function test_the_lit_tile_is_the_first_of_the_ids_it_was_given() {
+        // The surface hands over its *latched* ids, so a reordered grid moves
+        // the measured tile with it rather than reporting `tileOrder`'s idea.
+        const facts = fullFacts();
+        compare(policy.firstLitId(["dnd", "wifi"], facts), "wifi");
+        compare(policy.firstLitId([], facts), "");
+        compare(policy.firstLitId(null, facts), "");
+    }
+
+    function test_the_lit_tile_moves_along_the_order_as_toggles_flip() {
+        const facts = fullFacts();
+        facts.wifi.on = false;
+        compare(litId(facts), "bluetooth");
+        facts.bluetooth.on = false;
+        facts.dnd.on = true;
+        compare(litId(facts), "dnd");
+        // Further down the order, and lit by a fact that is not a boolean:
+        // `mode` is on in *light* mode, and `powerprofile` on anything but
+        // balanced.
+        facts.dnd.on = false;
+        facts.powerprofile.profile = "performance";
+        compare(litId(facts), "powerprofile");
+        facts.dark = false;
+        compare(litId(facts), "mode");
+    }
+
+    function test_a_panel_with_nothing_lit_has_no_lit_tile() {
+        // Every tile off is a real state — a dark-mode laptop on balanced
+        // power with both radios down — and the harness has to be told there
+        // is nothing to measure rather than handed the first tile.
+        const facts = fullFacts();
+        facts.wifi.on = false;
+        facts.bluetooth.on = false;
+        compare(litId(facts), "");
+    }
+
     // --- moving a slider -----------------------------------------------------
 
     function test_a_slider_position_is_a_whole_percent_within_range() {

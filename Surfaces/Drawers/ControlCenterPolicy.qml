@@ -116,15 +116,80 @@ QtObject {
         return null;
     }
 
-    /// The tiles chunked into rows of `columns`. A short last row is short
-    /// rather than padded — the layout left-aligns it, and a padded row is a
-    /// row with an invisible pressable hole in it.
-    function rows(list: var): var {
+    /// A list chunked into rows of `columns` — the tiles, or since #195 the
+    /// latched tile *ids*. A short last row is short rather than padded: the
+    /// layout left-aligns it, and a padded row is a row with an invisible
+    /// pressable hole in it.
+    ///
+    /// `width` overrides `columns` and exists for one caller: the surface's
+    /// row binding, which has to name the column count as a dependency of its
+    /// own rather than have it read a call deep (#50). Omit it everywhere
+    /// else.
+    function rows(list: var, width: var): var {
         const flat = list ?? [];
+        const columns = Math.max(1, width ?? policy.columns);
         const out = [];
-        for (let i = 0; i < flat.length; i += policy.columns)
-            out.push(flat.slice(i, i + policy.columns));
+        for (let i = 0; i < flat.length; i += columns)
+            out.push(flat.slice(i, i + columns));
         return out;
+    }
+
+    // --- the grid's identity, apart from its contents (#195) -----------------
+    //
+    // The three below are the tile half of what `sliderIds` / `sliderRow` /
+    // `sameIds` do for the sliders (#192): the surface's `Repeater` is given a
+    // model whose identity survives a service tick, and each delegate binds
+    // its own row. Why that is worth doing — and which of the ticket's stated
+    // consequences turned out to be the real one — is in ControlCenter.qml
+    // next to the latch, where it can be read against the code it explains.
+    //
+    // `tiles()` above is still the whole grid resolved in one go, and is what
+    // anything not feeding a `Repeater` should keep using.
+
+    /// The ids of `tiles()`, in the same order: the grid this machine has,
+    /// carrying nothing that changes when a toggle flips.
+    function tileIds(facts: var): var {
+        return policy.tiles(facts).map(row => row.id);
+    }
+
+    /// One tile for a latched id, or a placeholder that says it is not there.
+    ///
+    /// The placeholder is for the turn between hardware going away and the
+    /// latch catching up — the surface hides that row. It is also what an id
+    /// from a newer shell's config resolves to, which `tiles()` simply drops.
+    function tileRow(id: string, facts: var): var {
+        const row = policy.tile(id, facts ?? ({}));
+        if (row !== null)
+            return row;
+        const gone = policy.makeTile(id, false, "", "", "");
+        gone.drillIn = "";
+        gone.doorOnly = false;
+        gone.present = false;
+        return gone;
+    }
+
+    /// The id of the first lit tile among `ids`, or `""` when none is.
+    ///
+    /// tools/capture-harness.sh measures that one tile for #79 — `bgBase` ink
+    /// on an `accentDeep` fill is a pairing that exists nowhere else in the
+    /// shell. It used to be whichever lit delegate finished building first,
+    /// decided in a `Component.onCompleted` that ran once and left the answer
+    /// frozen at whatever was lit when the panel opened. Which tile it is has
+    /// to be a decision that can be re-made without rebuilding anything, so it
+    /// is one, and it is here.
+    ///
+    /// The ids are a parameter and not read off `tileOrder` here, so that the
+    /// surface's binding names both of its dependencies — #50 measured that a
+    /// binding does not reliably pick up one read a call deep, and a lit tile
+    /// that stopped tracking a reorder would be a contrast floor measured
+    /// against the wrong tile with nothing to show for it.
+    function firstLitId(ids: var, facts: var): string {
+        for (const id of (ids ?? [])) {
+            const row = policy.tile(id, facts ?? ({}));
+            if (row !== null && row.on === true)
+                return id;
+        }
+        return "";
     }
 
     // --- one tile at a time --------------------------------------------------
@@ -144,9 +209,13 @@ QtObject {
     /// it.
     function makeTile(id: string, on: bool, icon: string, label: string,
                       detail: string): var {
+        // `present` is on every row rather than bolted onto the ones that
+        // need it (#195): a tile that came back from `tileRow` with the field
+        // missing and one that came back with it `false` would read the same
+        // to a careless caller, and only one of them is a tile.
         return { id: id, on: on === true, icon: icon, label: label,
                  detail: detail, drillIn: policy.drill.panelFor(id),
-                 doorOnly: policy.drill.doorOnly(id) };
+                 doorOnly: policy.drill.doorOnly(id), present: true };
     }
 
     function wifiTile(wifi: var): var {
@@ -329,9 +398,17 @@ QtObject {
 
     /// Whether two id lists name the same things in the same order.
     ///
-    /// The latch above needs this because it cannot compare references: every
-    /// call to `sliderIds()` returns a fresh array whatever is in it, so
-    /// "did the set change" has to be asked of the contents.
+    /// Both latches above need this because they cannot compare references:
+    /// every call to `sliderIds()` or `tileIds()` returns a fresh array
+    /// whatever is in it, so "did the set change" has to be asked of the
+    /// contents.
+    ///
+    /// In order, and that is the point rather than an implementation detail: a
+    /// `Repeater` model reordered *is* a different model and has to reset, so
+    /// #55's reordering must reach the surface. `DrawerPolicy.sameScreens`
+    /// looks like this and sorts first, because a screen list is a set;
+    /// docs/adr/0003-list-identity-loops-stay-put.md is why they are not one
+    /// function.
     function sameIds(a: var, b: var): bool {
         const left = a ?? [];
         const right = b ?? [];

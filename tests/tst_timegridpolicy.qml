@@ -422,4 +422,40 @@ TestCase {
         compare(r.y, 9 * 96);
         compare(r.h, 1.5 * 96);
     }
+
+    // --- the gutter label the live time overprints -----------------------------
+
+    function test_hourLabelHidden_is_a_distance_not_an_hour() {
+        // The case from the first capture of the week view, at `hourRow: 56`
+        // and 13:40. The now-line is at 765.3.
+        const now = grid.nowLineY("2026-08-18T13:40", 56);
+        fuzzyCompare(now, 13 * 56 + 40 * 56 / 60, 0.01);
+
+        // 14:00 is 18.7px below it and is the label actually being printed
+        // over — it goes.
+        verify(grid.hourLabelHidden(14 * 56, now));
+
+        // 13:00 is the *current hour* and is 37px away, with nothing near it.
+        // Hiding it would blank a legible label and leave the illegible one.
+        verify(!grid.hourLabelHidden(13 * 56, now));
+
+        verify(!grid.hourLabelHidden(12 * 56, now));
+        verify(!grid.hourLabelHidden(15 * 56, now));
+    }
+
+    function test_hourLabelHidden_hides_nothing_without_a_now_line() {
+        // `nowLineY` answers -1 for a clock this view cannot place, and every
+        // label has to survive that.
+        for (let hour = 1; hour <= 23; hour++)
+            verify(!grid.hourLabelHidden(hour * 56, -1));
+    }
+
+    function test_hourLabelHidden_gap_is_symmetric_and_overridable() {
+        compare(grid.labelGap, 20);
+        verify(grid.hourLabelHidden(100, 119));
+        verify(grid.hourLabelHidden(100, 81));
+        verify(!grid.hourLabelHidden(100, 120));
+        verify(!grid.hourLabelHidden(100, 80));
+        verify(!grid.hourLabelHidden(100, 119, 5));
+    }
 }

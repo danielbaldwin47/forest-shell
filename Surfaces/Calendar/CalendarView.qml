@@ -27,17 +27,27 @@
 //
 // **If a layer variant is ever wanted, it is `OnDemand`, never `Exclusive`.**
 //
-// ## What this file is now
+// ## What this file is
 //
-// The window's chrome and its state, with the body still a placeholder: the
-// views land in later pieces, and everything they need — which view, which day,
-// what time it is pretending to be, which event is selected — is already a
-// property here so they can be dropped in without restructuring this file or
-// the harnesses that drive it.
+// The window's chrome and its state: a sidebar, a toolbar, and whichever view
+// the toolbar last asked for. It holds no calendar arithmetic of its own —
+// which day the chevrons land on is `KeyNavPolicy.shiftPeriod`, what the title
+// says is `CalendarFormat`, and what the grid draws is `WeekView` reading the
+// two grid policies. This file decides where those things sit and nothing else.
+//
+// ## Why the verbs leave as signals
+//
+// The controls do not call `CalendarWindow` directly, even though that is where
+// every one of them ends up. The singleton builds this view, so a view that
+// reached back into it would be a cycle — and, more usefully, it would be a
+// cycle the capture harness cannot break: `tools/capture-harness.sh` builds
+// `CalendarView` on its own, with no singleton anywhere, precisely so a picture
+// can be posed without a shell. Signals out, properties in.
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Core
+import qs.Services.Calendar
 
 FloatingWindow {
     id: window
@@ -66,6 +76,48 @@ FloatingWindow {
     /// the window owns tearing it down; this only reports it, and the reason is
     /// what the log line at the other end says.
     signal closeRequested(string reason)
+
+    /// What the chrome asked for. `CalendarWindow` owns all three — see the
+    /// header for why they leave as signals rather than as calls.
+    signal viewRequested(string name)
+    signal dateRequested(string iso)
+    signal todayRequested
+    signal eventSelected(string id)
+
+    /// The wall clock the now-line and the today-circle are drawn from,
+    /// `"2026-08-18T13:40"`.
+    ///
+    /// `nowOverride` wins outright when it is set. A picture whose now-line is
+    /// frozen at 13:40 on the 18th but whose today-circle sits on whatever day
+    /// the machine happens to be running is two clocks in one window, and the
+    /// harness would have posed half a surface.
+    ///
+    /// Otherwise it is `Core/Time.qml`, which ticks once a minute for the whole
+    /// shell — the now-line moves 0.93px a minute, so a per-minute tick is
+    /// exactly the resolution it can show.
+    readonly property string nowStamp: {
+        if (window.nowOverride.length > 0)
+            return window.nowOverride;
+        const now = Time.now;
+        return window.keyNav.time.formatStamp(
+            window.keyNav.time.dayIso(now.getFullYear(), now.getMonth() + 1, now.getDate()),
+            now.getHours() * 60 + now.getMinutes());
+    }
+
+    readonly property string todayIso: window.nowStamp.split("T")[0]
+
+    /// The locale's first weekday, `Locale.Sunday === 0` — the same source
+    /// `Surfaces/Drawers/Cards/CalendarCard.qml` reads, so the shell's two
+    /// calendars start their weeks on the same day.
+    readonly property int firstDay: Qt.locale().firstDayOfWeek
+
+    /// A 24-hour clock or not, resolved once for the whole shell in
+    /// `Core/TimeFormat.qml`. Read here and handed down, so one calendar cannot
+    /// show two clocks.
+    readonly property bool use24: TimeFormat.rule.is24Hour(
+        TimeFormat.preference, Qt.locale().timeFormat(Locale.ShortFormat))
+
+    property KeyNavPolicy keyNav: KeyNavPolicy {}
 
     title: "forest-shell — calendar"
     // Stated rather than assumed: the window exists only while it is open, so
@@ -104,48 +156,91 @@ FloatingWindow {
 
         // --- the body ---------------------------------------------------------
         //
-        // A placeholder, and deliberately one that names its own state: what it
-        // draws is exactly what the harnesses assert over IPC, so a capture of
-        // this window and a line in the log say the same thing about it. The
-        // grid replaces this wholesale in the next piece.
-        Column {
-            anchors.centerIn: parent
-            spacing: Tokens.space3
+        // Sidebar down the left at its full height, toolbar across what is
+        // left, grid under it. The sidebar is full height rather than starting
+        // under the toolbar because the toolbar's title names the *grid's*
+        // period, and a title that spanned the sidebar too would look like it
+        // named both.
 
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: window.view + " view"
-                color: Theme.textPrimary
-                font.family: Tokens.fontUi
-                font.pointSize: Tokens.pt(22)
-                font.weight: Tokens.weightMedium
-            }
+        Rectangle {
+            id: sidebar
 
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: window.anchorDate
-                color: Theme.textSecondary
-                font.family: Tokens.fontUi
-                font.pointSize: Tokens.pt(15)
-            }
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: CalendarTokens.sidebarW
+            color: Theme.surface
 
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                visible: window.nowOverride.length > 0
-                text: "now " + window.nowOverride
-                color: Theme.textMuted
-                font.family: Tokens.fontMono
-                font.pointSize: Tokens.pt(12)
-            }
+            // The mini-month, the calendar list and the "Add calendar" row land
+            // here in a later piece. Empty is the honest state for now: a
+            // sidebar drawn with placeholder rows would be a picture of
+            // something that does not exist.
 
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                visible: window.selectedId.length > 0
-                text: "selected " + window.selectedId
-                color: Theme.textMuted
-                font.family: Tokens.fontMono
-                font.pointSize: Tokens.pt(12)
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 1
+                color: Theme.borderSubtle
             }
+        }
+
+        CalendarToolbar {
+            id: toolbar
+
+            anchors.left: sidebar.right
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: CalendarTokens.toolbarH
+
+            view: window.view
+            anchorDate: window.anchorDate
+            todayIso: window.todayIso
+            firstDay: window.firstDay
+
+            onViewRequested: name => window.viewRequested(name)
+            onTodayRequested: window.todayRequested()
+            onStepRequested: delta => {
+                const next = window.keyNav.shiftPeriod(window.view, window.anchorDate, delta);
+                if (next)
+                    window.dateRequested(next);
+            }
+        }
+
+        /// The grid. `dayCount` is the only thing that separates the day view
+        /// from the week view — see `WeekView.qml`'s header — so both are this
+        /// one instance, and stepping between them is a property change rather
+        /// than a component swap that would drop the scroll position.
+        WeekView {
+            id: grid
+
+            anchors.left: sidebar.right
+            anchors.right: parent.right
+            anchors.top: toolbar.bottom
+            anchors.bottom: parent.bottom
+            visible: window.view !== "month"
+
+            dayCount: window.view === "day" ? 1 : 7
+            anchorDate: window.anchorDate
+            firstDay: window.firstDay
+            todayIso: window.todayIso
+            nowStamp: window.nowStamp
+            events: CalendarStore.events
+            selectedId: window.selectedId
+            use24: window.use24
+
+            onEventActivated: id => window.eventSelected(id)
+        }
+
+        /// The month grid is a later piece. Saying so out loud beats an empty
+        /// panel that reads as a grid that failed to draw.
+        Text {
+            anchors.centerIn: grid
+            visible: window.view === "month"
+            text: "month view — not built yet"
+            color: Theme.textMuted
+            font.family: Theme.fontUi
+            font.pointSize: Theme.pt(15)
         }
     }
 }

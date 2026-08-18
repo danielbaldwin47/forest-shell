@@ -284,4 +284,78 @@ QtObject {
         }
         return out;
     }
+
+    // --- which row an event belongs on ----------------------------------------
+
+    /// True for an event that belongs in the all-day band rather than in the
+    /// time grid.
+    ///
+    /// Two kinds qualify and the second is the one that is easy to miss. An
+    /// event flagged `allDay` obviously has no place on a 24-hour column. But
+    /// so does a *timed* event that runs across days — the fixture's
+    /// "Nordic QML Days", 09:00 Thursday to 17:00 Saturday, is drawn in the
+    /// grid as three disconnected blocks that say nothing about it being one
+    /// conference. A bar across three columns says exactly that.
+    ///
+    /// The threshold is "touches more than one day", not "lasts more than 24
+    /// hours": a 23:00–01:00 event touches two days and is still an evening,
+    /// so `spansDays` — which counts calendar days and treats an exclusive
+    /// midnight end as the day before — is the function asked, not a duration.
+    function isBanded(event: var): bool {
+        if (!event)
+            return false;
+        if (event.allDay === true)
+            return true;
+        return policy.eventPolicy.spansDays(event) > 1;
+    }
+
+    /// The all-day band's events, in the order they were given.
+    function bandEvents(events: var): var {
+        return (events || []).filter(function (event) {
+            return policy.isBanded(event);
+        });
+    }
+
+    /// The time grid's events — everything the band did not take. Stated as its
+    /// own function rather than left to each caller's `!isBanded`, so the two
+    /// rows can never both claim an event or both drop it.
+    function gridEvents(events: var): var {
+        return (events || []).filter(function (event) {
+            return event && !policy.isBanded(event);
+        });
+    }
+
+    // --- how tall a chip may be -----------------------------------------------
+
+    /// At or under this many minutes a chip has no room for two lines.
+    ///
+    /// 30 and not 20: at `hourRow` 56 a half-hour chip is 28px tall, and two
+    /// lines of pt(12.5) and pt(11) with `space1` of top padding need 34. The
+    /// number is here rather than in the chip because it is the same question
+    /// the layout is already answering — how much room does this event get —
+    /// and because a threshold with no test is a threshold that drifts.
+    readonly property int compactMinutes: 30
+
+    /// Whether a chip of this many minutes collapses to one line, with its time
+    /// set inline after its title instead of under it.
+    function isCompact(minutes: real): bool {
+        return isFinite(minutes) && minutes <= policy.compactMinutes;
+    }
+
+    /// Under this many pixels of chip width, the time line is dropped and the
+    /// title gets the chip to itself.
+    ///
+    /// The number comes off the picture rather than out of the air. A
+    /// three-way overlap on a 1180px window gives each chip 41px, of which 19
+    /// is padding and the accent bar — and `"10 – 11:30a"` in 22px is `"1…"`,
+    /// which is not a time, is not a title, and is the only thing on the
+    /// second line. 92px is where `"10 – 11:30a"` stops eliding at pt(11).
+    readonly property int timeLineMinWidth: 92
+
+    /// Whether a chip this wide has room to say when it is as well as what it
+    /// is. A chip that cannot is not wrong — it is a chip in a busy hour, and
+    /// its neighbours' edges already say where it starts and stops.
+    function showsTimeLine(width: real): bool {
+        return isFinite(width) && width >= policy.timeLineMinWidth;
+    }
 }

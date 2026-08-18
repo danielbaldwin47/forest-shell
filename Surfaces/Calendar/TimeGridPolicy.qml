@@ -138,6 +138,27 @@ QtObject {
         return grid.minutesToY(minutes, hourHeight);
     }
 
+    /// How close an hour label may come to the live-time label before one of
+    /// them has to go. Two labels at pt(11) are ~15px tall, so 20 is one gap
+    /// between them plus a little air.
+    readonly property int labelGap: 20
+
+    /// Whether an hour label is suppressed because the live time is sitting on
+    /// top of it.
+    ///
+    /// **This is not "hide the current hour", which is what it looks like it
+    /// should be.** At 13:40 with `hourRow: 56` the now-line is 37px below the
+    /// 13:00 rule and 19px above the 14:00 one — so hiding *the current hour*
+    /// would blank a label nothing is near and leave the one actually being
+    /// overprinted in place. The question is a distance, so the rule is a
+    /// distance. `nowY < 0` — the clock is not in this view — hides nothing.
+    function hourLabelHidden(labelY: real, nowY: real, gap): bool {
+        if (!(nowY >= 0) || !isFinite(labelY))
+            return false;
+        const g = (gap === undefined || gap === null) ? grid.labelGap : gap;
+        return Math.abs(labelY - nowY) < g;
+    }
+
     // --- the horizontal axis --------------------------------------------------
 
     /// Saturday or Sunday. `false` for anything that is not a day.

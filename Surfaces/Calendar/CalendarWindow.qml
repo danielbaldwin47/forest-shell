@@ -156,6 +156,18 @@ Singleton {
                 // which — a window that vanished and a window that was
                 // dismissed look identical afterwards.
                 onCloseRequested: reason => root.close(reason)
+
+                // The toolbar's three verbs and the grid's one, arriving as
+                // signals rather than as calls into this singleton — the view
+                // is built here, so a view that reached back would be a cycle,
+                // and the capture harness builds the same view with no
+                // singleton anywhere. They land on exactly the functions IPC
+                // lands on, so a click and `qs ipc call calendar view month`
+                // are the same event and log the same line.
+                onViewRequested: name => root.setView(name)
+                onDateRequested: iso => root.goToDay(iso)
+                onTodayRequested: root.goToday()
+                onEventSelected: id => root.select(id)
             }
         }
     }

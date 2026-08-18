@@ -125,6 +125,33 @@ QtObject {
         return "";
     }
 
+    /// `title` split for the toolbar, which sets the two halves differently:
+    /// `{lead, year}` — `"August"` + `"2026"`, `"Aug 17 – 23"` + `"2026"`,
+    /// `"Tuesday, 18 August"` + `"2026"`.
+    ///
+    /// The toolbar sets `lead` in Newsreader and `year` in the UI face at
+    /// `textMuted`, which is the one place in the shell the display font is
+    /// used twice. Splitting here rather than there is the same argument
+    /// `dayHeader` makes: the view would otherwise have to take a string this
+    /// file just built and pull it apart again with a regex of its own, and two
+    /// regexes over one format is how a header ends up reading `"August 20"`.
+    ///
+    /// Only a *trailing* year is taken, and only when it is the last word. The
+    /// cross-year range `"Dec 29, 2025 – Jan 4, 2026"` therefore leaves its
+    /// first year where it is and lifts only the second — the lead reads
+    /// `"Dec 29, 2025 – Jan 4"`, which is exactly the week it names.
+    ///
+    /// An unrecognised view gives `{lead: "", year: ""}` rather than `null`, so
+    /// a toolbar binding onto `.lead` renders an empty title instead of
+    /// throwing on every frame.
+    function titleParts(view: string, anchorIso: string, firstDay: int): var {
+        const full = format.title(view, anchorIso, firstDay);
+        const match = /^(.*?)[,\s]*\s(\d{4})$/.exec(full);
+        if (!match)
+            return { "lead": full, "year": "" };
+        return { "lead": match[1], "year": match[2] };
+    }
+
     /// `"August 2026"`.
     function monthTitle(iso: string): string {
         const d = format.time.parseDay(iso);

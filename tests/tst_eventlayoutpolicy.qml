@@ -656,4 +656,79 @@ TestCase {
             }
         }
     }
+
+    // --- which row an event belongs on ----------------------------------------
+
+    function test_isBanded_takes_allday_and_multiday() {
+        // A meeting inside one day stays in the grid.
+        verify(!layoutPolicy.isBanded(testCase.evt("a", "2026-08-18T10:00", "2026-08-18T11:30")));
+
+        // The flag is enough on its own.
+        const flagged = testCase.evt("b", "2026-08-19T00:00", "2026-08-20T00:00");
+        flagged.allDay = true;
+        verify(layoutPolicy.isBanded(flagged));
+
+        // And so is crossing days without it — the fixture's "Nordic QML Days",
+        // 09:00 Thursday to 17:00 Saturday, which the grid would draw as three
+        // unrelated blocks.
+        verify(layoutPolicy.isBanded(testCase.evt("c", "2026-08-20T09:00", "2026-08-22T17:00")));
+    }
+
+    function test_isBanded_leaves_an_evening_in_the_grid() {
+        // 23:00–01:00 touches two days and is still one evening. `spansDays`
+        // counts calendar days, so this is the case that says the threshold is
+        // days-touched and not hours-long.
+        compare(layoutPolicy.eventPolicy.spansDays(
+                    testCase.evt("d", "2026-08-18T23:00", "2026-08-19T01:00")), 2);
+        verify(layoutPolicy.isBanded(testCase.evt("d", "2026-08-18T23:00", "2026-08-19T01:00")));
+
+        // Whereas one ending exactly at midnight belongs to its own day alone.
+        verify(!layoutPolicy.isBanded(testCase.evt("e", "2026-08-18T22:00", "2026-08-19T00:00")));
+    }
+
+    function test_band_and_grid_partition_the_list() {
+        const timed = testCase.evt("a", "2026-08-18T10:00", "2026-08-18T11:30");
+        const long = testCase.evt("c", "2026-08-20T09:00", "2026-08-22T17:00");
+        const flagged = testCase.evt("b", "2026-08-19T00:00", "2026-08-20T00:00");
+        flagged.allDay = true;
+        const all = [timed, flagged, long];
+
+        compare(layoutPolicy.bandEvents(all).map(e => e.id), ["b", "c"]);
+        compare(layoutPolicy.gridEvents(all).map(e => e.id), ["a"]);
+
+        // The partition is the point: no event may appear on both rows or on
+        // neither, whatever the list holds.
+        compare(layoutPolicy.bandEvents(all).length + layoutPolicy.gridEvents(all).length,
+                all.length);
+        compare(layoutPolicy.bandEvents([]).length, 0);
+        compare(layoutPolicy.gridEvents(null).length, 0);
+    }
+
+    function test_isCompact_threshold() {
+        // 30 minutes is 28px at `hourRow: 56`, and two lines need 34.
+        compare(layoutPolicy.compactMinutes, 30);
+        verify(layoutPolicy.isCompact(15));
+        verify(layoutPolicy.isCompact(30));
+        verify(!layoutPolicy.isCompact(31));
+        verify(!layoutPolicy.isCompact(90));
+        // A duration that is not one must not silently collapse every chip.
+        verify(!layoutPolicy.isCompact(NaN));
+    }
+
+    function test_showsTimeLine_threshold() {
+        compare(layoutPolicy.timeLineMinWidth, 92);
+        verify(layoutPolicy.showsTimeLine(92));
+        verify(layoutPolicy.showsTimeLine(300));
+        verify(!layoutPolicy.showsTimeLine(91));
+
+        // The measured case: the fixture's three-way overlap on 2026-08-18, in
+        // a 1180px window with a 248px sidebar and a 56px gutter, gives each
+        // chip a third of a 125px column.
+        const columnW = (1180 - 248 - 56) / 7;
+        verify(!layoutPolicy.showsTimeLine(columnW / 3));
+        // And a day alone in its hour keeps its time.
+        verify(layoutPolicy.showsTimeLine(columnW));
+
+        verify(!layoutPolicy.showsTimeLine(NaN));
+    }
 }

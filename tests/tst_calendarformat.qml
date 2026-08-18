@@ -339,4 +339,48 @@ TestCase {
         compare(format.title("month", "2024-02-29", 1), "February 2024");
         compare(format.title("week", "2024-02-29", 1), "Feb 26 – Mar 3, 2024");
     }
+
+    // --- the toolbar's two faces ----------------------------------------------
+
+    function test_titleParts_lifts_the_trailing_year() {
+        compare(format.titleParts("month", "2026-08-18", 1),
+                { "lead": "August", "year": "2026" });
+        compare(format.titleParts("week", "2026-08-18", 1),
+                { "lead": "Aug 17 – 23", "year": "2026" });
+        compare(format.titleParts("day", "2026-08-18", 1),
+                { "lead": "Tuesday, August 18", "year": "2026" });
+    }
+
+    function test_titleParts_takes_only_the_last_year() {
+        // The cross-year week names two years and only the second is trailing.
+        // Lifting both would leave "Dec 29 – Jan 4", which is a week in no
+        // particular year and reads as a bug in the header rather than in the
+        // split.
+        compare(format.title("week", "2025-12-31", 1), "Dec 29, 2025 – Jan 4, 2026");
+        compare(format.titleParts("week", "2025-12-31", 1),
+                { "lead": "Dec 29, 2025 – Jan 4", "year": "2026" });
+    }
+
+    function test_titleParts_never_hands_back_undefined() {
+        // The toolbar binds straight onto `.lead`, once per frame. A `null`
+        // here is a TypeError on every repaint of the window.
+        compare(format.titleParts("fortnight", "2026-08-18", 1), { "lead": "", "year": "" });
+        compare(format.titleParts("week", "not-a-day", 1), { "lead": "", "year": "" });
+    }
+
+    function test_titleParts_rejoins_to_the_title() {
+        // The split may drop a separator but never a word: whatever comes back
+        // must still be the title `title()` built.
+        const views = ["day", "week", "month"];
+        const days = ["2026-08-18", "2026-01-01", "2025-12-31", "2024-02-29"];
+        for (let v = 0; v < views.length; v++) {
+            for (let d = 0; d < days.length; d++) {
+                const parts = format.titleParts(views[v], days[d], 1);
+                const full = format.title(views[v], days[d], 1);
+                verify(full.indexOf(parts.lead) === 0, views[v] + " " + days[d] + ": " + full);
+                verify(full.indexOf(parts.year) === full.length - parts.year.length,
+                       views[v] + " " + days[d] + ": " + full);
+            }
+        }
+    }
 }

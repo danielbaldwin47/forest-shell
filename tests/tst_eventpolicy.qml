@@ -411,4 +411,31 @@ TestCase {
         compare(e.guests.join(","), "mira");
         compare(policy.remove(list, "evt-1").length, 0);
     }
+
+    // --- recolour -------------------------------------------------------------
+
+    function test_recolour_pins_a_hue_by_name() {
+        const list = policy.recolour(testCase.week(), "evt-2", "Heather");
+        compare(policy.byId(list, "evt-2").colour, "heather");
+        // And nothing else moved.
+        compare(policy.byId(list, "evt-3").colour, "");
+    }
+
+    function test_recolour_with_nothing_hands_the_hue_back_to_the_hash() {
+        let list = policy.recolour(testCase.week(), "evt-2", "lake");
+        list = policy.recolour(list, "evt-2", "");
+        compare(policy.byId(list, "evt-2").colour, "");
+    }
+
+    function test_recolouring_an_event_that_is_not_there_changes_nothing() {
+        const before = testCase.week();
+        compare(testCase.ids(policy.recolour(before, "evt-99", "moss")),
+                testCase.ids(before));
+    }
+
+    function test_retitle_names_one_event_and_leaves_the_rest() {
+        const list = policy.retitle(testCase.week(), "evt-2", "Design review");
+        compare(policy.byId(list, "evt-2").title, "Design review");
+        compare(policy.byId(list, "evt-3").title, "evt-3");
+    }
 }

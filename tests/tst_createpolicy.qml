@@ -57,4 +57,55 @@ TestCase {
         // rare but must not land at NaN.
         compare(policy.startMinute("2026-08-18", "", testCase.nowMin, 15, 60), 9 * 60);
     }
+
+    // --- where the quick-create panel goes ------------------------------------
+
+    readonly property var chip: ({ "x": 300, "y": 200, "width": 120, "height": 84 })
+
+    function test_the_panel_sits_to_the_right_of_its_chip() {
+        const at = policy.popoverAnchor(testCase.chip, 320, 260, 1000, 700, 8, 8);
+        compare(at.x, 428);          // 300 + 120 + 8
+        compare(at.y, 200);          // aligned with the chip's own top edge
+        compare(at.flipped, false);
+    }
+
+    function test_a_chip_against_the_right_edge_flips_the_panel() {
+        // Saturday's column: 320 of panel plus both gaps will not fit to the
+        // right, and the whole panel does fit to the left, so it goes there
+        // rather than sliding back over the chip it names.
+        const at = policy.popoverAnchor({ "x": 820, "y": 100, "width": 120, "height": 84 },
+                                        320, 260, 1000, 700, 8, 8);
+        compare(at.x, 492);          // 820 - 8 - 320
+        compare(at.flipped, true);
+    }
+
+    function test_a_grid_too_narrow_for_either_side_clamps_instead() {
+        // 400px of view, 320 of panel: neither side fits, so it gives up on
+        // beside and stays on screen — the one case where it overlaps.
+        const at = policy.popoverAnchor({ "x": 200, "y": 40, "width": 100, "height": 60 },
+                                        320, 260, 400, 700, 8, 8);
+        compare(at.x, 72);           // 400 - 320 - 8
+        verify(at.x >= 8);
+    }
+
+    function test_a_chip_at_the_bottom_slides_the_panel_up_to_fit() {
+        const at = policy.popoverAnchor({ "x": 100, "y": 640, "width": 120, "height": 30 },
+                                        320, 260, 1000, 700, 8, 8);
+        compare(at.y, 432);          // 700 - 260 - 8
+    }
+
+    function test_a_panel_taller_than_the_view_still_starts_on_screen() {
+        // The margin wins over the clamp: a panel that cannot fit is pinned to
+        // the top rather than pushed off it by a negative maximum.
+        const at = policy.popoverAnchor(testCase.chip, 320, 900, 1000, 700, 8, 8);
+        compare(at.y, 8);
+    }
+
+    function test_the_gap_and_the_margin_may_both_be_left_out() {
+        // A caller mid-binding hands zeros; the panel must still be beside the
+        // chip and on screen rather than at NaN.
+        const at = policy.popoverAnchor(null, 320, 260, 1000, 700, -1, -1);
+        compare(at.x, 8);
+        compare(at.y, 8);
+    }
 }

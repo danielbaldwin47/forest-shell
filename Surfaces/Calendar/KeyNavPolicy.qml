@@ -299,6 +299,37 @@ QtObject {
         return "";
     }
 
+    /// The days a view has on screen, as `{from, to}` inclusive — the range
+    /// `Up`/`Down` walk, and the one the surface hands to
+    /// `EventPolicy.forRange`. `null` for a day that is not one.
+    ///
+    /// The month case is the **calendar month**, 1st to last, and deliberately
+    /// not the six-row grid: the grid's leading and trailing cells belong to
+    /// the months either side, and arrowing off the end of August into a chip
+    /// that is faintly greyed out because it is really September is a selection
+    /// nobody asked for. What is legible in the grid and what is navigable are
+    /// two different questions.
+    function visibleRange(view: string, anchorIso: string, firstDay: int): var {
+        const d = policy.time.parseDay(anchorIso);
+        if (!d)
+            return null;
+        switch (view) {
+        case "day":
+            return { "from": anchorIso, "to": anchorIso };
+        case "week": {
+            const start = policy.time.weekStart(anchorIso, firstDay);
+            return { "from": start, "to": policy.time.addDays(start, 6) };
+        }
+        case "month":
+            return {
+                "from": policy.time.dayIso(d.year, d.month, 1),
+                "to": policy.time.dayIso(d.year, d.month,
+                                         policy.time.daysInMonth(d.year, d.month))
+            };
+        }
+        return null;
+    }
+
     /// The id `delta` steps along `ids` from `current`, wrapping at both ends.
     /// `""` when the list is empty.
     ///
@@ -355,7 +386,56 @@ QtObject {
         ];
     }
 
-    /// What the command menu lists, as `{id, label, shortcut}`.
+    /// The same table gathered under its headings, `[{group, rows}]`, in the
+    /// order the groups first appear. A sheet that regrouped by hand would be a
+    /// second place the group names are written down.
+    function shortcutsGroups(): var {
+        const out = [];
+        const seen = ({});
+        const table = policy.shortcutsTable();
+        for (let i = 0; i < table.length; i++) {
+            const row = table[i];
+            const name = row.group || "";
+            if (seen[name] === undefined) {
+                seen[name] = out.length;
+                out.push({ "group": name, "rows": [] });
+            }
+            out[seen[name]].rows.push(row);
+        }
+        return out;
+    }
+
+    /// Those groups split into the sheet's two columns, `[left, right]`.
+    ///
+    /// Split by **printed height**, not by group count: a heading costs a row
+    /// like everything else, so a 3-row group and a 4-row group are 4 and 5
+    /// units. The left column takes whole groups until it is at least half the
+    /// total, which keeps a group's rows under their own heading — the one rule
+    /// a two-column reference cannot break, because a heading with nothing
+    /// under it and rows with no heading above them are both unreadable.
+    ///
+    /// A single group is never split, so a table that is one long group prints
+    /// as one column rather than as two halves of a list.
+    function shortcutsColumns(): var {
+        const groups = policy.shortcutsGroups();
+        let total = 0;
+        for (let i = 0; i < groups.length; i++)
+            total += groups[i].rows.length + 1;
+        const left = [];
+        const right = [];
+        let filled = 0;
+        for (let j = 0; j < groups.length; j++) {
+            if (left.length === 0 || (filled * 2 < total && j < groups.length - 1)) {
+                left.push(groups[j]);
+                filled += groups[j].rows.length + 1;
+            } else {
+                right.push(groups[j]);
+            }
+        }
+        return [left, right];
+    }
+
+    /// What the command menu lists, as `{id, label, shortcut, group}`.
     ///
     /// `id` is the verb the view dispatches on — `"view.day"`, `"period.next"`
     /// — rather than an index, so reordering this list or filtering it cannot
@@ -370,19 +450,29 @@ QtObject {
         const noun = ({ "day": "day", "week": "week", "month": "month" })[c.view] || "period";
         const subject = c.selectedTitle ? "“" + c.selectedTitle + "”" : "the selected event";
         const out = [
-            { "id": "view.day", "label": "Day view", "shortcut": "D" },
-            { "id": "view.week", "label": "Week view", "shortcut": "W" },
-            { "id": "view.month", "label": "Month view", "shortcut": "M" },
-            { "id": "today", "label": "Jump to today", "shortcut": "T" },
-            { "id": "period.previous", "label": "Previous " + noun, "shortcut": "J" },
-            { "id": "period.next", "label": "Next " + noun, "shortcut": "K" },
-            { "id": "event.create", "label": "New event", "shortcut": "C" }
+            { "id": "view.day", "label": "Day view", "shortcut": "D",
+              "group": "View", "icon": "calendar" },
+            { "id": "view.week", "label": "Week view", "shortcut": "W",
+              "group": "View", "icon": "calendar-range" },
+            { "id": "view.month", "label": "Month view", "shortcut": "M",
+              "group": "View", "icon": "calendar-days" },
+            { "id": "today", "label": "Jump to today", "shortcut": "T",
+              "group": "Navigate", "icon": "calendar-check" },
+            { "id": "period.previous", "label": "Previous " + noun, "shortcut": "J",
+              "group": "Navigate", "icon": "chevron-left" },
+            { "id": "period.next", "label": "Next " + noun, "shortcut": "K",
+              "group": "Navigate", "icon": "chevron-right" },
+            { "id": "event.create", "label": "New event", "shortcut": "C",
+              "group": "Event", "icon": "plus" }
         ];
         if (c.selectedId) {
-            out.push({ "id": "event.open", "label": "Open " + subject, "shortcut": "Enter" });
-            out.push({ "id": "event.delete", "label": "Delete " + subject, "shortcut": "Backspace" });
+            out.push({ "id": "event.open", "label": "Open " + subject, "shortcut": "Enter",
+                       "group": "Event", "icon": "square-pen" });
+            out.push({ "id": "event.delete", "label": "Delete " + subject, "shortcut": "Backspace",
+                       "group": "Event", "icon": "trash-2" });
         }
-        out.push({ "id": "help.shortcuts", "label": "Keyboard shortcuts", "shortcut": "?" });
+        out.push({ "id": "help.shortcuts", "label": "Keyboard shortcuts", "shortcut": "?",
+                   "group": "Help", "icon": "keyboard" });
         return out;
     }
 
@@ -443,5 +533,105 @@ QtObject {
         for (let k = 0; k < scored.length; k++)
             out.push(scored[k].item);
         return out;
+    }
+
+    /// A shortcut string broken into what a keycap row draws:
+    /// `{kind: "key"|"sep", text}`.
+    ///
+    /// Two separators, and they mean opposite things, which is why one is drawn
+    /// and one is not. `+` is a **chord** — `Ctrl+N` is one gesture, so its caps
+    /// sit side by side and the plus disappears, exactly as a keyboard does not
+    /// have a plus key on it. `/` is an **alternative** — `C / Ctrl+N` is two
+    /// ways to do one thing, and dropping that slash would read as a four-key
+    /// chord nobody could press.
+    function keyCaps(text: var): var {
+        const s = String(text === undefined || text === null ? "" : text).trim();
+        const out = [];
+        if (!s)
+            return out;
+        const alternatives = s.split("/");
+        for (let i = 0; i < alternatives.length; i++) {
+            const chord = alternatives[i].trim().split("+");
+            const before = out.length;
+            for (let j = 0; j < chord.length; j++) {
+                const cap = chord[j].trim();
+                if (cap)
+                    out.push({ "kind": "key", "text": cap });
+            }
+            // Only between two alternatives that both produced a cap — a
+            // trailing slash must not print a separator with nothing after it.
+            if (i > 0 && before > 0 && out.length > before)
+                out.splice(before, 0, { "kind": "sep", "text": "/" });
+        }
+        return out;
+    }
+
+    // --- the menu as rows, headings included ----------------------------------
+
+    /// A filtered command list flattened into what the menu actually draws:
+    /// `{kind: "group", label}` headings interleaved with
+    /// `{kind: "command", command}` rows.
+    ///
+    /// One list rather than a list of sections, because the highlight is an
+    /// **index into what is on screen** and a nested model would make it a pair
+    /// of indices — which is the shape that goes wrong the first time a filter
+    /// empties a group. Headings appear in the order their groups first appear
+    /// in `items`, so filtering reorders the whole menu rather than leaving a
+    /// heading stranded above a better-scoring row from somewhere else.
+    function menuRows(items: var): var {
+        const list = (items && typeof items !== "string" && typeof items.length === "number")
+                   ? items : [];
+        const out = [];
+        const order = [];
+        const bucket = ({});
+        for (let i = 0; i < list.length; i++) {
+            const name = (list[i] && list[i].group) || "";
+            if (bucket[name] === undefined) {
+                bucket[name] = [];
+                order.push(name);
+            }
+            bucket[name].push(list[i]);
+        }
+        for (let g = 0; g < order.length; g++) {
+            out.push({ "kind": "group", "label": order[g], "command": null });
+            const rows = bucket[order[g]];
+            for (let r = 0; r < rows.length; r++)
+                out.push({ "kind": "command", "label": rows[r].label, "command": rows[r] });
+        }
+        return out;
+    }
+
+    /// The index of the first command row, or `-1` when the filter matched
+    /// nothing. What the menu highlights on open and after every keystroke.
+    function firstRow(rows: var): int {
+        return policy.stepRow(rows, -1, 1);
+    }
+
+    /// The next selectable row `delta` steps from `index`, wrapping, skipping
+    /// headings. `-1` when there is nothing selectable at all — which is a real
+    /// state (a query that matches nothing), not an error.
+    ///
+    /// Wrapping is why this is arithmetic and not `index + delta`: a menu whose
+    /// first row is a heading would start the highlight on the heading, and one
+    /// whose last row is a command would stop dead at the bottom.
+    function stepRow(rows: var, index: int, delta: int): int {
+        const list = (rows && typeof rows !== "string" && typeof rows.length === "number")
+                   ? rows : [];
+        const n = list.length;
+        if (n === 0)
+            return -1;
+        const step = (Math.round(delta) || 1) > 0 ? 1 : -1;
+        let at = Math.round(index);
+        // No usable starting point — before the first row going down, past the
+        // last one going up, so the first step lands on an end rather than two
+        // rows in from one.
+        if (isNaN(at) || at < 0 || at >= n)
+            at = step < 0 ? n : -1;
+        for (let i = 0; i < n; i++) {
+            at = ((at + step) % n + n) % n;
+            if (list[at] && list[at].kind === "command")
+                return at;
+        }
+        return -1;
     }
 }

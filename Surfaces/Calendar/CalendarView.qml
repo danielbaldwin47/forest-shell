@@ -72,6 +72,19 @@ FloatingWindow {
     /// The selected event's id, or `""`.
     property string selectedId: ""
 
+    /// The overlays, as plain properties so the capture harness can pose either
+    /// one without driving a key. At most one is ever true — `setOverlay` is
+    /// what enforces that, and it is the only thing that should write them.
+    property bool commandOpen: false
+    property bool shortcutsOpen: false
+
+    /// What the command menu's field has in it. A property rather than the
+    /// menu's own state, for the same reason: a picture of an empty field says
+    /// nothing about whether filtering works.
+    property string commandQuery: ""
+
+    readonly property bool overlayOpen: window.commandOpen || window.shortcutsOpen
+
     /// The window wants to go away, and why: `"compositor"` for the close
     /// button or a window-manager kill, `"escape"` for the key. Whoever opened
     /// the window owns tearing it down; this only reports it, and the reason is
@@ -90,6 +103,192 @@ FloatingWindow {
     /// button has no y coordinate to read a time off) and the singleton owns
     /// the store, for the same reason the other four leave as signals.
     signal createRequested(string iso, int startMin)
+
+    /// Enter on a selection, and Backspace/Delete on one. Out as signals for
+    /// the same reason the five above are: the singleton owns the store.
+    signal openRequested(string id)
+    signal deleteRequested(string id)
+
+    /// An overlay opened or closed — `"command menu"`, `"shortcuts"`. The
+    /// window logs it; this file does not, so a posed capture (which has no
+    /// singleton at all) is not writing lines into a log nobody is reading.
+    signal overlayToggled(string name, bool open)
+
+    onCommandOpenChanged: window.overlayToggled("command menu", window.commandOpen)
+    onShortcutsOpenChanged: window.overlayToggled("shortcuts", window.shortcutsOpen)
+
+    /// Show one overlay or hide one. At most one is up at a time: the command
+    /// menu and the shortcuts sheet are both modal over the same grid, and two
+    /// scrims stacked on one window is a picture of a bug.
+    function setOverlay(name: string, open: bool): void {
+        if (open) {
+            // The query is cleared before the menu exists, so a menu that
+            // opens is a menu with an empty field rather than one showing the
+            // last thing anybody searched for.
+            if (name === "command")
+                window.commandQuery = "";
+            window.commandOpen = name === "command";
+            window.shortcutsOpen = name === "shortcuts";
+        } else if (name === "command") {
+            window.commandOpen = false;
+        } else {
+            window.shortcutsOpen = false;
+        }
+    }
+
+    function closeOverlays(): void {
+        window.commandOpen = false;
+        window.shortcutsOpen = false;
+    }
+
+    /// A new hour-long event on the day in view, at the slot `CreatePolicy`
+    /// picks. The sidebar's `+` and the `C` key are one call, so a click and a
+    /// keystroke cannot land on different minutes.
+    function createHere(): void {
+        window.createRequested(
+            window.anchorDate,
+            window.createPolicy.startMinute(
+                window.anchorDate, window.todayIso,
+                window.keyNav.time.parseMinutes(window.nowStamp),
+                CalendarTokens.snapMin, 60));
+    }
+
+    /// The events on screen, in the order `Up`/`Down` walk them.
+    ///
+    /// Which days count is `KeyNavPolicy.visibleRange` and the ordering is
+    /// `EventPolicy.sort` underneath `forRange`, so the arrows follow the same
+    /// order the grid draws in rather than the file's.
+    readonly property var visibleEventIds: {
+        const range = window.keyNav.visibleRange(window.view, window.anchorDate,
+                                                 window.firstDay);
+        if (!range)
+            return [];
+        const inRange = CalendarStore.policy.forRange(CalendarStore.events,
+                                                      range.from, range.to);
+        const ids = [];
+        for (let i = 0; i < inRange.length; i++)
+            ids.push(inRange[i].id);
+        return ids;
+    }
+
+    /// Everything `KeyNavPolicy.action` needs to answer a key. Assembled here
+    /// and nowhere else, so there is one description of "what is on screen".
+    ///
+    /// `typing` is the command menu's field having the caret: with it set the
+    /// policy drops every bare letter, which is what stops `d` typed into a
+    /// search box from flipping the calendar to the day view.
+    readonly property var keyContext: ({
+        "view": window.view,
+        "anchorIso": window.anchorDate,
+        "nowIso": window.nowStamp,
+        "selectedId": window.selectedId,
+        "selectedTitle": window.selectedTitle,
+        "visibleEventIds": window.visibleEventIds,
+        "overlayOpen": window.overlayOpen,
+        "typing": window.commandOpen
+    })
+
+    /// The selected event's title, for the command menu's "Delete “…”" row.
+    readonly property string selectedTitle: {
+        if (!window.selectedId)
+            return "";
+        const event = CalendarStore.policy.byId(CalendarStore.events, window.selectedId);
+        return event && event.title ? event.title : "";
+    }
+
+    /// One key, resolved by `KeyNavPolicy` and dispatched. Everything the
+    /// keyboard does to this surface goes through here, which is what keeps the
+    /// keymap a table rather than a scattering of `Keys.on…` handlers.
+    function handleKey(event: var): void {
+        const decided = window.keyNav.action(event.key, event.modifiers, window.keyContext);
+        if (!decided)
+            return;
+        event.accepted = true;
+        switch (decided.kind) {
+        case "view":
+            window.viewRequested(decided.arg);
+            break;
+        case "today":
+            window.todayRequested();
+            break;
+        case "period": {
+            const next = window.keyNav.shiftPeriod(window.view, window.anchorDate,
+                                                   decided.arg);
+            if (next)
+                window.dateRequested(next);
+            break;
+        }
+        case "select":
+            window.eventSelected(decided.arg);
+            break;
+        case "create":
+            window.createHere();
+            break;
+        case "open":
+            window.openRequested(decided.arg);
+            break;
+        case "delete":
+            window.deleteRequested(decided.arg);
+            break;
+        case "command":
+            window.setOverlay("command", !window.commandOpen);
+            break;
+        case "shortcuts":
+            window.setOverlay("shortcuts", !window.shortcutsOpen);
+            break;
+        case "close":
+            // The overlay first, then the window — one Escape per layer, which
+            // is the only behaviour that lets a person dismiss a menu without
+            // losing the window behind it.
+            if (decided.arg === "overlay")
+                window.closeOverlays();
+            else
+                window.closeRequested("escape");
+            break;
+        }
+    }
+
+    /// Runs a command menu row. The ids are `KeyNavPolicy.commands`', so this
+    /// switch and that list are the two halves of one table.
+    function runCommand(id: string): void {
+        window.closeOverlays();
+        switch (id) {
+        case "view.day":
+            window.viewRequested("day");
+            break;
+        case "view.week":
+            window.viewRequested("week");
+            break;
+        case "view.month":
+            window.viewRequested("month");
+            break;
+        case "today":
+            window.todayRequested();
+            break;
+        case "period.previous":
+        case "period.next": {
+            const next = window.keyNav.shiftPeriod(
+                window.view, window.anchorDate, id === "period.next" ? 1 : -1);
+            if (next)
+                window.dateRequested(next);
+            break;
+        }
+        case "event.create":
+            window.createHere();
+            break;
+        case "event.open":
+            if (window.selectedId)
+                window.openRequested(window.selectedId);
+            break;
+        case "event.delete":
+            if (window.selectedId)
+                window.deleteRequested(window.selectedId);
+            break;
+        case "help.shortcuts":
+            window.setOverlay("shortcuts", true);
+            break;
+        }
+    }
 
     /// The wall clock the now-line and the today-circle are drawn from,
     /// `"2026-08-18T13:40"`.
@@ -149,18 +348,17 @@ FloatingWindow {
     }
 
     Item {
+        id: page
+
         anchors.fill: parent
         focus: true
 
-        // Escape, from wherever the focus is. An unhandled key walks up the
-        // focus chain, so the window needs exactly one handler for it and no
-        // control inside needs to know the window can be closed.
-        Keys.onPressed: event => {
-            if (event.key === Qt.Key_Escape) {
-                window.closeRequested("escape");
-                event.accepted = true;
-            }
-        }
+        // Every key, from wherever the focus is. An unhandled key walks up the
+        // focus chain, so the window needs exactly one handler and no control
+        // inside needs to know what the keyboard does — including the command
+        // menu's own field, which keeps only the three keys that are about its
+        // list and lets the rest bubble to here.
+        Keys.onPressed: event => window.handleKey(event)
 
         // --- the body ---------------------------------------------------------
         //
@@ -269,12 +467,7 @@ FloatingWindow {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: window.createRequested(
-                            window.anchorDate,
-                            window.createPolicy.startMinute(
-                                window.anchorDate, window.todayIso,
-                                window.keyNav.time.parseMinutes(window.nowStamp),
-                                CalendarTokens.snapMin, 60))
+                        onClicked: window.createHere()
                     }
                 }
 
@@ -620,6 +813,49 @@ FloatingWindow {
             use24: window.use24
 
             onEventActivated: id => window.eventSelected(id)
+        }
+
+        // --- the overlays -----------------------------------------------------
+        //
+        // Last in the file, so they are last in the stacking order and cover
+        // the grid, the toolbar and the sidebar alike — an overlay that a
+        // toolbar button could still be clicked through is the #187 failure
+        // wearing different clothes.
+        //
+        // `Loader`s and not `visible`, because both are keyboard surfaces:
+        // building one is what gives it the caret, and destroying it is what
+        // gives the caret back rather than leaving a hidden field holding it.
+
+        Loader {
+            id: commandLoader
+
+            anchors.fill: parent
+            active: window.commandOpen
+
+            sourceComponent: CommandMenu {
+                keyNav: window.keyNav
+                ctx: window.keyContext
+
+                // Bound both ways: the harness poses a query by setting
+                // `commandQuery`, and typing writes back the same string.
+                query: window.commandQuery
+                onQueryChanged: window.commandQuery = query
+
+                onAccepted: commandId => window.runCommand(commandId)
+                onDismissed: window.setOverlay("command", false)
+            }
+        }
+
+        Loader {
+            id: shortcutsLoader
+
+            anchors.fill: parent
+            active: window.shortcutsOpen
+
+            sourceComponent: ShortcutsSheet {
+                keyNav: window.keyNav
+                onDismissed: window.setOverlay("shortcuts", false)
+            }
         }
     }
 }

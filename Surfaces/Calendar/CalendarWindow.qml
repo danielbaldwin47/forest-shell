@@ -137,6 +137,20 @@ Singleton {
         Logger.log("calendar", "select " + id);
     }
 
+    /// Open an event — Enter on a selection, a double click, or `ipc call
+    /// calendar openEvent`. Selecting it is part of opening it: an editor for
+    /// an event the grid does not show as chosen is two answers to "which one".
+    ///
+    /// The editor itself is not built yet; the line is, because seam 2 asserts
+    /// on lines and a verb that logs nothing is a verb with no seam (#81).
+    function openEvent(id: string): void {
+        if (!id)
+            return;
+        if (root.selectedId !== id)
+            root.select(id);
+        Logger.log("calendar", "open " + id);
+    }
+
     /// One hour, on the day in view, at the minute the chrome worked out. The
     /// new event is selected as well as made, because the reason to press a
     /// create button is to edit the thing it creates — and because a chip that
@@ -183,6 +197,15 @@ Singleton {
                 onTodayRequested: root.goToday()
                 onEventSelected: id => root.select(id)
                 onCreateRequested: (iso, startMin) => root.newEvent(iso, startMin)
+
+                // The keyboard's own three. `overlayToggled` is logged here
+                // rather than in the view because the view is also built by
+                // the capture harness, with no singleton and no log to write
+                // to — signals out, the same as every other verb.
+                onOpenRequested: id => root.openEvent(id)
+                onDeleteRequested: id => CalendarStore.deleteEvent(id)
+                onOverlayToggled: (name, open) =>
+                    Logger.log("calendar", name + (open ? " open" : " closed"))
             }
         }
     }
@@ -214,7 +237,7 @@ Singleton {
         function create(iso: string, startMin: int, minutes: int, title: string): string {
             return CalendarStore.createEvent(iso, startMin, minutes, title);
         }
-        function openEvent(id: string): void { root.show(); root.select(id); }
+        function openEvent(id: string): void { root.show(); root.openEvent(id); }
         function guestAdd(id: string, contact: string): bool {
             return CalendarStore.addGuest(id, contact);
         }

@@ -130,6 +130,18 @@ Singleton {
     readonly property color shadowKey: Qt.rgba(0, 0, 0, Theme.dark ? 0.28 : 0.10)
     readonly property color shadowAmbient: Qt.rgba(0, 0, 0, Theme.dark ? 0.36 : 0.14)
 
+    /// The wash a modal puts over the grid behind it — the command menu and the
+    /// shortcuts sheet.
+    ///
+    /// **Not** `Theme.fogWash` at `fogWashOpacity`, which is the shell's scrim
+    /// for a *desktop*: 10% of a pale mist, which reads as haze over a
+    /// photograph and, measured on this surface, as nothing at all over a dark
+    /// grid — the first capture of the command menu had a card apparently
+    /// floating on an undimmed calendar. A modal over a document has to push
+    /// the document back, and the only ink that does that in both themes is
+    /// black. Light needs less of it because its page has further to fall.
+    readonly property color scrimWash: Qt.rgba(0, 0, 0, Theme.dark ? 0.46 : 0.28)
+
     // --- the column washes ----------------------------------------------------
 
     /// The weekend column's wash, and **the one place this file departs from

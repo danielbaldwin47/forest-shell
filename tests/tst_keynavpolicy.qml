@@ -546,4 +546,193 @@ TestCase {
         compare(keys.createStamp(), "");
         compare(keys.selectAction(undefined, 1), null);
     }
+
+    // --- the range the arrows walk -------------------------------------------
+
+    function test_the_visible_range_of_each_view() {
+        const day = keys.visibleRange("day", testCase.anchor, 1);
+        compare(day.from, "2026-08-18");
+        compare(day.to, "2026-08-18");
+
+        // Monday-first: the 18th is a Tuesday, so the week runs 17th–23rd.
+        const week = keys.visibleRange("week", testCase.anchor, 1);
+        compare(week.from, "2026-08-17");
+        compare(week.to, "2026-08-23");
+
+        // Sunday-first moves both ends by one, and nothing else.
+        const sunday = keys.visibleRange("week", testCase.anchor, 0);
+        compare(sunday.from, "2026-08-16");
+        compare(sunday.to, "2026-08-22");
+    }
+
+    function test_the_month_range_is_the_month_and_not_the_grid() {
+        // The grid shows late July and early September; the arrows do not, or
+        // Down off the end of August lands on a greyed-out September chip.
+        const month = keys.visibleRange("month", testCase.anchor, 1);
+        compare(month.from, "2026-08-01");
+        compare(month.to, "2026-08-31");
+
+        // Short months and leap Februaries are the whole reason it asks
+        // CalendarTime rather than assuming 31.
+        compare(keys.visibleRange("month", "2026-02-09", 1).to, "2026-02-28");
+        compare(keys.visibleRange("month", "2024-02-09", 1).to, "2024-02-29");
+        compare(keys.visibleRange("month", "2026-04-30", 1).to, "2026-04-30");
+    }
+
+    function test_a_range_of_a_view_or_a_day_that_is_neither() {
+        compare(keys.visibleRange("week", "not-a-day", 1), null);
+        compare(keys.visibleRange("fortnight", testCase.anchor, 1), null);
+    }
+
+    // --- the sheet's two columns ---------------------------------------------
+
+    function test_every_shortcut_reaches_exactly_one_column() {
+        const columns = keys.shortcutsColumns();
+        compare(columns.length, 2);
+        let rows = 0;
+        for (const column of columns) {
+            for (const group of column) {
+                verify(group.group.length > 0);
+                verify(group.rows.length > 0);
+                rows += group.rows.length;
+                // A heading and its rows are never split across the gutter.
+                for (const row of group.rows)
+                    compare(row.group, group.group);
+            }
+        }
+        compare(rows, keys.shortcutsTable().length);
+    }
+
+    function test_the_columns_are_split_by_printed_height() {
+        const columns = keys.shortcutsColumns();
+        const printed = function (column) {
+            let units = 0;
+            for (const group of column)
+                units += group.rows.length + 1;
+            return units;
+        };
+        const left = printed(columns[0]);
+        const right = printed(columns[1]);
+        verify(left > 0);
+        verify(right > 0);
+        // Whole groups only, so the halves are close rather than equal — but a
+        // split that put eleven units against six would be a column of white.
+        verify(Math.abs(left - right) <= 3);
+    }
+
+    // --- the menu as rows -----------------------------------------------------
+
+    function test_menu_rows_head_each_group_once() {
+        const rows = keys.menuRows(keys.commands(testCase.ctxOf({})));
+        const headings = [];
+        let seenCommand = false;
+        for (const row of rows) {
+            if (row.kind === "group") {
+                verify(headings.indexOf(row.label) < 0);
+                headings.push(row.label);
+            } else {
+                compare(row.kind, "command");
+                // Every command row sits under a heading, never above one.
+                verify(headings.length > 0);
+                compare(row.command.group, headings[headings.length - 1]);
+                seenCommand = true;
+            }
+        }
+        verify(seenCommand);
+        compare(headings, ["View", "Navigate", "Event", "Help"]);
+    }
+
+    function test_menu_rows_of_a_filtered_list_drop_the_empty_headings() {
+        const rows = keys.menuRows(keys.filter(keys.commands(testCase.ctxOf({})), "view"));
+        for (const row of rows) {
+            if (row.kind === "group")
+                compare(row.label, "View");
+        }
+        compare(rows[0].kind, "group");
+        compare(rows.length, 4);
+    }
+
+    function test_stepping_skips_the_headings_and_wraps() {
+        const rows = keys.menuRows(keys.commands(testCase.ctxOf({})));
+        const first = keys.firstRow(rows);
+        compare(first, 1);
+        compare(rows[first].kind, "command");
+
+        // Down from the last command of a group steps over the next heading.
+        let at = first;
+        for (let i = 0; i < 3; i++)
+            at = keys.stepRow(rows, at, 1);
+        compare(rows[at].kind, "command");
+        compare(rows[at].command.id, "today");
+
+        // Up from the first command wraps to the last one, not to a heading.
+        const last = keys.stepRow(rows, first, -1);
+        compare(rows[last].kind, "command");
+        compare(rows[last].command.id, "help.shortcuts");
+        compare(last, rows.length - 1);
+    }
+
+    function test_probe_a_menu_with_nothing_in_it_selects_nothing() {
+        const rows = keys.menuRows(keys.filter(keys.commands(testCase.ctxOf({})), "zzzz"));
+        compare(rows.length, 0);
+        compare(keys.firstRow(rows), -1);
+        compare(keys.stepRow(rows, 0, 1), -1);
+        compare(keys.stepRow([], -1, -1), -1);
+        compare(keys.menuRows(undefined).length, 0);
+    }
+
+    function test_probe_stepping_from_an_index_that_is_not_on_screen() {
+        // The query shrank the list under a highlight that was further down —
+        // Down starts over at the top and Up at the bottom, never two in.
+        const rows = keys.menuRows(keys.commands(testCase.ctxOf({})));
+        compare(keys.stepRow(rows, 99, 1), 1);
+        compare(keys.stepRow(rows, -1, -1), rows.length - 1);
+        compare(keys.stepRow(rows, 0, 1), 1);
+    }
+
+    function test_probe_every_command_carries_a_group_and_an_icon() {
+        // The menu draws both; a command that arrived without either would be a
+        // blank slot rather than a missing command, which is the harder bug.
+        const groups = ["View", "Navigate", "Event", "Help"];
+        for (const command of keys.commands(testCase.ctxOf({ "selectedId": "evt-3" }))) {
+            verify(groups.indexOf(command.group) >= 0);
+            verify(command.icon.length > 0);
+        }
+    }
+
+    // --- shortcuts as keycaps -------------------------------------------------
+
+    function test_a_chord_is_caps_side_by_side_and_an_alternative_keeps_its_slash() {
+        const chord = keys.keyCaps("Ctrl+N");
+        compare(chord.length, 2);
+        compare(chord[0].kind, "key");
+        compare(chord[0].text, "Ctrl");
+        compare(chord[1].text, "N");
+
+        const either = keys.keyCaps("C / Ctrl+N");
+        compare(either.length, 4);
+        compare(either[0].text, "C");
+        compare(either[1].kind, "sep");
+        compare(either[1].text, "/");
+        compare(either[2].text, "Ctrl");
+        compare(either[3].text, "N");
+    }
+
+    function test_probe_every_row_of_the_sheet_breaks_into_caps() {
+        for (const row of keys.shortcutsTable()) {
+            const caps = keys.keyCaps(row.keys);
+            verify(caps.length > 0);
+            // A separator never opens or closes a row — it would print as a
+            // slash with nothing on one side of it.
+            compare(caps[0].kind, "key");
+            compare(caps[caps.length - 1].kind, "key");
+        }
+    }
+
+    function test_probe_a_shortcut_that_is_empty_or_ragged() {
+        compare(keys.keyCaps("").length, 0);
+        compare(keys.keyCaps(undefined).length, 0);
+        compare(keys.keyCaps("K /").length, 1);
+        compare(keys.keyCaps("+K+").length, 1);
+    }
 }

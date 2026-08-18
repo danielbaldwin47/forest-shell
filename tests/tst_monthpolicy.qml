@@ -943,4 +943,97 @@ TestCase {
         compare(caps.full, 3);
         compare(caps.withMore, 3);
     }
+
+    // --- past vs future -------------------------------------------------------
+
+    /// The strength split is on the event's **end**, so a meeting that is
+    /// running right now has not happened yet — it is the chip the reader is
+    /// most likely looking for and it stays at full strength. The rule is
+    /// `HuePolicy.isPast`; what is checked here is that the month view asks it
+    /// about the right field of the right object.
+    function test_an_event_is_past_only_once_it_has_ended() {
+        const now = "2026-08-18T13:40";
+        compare(policy.isPast({ "start": "2026-08-18T09:00",
+                                "end": "2026-08-18T10:00" }, now), true);
+        // Running right now — started before, ends after.
+        compare(policy.isPast({ "start": "2026-08-18T13:00",
+                                "end": "2026-08-18T14:00" }, now), false);
+        // Ends on this very minute: past, the same way the week grid has it, so
+        // a chip never sits in a third state while the two views disagree.
+        compare(policy.isPast({ "start": "2026-08-18T13:00",
+                                "end": "2026-08-18T13:40" }, now), true);
+        // Tomorrow.
+        compare(policy.isPast({ "start": "2026-08-19T09:00",
+                                "end": "2026-08-19T10:00" }, now), false);
+    }
+
+    /// An all-day event is over at the end of its last day, not at midnight of
+    /// its first — the day form has no time in it, so the bound is that day's
+    /// last minute. Today's all-day banner therefore stays at full strength all
+    /// day, which is the only reading of it that is true.
+    function test_an_all_day_event_is_past_only_after_its_last_day() {
+        compare(policy.isPast({ "start": "2026-08-18", "end": "2026-08-18",
+                                "allDay": true }, "2026-08-18T13:40"), false);
+        compare(policy.isPast({ "start": "2026-08-17", "end": "2026-08-17",
+                                "allDay": true }, "2026-08-18T13:40"), true);
+        // A multi-day banner is live until its last day is done.
+        compare(policy.isPast({ "start": "2026-08-16", "end": "2026-08-19",
+                                "allDay": true }, "2026-08-18T13:40"), false);
+    }
+
+    /// No clock means no split. A caller with a date but no `now` is better
+    /// served by one strength than by a grid that dims half of itself against
+    /// a time nobody set.
+    function test_without_a_now_nothing_is_past() {
+        const event = { "start": "2020-01-01T09:00", "end": "2020-01-01T10:00" };
+        compare(policy.isPast(event, ""), false);
+        compare(policy.isPast(event, "not-a-stamp"), false);
+        compare(policy.isPast(null, "2026-08-18T13:40"), false);
+        compare(policy.isPast({}, "2026-08-18T13:40"), false);
+        // An event with only a start is judged on that start.
+        compare(policy.isPast({ "start": "2026-08-18T09:00" }, "2026-08-18T13:40"), true);
+    }
+
+    // --- the words the cell uses ----------------------------------------------
+
+    /// `"3 more"`, with no plus: the row is a sentence about the cell, and the
+    /// one `+` in this surface already means *create*.
+    function test_the_overflow_row_has_no_plus() {
+        compare(policy.moreLabel(3), "3 more");
+        compare(policy.moreLabel(1), "1 more");
+        // Nothing hidden says nothing at all, so text and visibility cannot
+        // disagree when they are bound to the same call.
+        compare(policy.moreLabel(0), "");
+        compare(policy.moreLabel(-2), "");
+    }
+
+    /// A six-row grid always shows three months and the title band names one.
+    /// The other two are named where they turn — on the 1st — and nowhere else.
+    function test_the_first_of_a_month_is_named() {
+        const names = ["January", "February", "March", "April", "May", "June",
+                       "July", "August", "September", "October", "November",
+                       "December"];
+        compare(policy.numeralLabel({ "iso": "2026-09-01", "day": 1,
+                                      "inMonth": false, "isToday": false }, names),
+                "September 1");
+        compare(policy.numeralLabel({ "iso": "2026-08-18", "day": 18,
+                                      "inMonth": true, "isToday": false }, names),
+                "18");
+        // In-month or out of it makes no difference: the 1st is the 1st.
+        compare(policy.numeralLabel({ "iso": "2026-08-01", "day": 1,
+                                      "inMonth": true, "isToday": false }, names),
+                "August 1");
+        compare(policy.numeralLabel(null, names), "");
+    }
+
+    /// Today keeps the bare numeral, because its date is knocked out of a pill
+    /// sized to its own glyphs and a pill around "September 1" is a badge.
+    function test_todays_numeral_is_never_a_month_name() {
+        const names = ["January", "February", "March", "April", "May", "June",
+                       "July", "August", "September", "October", "November",
+                       "December"];
+        compare(policy.numeralLabel({ "iso": "2026-09-01", "day": 1,
+                                      "inMonth": false, "isToday": true }, names),
+                "1");
+    }
 }

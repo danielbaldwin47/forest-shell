@@ -77,6 +77,10 @@ QtObject {
     /// see `barSpan`.
     readonly property int barGutter: 8
 
+    /// The hue policy, for its past/future rule alone — see `isPast`. Shared
+    /// with the week grid so both scales draw the same line at the same minute.
+    readonly property HuePolicy hues: HuePolicy {}
+
     property CalendarPolicy month: CalendarPolicy {}
     property CalendarTime time: CalendarTime {}
     property EventPolicy events: EventPolicy {}
@@ -600,5 +604,77 @@ QtObject {
 
     function prevMonth(anchorIso: string): string {
         return policy.shiftMonths(anchorIso, -1);
+    }
+
+    // --- what a month cell says about an event --------------------------------
+
+    /// Whether an event is **already over** at `nowStamp`, which is the only
+    /// axis a month grid should split its chips on.
+    ///
+    /// The reference splits chip strength past-vs-future rather than by which
+    /// calendar an event came from, and that is the right axis: colour already
+    /// carries the calendar, and nothing else in the grid says *what has
+    /// happened yet*. A month of uniformly loud chips makes the reader find
+    /// today's row before the grid means anything; a month whose finished half
+    /// recedes hands them the answer with no search.
+    ///
+    /// **The rule itself is `HuePolicy.isPast`, and this only unwraps the
+    /// event.** The week grid already asked this question and answered it there
+    /// — end-not-start, a bare date as that day's last minute, an absent clock
+    /// as "nothing is past" — and a month view that re-derived any of those
+    /// would be two policies disagreeing about one word by a minute, at exactly
+    /// the minute the answer changes.
+    function isPast(event: var, nowStamp: string): bool {
+        if (!event)
+            return false;
+        return policy.hues.isPast(String(event.end || event.start || ""), nowStamp);
+    }
+
+    /// What the overflow row says: **`"3 more"`, with no plus.**
+    ///
+    /// The affordance is a sentence about the cell, not an arithmetic operator
+    /// applied to the chips above it — the reference writes it that way and it
+    /// reads that way. `"+3 more"` also collides with the one glyph in this
+    /// surface that already means *create*, which is the toolbar's `+`.
+    ///
+    /// Zero returns the empty string rather than `"0 more"`, so a caller that
+    /// binds the text and the visibility to the same call cannot disagree with
+    /// itself.
+    function moreLabel(count: int): string {
+        const n = Math.floor(count);
+        if (!isFinite(n) || n <= 0)
+            return "";
+        return n + " more";
+    }
+
+    /// The date a cell prints: `"18"`, or **`"September 1"`** on the first of a
+    /// month.
+    ///
+    /// A six-row grid always shows three months and names none of them; the
+    /// title band names only the middle one, so the leading and trailing days
+    /// are dated by a numeral that could belong to any of the three. Naming the
+    /// month exactly where it turns — on the 1st — costs one cell's worth of
+    /// width and removes the ambiguity from all six rows at once.
+    ///
+    /// **Today keeps the bare numeral**, because today's date is drawn knocked
+    /// out of a pill sized to its own glyphs, and a pill around "September 1"
+    /// would be a badge rather than a date mark.
+    ///
+    /// `names` is handed in so the rule is testable without a locale: absent,
+    /// the caller's locale supplies the standalone month names.
+    function numeralLabel(cell: var, names: var): string {
+        if (!cell)
+            return "";
+        const day = String(cell.day === undefined ? "" : cell.day);
+        if (cell.isToday === true || cell.day !== 1)
+            return day;
+        const parsed = policy.time.parseDay(String(cell.iso || ""));
+        if (!parsed)
+            return day;
+        const table = (names && names.length >= 12)
+            ? names
+            : Array.from({ "length": 12 },
+                         (_, i) => Qt.locale().standaloneMonthName(i, Locale.LongFormat));
+        return table[parsed.month - 1] + " " + day;
     }
 }

@@ -51,6 +51,20 @@ Item {
     /// twice.
     property string todayIso: ""
 
+    /// Now, as `YYYY-MM-DDTHH:MM`, and the axis every chip's strength is split
+    /// on (`MonthPolicy.isPast`). Passed in for the same reason `todayIso` is —
+    /// a capture has to take the same photograph twice.
+    ///
+    /// **Empty falls back to the end of `todayIso`**, so a caller that has a
+    /// date but no clock still gets the useful half of the split: every week
+    /// before this one recedes, and today's own cell stays at full strength
+    /// rather than guessing at an hour nobody supplied.
+    property string nowStamp: ""
+
+    readonly property string nowBound: view.nowStamp.length > 0
+        ? view.nowStamp
+        : (view.todayIso.length > 0 ? view.todayIso + "T00:00" : "")
+
     /// The whole store's worth of events. The view splits them into bars and
     /// chips itself, because the split is the policy's rule and not the
     /// caller's.
@@ -100,20 +114,35 @@ Item {
     /// The affordance's own row. See above: it is text, not a chip.
     readonly property int moreH: 16
 
-    /// The room the day numeral takes above the first chip, and where its disc
-    /// starts inside that room. **6px of clearance from the vertical rule**: a
-    /// disc pinned 2px off the grid line read as a sticker half off the cell,
-    /// and the clearance is what makes it sit *in* the square.
+    /// The room the day numeral takes above the first chip, and the shape of
+    /// today's mark inside that room.
     ///
-    /// The disc is the spec's **22**, and it is the grid's primary "today", so
-    /// nothing secondary may outrank it: the sidebar's mini-month drew a 26px
-    /// disc in a 30px cell, which measured 1.4x the mark in a cell seven times
-    /// the size — the weaker marker was the louder one. The mini-month's is now
-    /// 20 and this one is 22. 4 + 22 = 26, the numeral band.
+    /// **Today is a pill sized to its glyphs, not a fixed disc.** A 22px circle
+    /// leaves 3px of air around "18" — the review called it cramped, and it was
+    /// cramped by a *different* amount on the 8th, because one date fills a
+    /// circle and the other does not. `numeralPadH` either side is one constant
+    /// that reads the same on every day of the month, and the mark stays the
+    /// grid's primary "today": at 20 tall it is still the tallest solid colour
+    /// in the header band, and the mini-month's is 20 in a 30px cell so the two
+    /// calendars agree.
+    ///
+    /// `numeralRadius` is a rounded rectangle rather than a full round, which is
+    /// what lets the shape stay compact on a two-digit date without either
+    /// stretching into a lozenge or clipping its own digits.
     readonly property int numeralD: 22
+    readonly property int numeralH: 20
+    readonly property int numeralPadH: 5
+    readonly property int numeralRadius: 5
     readonly property int numeralTop: 4
     readonly property int numeralClearance: 6
     readonly property int cellHeaderH: 26
+
+    /// The month names the numeral asks for when a cell is the 1st. Resolved
+    /// once here rather than per cell: `numeralLabel` would otherwise build a
+    /// twelve-entry locale table 42 times a repaint.
+    readonly property var monthNames: Array.from(
+        { "length": 12 },
+        (_, i) => Qt.locale().standaloneMonthName(i, Locale.LongFormat))
 
     /// What a neighbouring month's chips keep. **0.8, not 0.45.** The ground
     /// under them has already moved 17 units of green; an opacity deep enough
@@ -121,7 +150,13 @@ Item {
     /// 3.6:1 against its own fill, which breaks the spec's contrast promise on
     /// events that are perfectly real — they just belong to September. At 0.8
     /// the worst hue measures 4.7:1 and the cell still reads as outside.
-    readonly property real outsideOpacity: 0.8
+    ///
+    /// **It carries more weight now than it did**, because the ground no longer
+    /// says anything about the month boundary (see the cell-ground section) —
+    /// so it steps to 0.72, which is as far as it can go before the weakest hue
+    /// on the weekend ground drops under the spec's 4.5:1. The rest of the cue
+    /// is the numeral, which is a whole colour apart rather than an opacity.
+    readonly property real outsideOpacity: 0.72
 
     /// Breathing room at the bottom of a cell. Zero: the chip stack already
     /// stops 1px above the row edge by arithmetic, and a foot on top of that
@@ -140,107 +175,58 @@ Item {
     readonly property int contentInset: Theme.space2
 
 
-    // --- the cell ladder --------------------------------------------------------
+    // --- the cell ground: two tones, and only two ---------------------------------
     //
-    // **Two cues, and they are not the same cue.** Weekday/weekend is a *fill*
-    // and runs the full height of a column; in/out of month is a *recede* and
-    // applies to whichever fill the cell already had. Collapsing both onto one
-    // four-rung ladder is what the pass before this did, and the review
-    // measured the result: out-of-month landed on `bgSunken` at g 10, darker
-    // than every in-month cell by 17, so the leading row read as a hole punched
-    // in the surface rather than a month falling away — and the trailing row
-    // checkered dark/light mid-week where the two cues crossed.
+    // **The ground channel carries one cue, and it is the weekend.** Three passes
+    // running, this grid painted four different tones on one axis — weekday-in,
+    // weekend-in, weekday-out, weekend-out — and each pass re-derived the
+    // magnitudes to keep the two cues from being mistaken for each other. The
+    // arithmetic got better every time and the picture did not, because the
+    // premise was wrong: four flat tones across 42 large rectangles is a
+    // *pattern*, and the eye reads the pattern before it reads any one step in
+    // it. The trailing row checkering dark/light mid-week was not a magnitude
+    // bug. It was the fourth tone existing.
     //
-    // So (green channel, dark palette, where the eye's response is steepest):
+    // The reference paints two: weekend columns a shade below weekday columns,
+    // and nothing else. Its leading and trailing days sit on exactly the ground
+    // their column gives them, and the month boundary is said entirely in ink —
+    // a muted numeral and receded events. That works because *ink is the
+    // stronger channel here anyway*: a numeral and three chips changing value
+    // is a bigger signal than 17 units of grey under them, and it lands where
+    // the reader is already looking.
     //
-    // **And the two cues have to be ordered.** The pass before this had them
-    // the wrong way round, measured off the capture (green channel, dark
-    // palette): weekday-in 38, weekend-in 21, out-of-month-weekday 30. A
-    // Saturday inside the month was 17 steps from its neighbour and the *month
-    // boundary* only 8 — so the grid's loudest edge ran down two columns that
-    // are merely quiet, and the edge that actually matters, where August stops,
-    // was the faintest thing in the picture.
+    // So: one sink, one axis, no interaction to order.
     //
-    // The invariant, and it is checkable off any capture:
-    //
-    //     |weekend − weekday|  <  |out-of-month − weekday|
-    //
-    // **And both steps have to clear the threshold at which a step is a step.**
-    // The pass before this had the ordering right and the magnitudes far too
-    // small — measured off the capture, in-month weekday g 38, weekend g 32,
-    // out-of-month g 25: four states spread over 13 units of 255, ~6 apart, on
-    // large flat areas seen peripherally. Neither cue read, and each could be
-    // mistaken for the other. So the weekend wash goes to 34% and the month sink
-    // to 72%, which roughly doubles both gaps and holds the 1:2 ratio between
-    // them:
-    //
-    //     weekday, in      surfaceRaised                        g 38
-    //     weekend, in      surfaceRaised sunk 34%               g 28   Δ 10
-    //     weekday, out     the same, sunk 72%                   g 17   Δ 21
-    //     weekend, out     both                                 g 14
-    //     grid rule        borderSubtle                         g 56
+    //     weekday      surfaceRaised                        g 38
+    //     weekend      surfaceRaised sunk 28%               g 30   Δ 8
+    //     grid rule    borderSubtle                         g 56
     //
     // The weekend *recedes*, which is what a weekend is: the brief asks for the
     // week's shape to be readable peripherally, and a receding Saturday says
-    // "quiet" where a lifted one said "look here". Out of month the ground
-    // moves twice as far, and the numerals' and chips' 45% opacity carries the
-    // rest.
+    // "quiet" where a lifted one said "look here".
     //
-    // **Today's wash is 2.2% and no more.** The mark is the filled circle
-    // behind the numeral; an earlier pass tinted the whole cell hard enough to
-    // measure (43,65,62), a hue shift rather than a lift, and today's square
-    // was the one ground in the grid that was a different colour. 2.2% lifts
-    // the green channel by 3 where the weekend drops it by 6, so the faintest
-    // thing in the grid stays the faintest — it just stops the circle looking
-    // stuck to an ordinary Tuesday.
+    // **Today gets no wash at all.** Its mark is the pill behind the numeral,
+    // and a third ground tone would be a second answer to a question already
+    // answered — which is how this section acquired its fourth tone the first
+    // time.
     //
-    // Light mode walks the same ladder downward from paper; `surfaceRaised`
-    // there is pure white and `bgSunken` is the bottom of the token set, so the
-    // same two mixes land in the same relative places.
+    // Light mode walks the same step downward from paper; `surfaceRaised` there
+    // is pure white and `bgSunken` the bottom of the token set, so the one mix
+    // lands in the same relative place.
     readonly property color cellWeekday: Theme.surfaceRaised
 
-    /// **Two cues, two channels, and neither may borrow the other's.** The pass
-    /// before this moved the weekend off the ground and onto the numeral, which
-    /// collided head-on with the one cue that was already a numeral: measured
-    /// on the capture, an in-month Saturday's date (125,143,134) and an
-    /// out-of-month Thursday's (113,119,115) were the same grey saying two
-    /// different things, and an out-of-month *weekend* stacked both dimmings
-    /// onto one glyph and landed at 2.6:1 — below any reading threshold. The
-    /// reference never dims a weekend numeral, for exactly this reason.
-    ///
-    /// So the channels are separated by construction and each says one thing:
-    ///
-    ///     weekend        ground only    — a sink of 28% toward `bgSunken`
-    ///     out of month   ground + ink   — a sink of 62%, and a muted numeral
-    ///
-    /// A weekend's date is `textPrimary`, identical to a Tuesday's, because a
-    /// Saturday in this month is exactly as real as a Tuesday in it. The four
-    /// grounds, green channel, dark palette:
-    ///
-    ///     weekday, in      surfaceRaised                        g 38
-    ///     weekend, in      sunk 28%                             g 30   Δ  8
-    ///     weekday, out     sunk 62%                             g 21   Δ 17
-    ///     weekend, out     sunk 75%                             g 17
-    ///
-    /// which keeps the invariant the month boundary has to win:
-    ///
-    ///     |weekend − weekday|  <  |out-of-month − weekday|
-    ///
-    /// Light mode walks the same ladder downward from paper; `surfaceRaised`
-    /// there is pure white and `bgSunken` the bottom of the token set, so the
-    /// same four mixes land in the same relative places.
     readonly property real weekendSink: 0.28
-    readonly property real monthSink: 0.62
-    readonly property real bothSink: 0.75
 
     /// One opaque colour per cell rather than a stack of translucent layers —
-    /// stacked washes are what let a Saturday out-shout today two passes ago,
-    /// and what made the out-of-month weekend unreadable in the last one.
+    /// stacked washes are what let a Saturday out-shout today two passes ago.
+    /// `inMonth` is still in the signature and still ignored: the month
+    /// boundary is an ink cue (`numeralOutside`, `outsideOpacity`), and a caller
+    /// that hands both facts in should not have to know which of them the ground
+    /// spends.
     function cellGround(inMonth: bool, isWeekend: bool): color {
-        const sink = inMonth ? (isWeekend ? view.weekendSink : 0)
-                             : (isWeekend ? view.bothSink : view.monthSink);
-        return sink > 0 ? Qt.tint(view.cellWeekday, Qt.alpha(Theme.bgSunken, sink))
-                        : view.cellWeekday;
+        return isWeekend
+            ? Qt.tint(view.cellWeekday, Qt.alpha(Theme.bgSunken, view.weekendSink))
+            : view.cellWeekday;
     }
 
     /// A neighbouring month's date: `textMuted` at full strength, not
@@ -402,11 +388,17 @@ Item {
                 height: heading.height
 
                 Text {
-                    // Left-aligned on the cell's own content inset, with every
-                    // numeral, banner and chip below it. Centred caps over
-                    // left-aligned content was the header reading as a separate
-                    // object from the grid.
-                    x: view.contentInset
+                    /// **Centred over the column.** It was left-aligned on the
+                    /// cell's content inset, which was right while the dates
+                    /// were on that inset too — the header and the first line
+                    /// of every cell shared one rule. The dates have moved to
+                    /// the right edge, so a left-aligned cap now sits over
+                    /// nothing in particular: it agrees with the events and
+                    /// disagrees with the date it names. Centred, it belongs to
+                    /// the whole column rather than to either edge of it, which
+                    /// is what a column heading is, and it is what the reference
+                    /// does.
+                    anchors.horizontalCenter: parent.horizontalCenter
                     anchors.verticalCenter: parent.verticalCenter
                     text: cap.modelData
                     /// Every cap the same weight. The weekend is said once, by
@@ -554,38 +546,50 @@ Item {
 
                         readonly property var cell: row.cells[index]
 
-                        // The *glyph* starts on the content inset, not the
-                        // circle around it: the numeral is the top of the same
-                        // column the chips make, and a box centred on the inset
-                        // would push the digits 4px right of everything under
-                        // them.
-                        x: view.colEdges[numeral.index] + view.contentInset
+                        /// `"18"`, or `"September 1"` where the month turns —
+                        /// `MonthPolicy.numeralLabel`. A six-row grid always
+                        /// shows three months and the title band names one of
+                        /// them; naming the other two exactly where they start
+                        /// costs one cell's width and settles all six rows.
+                        readonly property string label:
+                            view.policy.numeralLabel(numeral.cell, view.monthNames)
+
+                        /// **The date sits at the top right, and the events own
+                        /// the left.** The pass before this put the numeral at
+                        /// the head of the same column the chips stand in, so
+                        /// the top line of every cell was a date where the six
+                        /// lines under it were titles, and a cell's list began
+                        /// one row lower than it looked. Moved across, the whole
+                        /// left edge belongs to events — a cell reads straight
+                        /// down as a list — and the dates become their own
+                        /// column down the right of each week, which is what
+                        /// makes a week's row scannable. The reference does
+                        /// this, and it is the reason its grid reads as a
+                        /// calendar rather than as a table of labels.
+                        x: view.colEdges[numeral.index]
                         y: view.numeralTop
-                        width: view.numeralD
+                        width: view.colEdges[numeral.index + 1] - view.colEdges[numeral.index]
                         height: view.numeralD
 
-                        /// Today is a filled circle in the accent, with the
-                        /// numeral knocked out of it — the same mark the week
+                        /// Today is a filled pill in the accent with the numeral
+                        /// knocked out of it — the same statement the week
                         /// header and the mini-month make, so one calendar
                         /// answers "which day is it" one way.
                         ///
-                        /// **Its left edge is the numeral rule.** Centring the
-                        /// disc on the digits was measured to move it: 3px
-                        /// right on a two-digit day and hard against the
-                        /// vertical rule on a one-digit one, so today's mark
-                        /// landed in a different place depending on the date,
-                        /// and on the 1st it sat closer to the grid line than
-                        /// anything else in the cell. Pinned to the same rule
-                        /// every other numeral starts on, it is 8px clear of
-                        /// the rule (`contentInset`, above the 6px floor) on
-                        /// every day of the month, and the column of dates
-                        /// down the left of the grid stays a column.
+                        /// **Sized to its own glyphs, not to a fixed circle.**
+                        /// A 22px disc is 3px of air around a two-digit date:
+                        /// the review called it cramped and it was, and worse,
+                        /// it was cramped by a different amount on the 8th than
+                        /// on the 18th because only one of them fills a circle.
+                        /// A pill with a constant `numeralPadH` either side is
+                        /// the same shape on both, and the digits stay on the
+                        /// column the other dates are in.
                         Rectangle {
-                            x: 0
-                            width: view.numeralD
-                            height: view.numeralD
-                            anchors.verticalCenter: parent.verticalCenter
-                            radius: Theme.radiusFull
+                            width: dayText.implicitWidth + 2 * view.numeralPadH
+                            height: view.numeralH
+                            anchors.horizontalCenter: dayText.horizontalCenter
+                            anchors.verticalCenter: dayText.verticalCenter
+                            radius: view.numeralRadius
                             color: Theme.accentPrimary
                             visible: numeral.cell ? numeral.cell.isToday : false
                         }
@@ -593,13 +597,17 @@ Item {
                         Text {
                             id: dayText
 
-                            /// Knocked out of the disc means centred in it;
-                            /// every other numeral sits on the rule the disc's
-                            /// left edge is on.
-                            x: numeral.cell && numeral.cell.isToday
-                                ? (view.numeralD - dayText.implicitWidth) / 2 : 0
+                            /// **The pill is what lines up, not the digits.**
+                            /// Today's numeral steps in by its own padding so
+                            /// the mark's right edge lands on the same rule
+                            /// every other date's does — otherwise the one cell
+                            /// the eye is looking for is the one whose marker
+                            /// hangs 5px closer to the grid line than the rest.
+                            anchors.right: parent.right
+                            anchors.rightMargin: view.contentInset
+                                + (numeral.cell && numeral.cell.isToday ? view.numeralPadH : 0)
                             anchors.verticalCenter: parent.verticalCenter
-                            text: numeral.cell ? numeral.cell.day : ""
+                            text: numeral.label
                             /// **Today, in the month, or out of it — and a
                             /// weekend is none of those.** Saturday's date is
                             /// a Tuesday's date; the weekend lives in the
@@ -691,6 +699,7 @@ Item {
                         hue: CalendarTokens.hues.forEvent(bar.source)
                         policy: view.policy
                         banner: true
+                        past: view.policy.isPast(bar.source, view.nowBound)
                         continuesLeft: bar.segment ? bar.segment.continuesLeft : false
                         continuesRight: bar.segment ? bar.segment.continuesRight : false
                         selected: bar.segment ? view.selectedId === bar.segment.id : false
@@ -754,6 +763,7 @@ Item {
                                     event: chipItem.source
                                     hue: CalendarTokens.hues.forEvent(chipItem.source)
                                     policy: view.policy
+                                    past: view.policy.isPast(chipItem.source, view.nowBound)
                                     selected: chipItem.source
                                         ? view.selectedId === chipItem.source.id : false
                                     use24: view.use24
@@ -783,7 +793,12 @@ Item {
                                     // read as a caption floating mid-cell.
                                     anchors.leftMargin: 0
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: "+" + stack.moreCount + " more"
+                                    /// **`"2 more"`, not `"+2 more"`.** The
+                                    /// wording is `MonthPolicy.moreLabel`: the
+                                    /// row is a sentence about the cell, and
+                                    /// the one `+` in this surface already
+                                    /// means *create* on the toolbar.
+                                    text: view.policy.moreLabel(stack.moreCount)
                                     color: Theme.textSecondary
                                     font.family: Theme.fontUi
                                     font.pointSize: Theme.pt(11)

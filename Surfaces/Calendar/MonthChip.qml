@@ -13,37 +13,54 @@
 // one name, and the week chip's own `compact` already means something different
 // (a short *meeting*, still in the time grid).
 //
-// ## Two shapes, one title column, and the difference is loud on purpose
+// ## Only one of the two shapes is filled, and that is the whole design
 //
-// A month view exists to answer one question per row of a cell: *is this at a
-// time, or is it all day?* The pass before this answered it with a 3px bar
-// versus a 6px dot on a 21px chip, and dropped the time from any chip whose
-// title wanted the width — measured on the capture, six of the day's events
-// carried no time at all, so a third of the grid could not be classified at
-// reading distance. Two cues fix it and neither is subtle:
+// Every pass before this one drew a month cell's events as a stack of filled
+// bricks — a tint of the hue behind every chip, timed and all-day alike. On one
+// chip it looks like an object; on a 42-cell grid carrying 90 of them it is a
+// mosaic, and the review said so twice: the grid's own structure (rules, dates,
+// today's mark) was reading *behind* a field of coloured rectangles, and the
+// loudest object in the window was whichever event happened to span three
+// columns. Raising or lowering the tint does not fix that. **The count of
+// filled rectangles is the problem, and the fix is to draw far fewer of them.**
 //
-//   - **A timed chip shows its time while the title can still be read.** The
-//     time *is* the classification, and a title elided two glyphs earlier costs
-//     less than an event of unknown kind — but a title cut to a stump costs
-//     more, so the trade is arithmetic and lives at seam 1
-//     (`MonthPolicy.chipText`, a share of the title's own glyphs).
-//   - **A banner is a stronger tint with an edge, a chip is a plain tint.** The
-//     pass before this made banners solid in the hue with `bgBase` ink, borrowed
-//     from the week grid's all-day band, and at month scale the borrow lost:
-//     a three-column saturated slab out-shouted today's accent disc, which is
-//     the one mark a month grid may not lose. So a banner mixes 15% of the bar
-//     colour into the same `tint(hue)` body and carries a hairline of the hue,
-//     one step from the chip beside it rather than five — and it keeps the same
-//     ink, so the ≥4.5:1 promise is one measurement for both shapes. What
-//     really says "all day" is the shape: a bar that spans its days.
+// So the two shapes stop being two strengths of one shape:
 //
-// **And there is no hue dot on a tinted chip.** The pass before this drew a 6px
-// dot at the head of every timed chip, which said in a second voice what the
-// body's own tint already says — the chip *is* that colour — and cost the title
-// ten pixels and a second left edge for it. So both shapes start their text on
-// one rule, `pad` in from the body edge, with nothing in front of it: the
-// previous pass had a banner's label at 8px from the body edge, a timed title at
-// 15px and a bar-chip title at 11px — three left edges inside one cell.
+//   - **A timed event is not a box at all.** It is a hue-coloured lozenge, then
+//     its time, then its title — three marks on the cell's own ground, with no
+//     fill, no border and no shape of its own. The reference draws it exactly
+//     this way, and the reason it works is that a timed event *is* a line item:
+//     it owns a moment, not a span, so there is nothing for a box to enclose.
+//     A cell of these reads as a list, which is what it is.
+//   - **A banner is the filled pill**, and now it is the only filled thing in
+//     the grid. It has earned the fill: it owns whole days, it runs across
+//     columns, and its shape is the statement. Because nothing else is filled,
+//     it needs no extra tint strength to be distinguishable — it is one step
+//     from its own cell rather than one step from the chip beside it — so it
+//     keeps the plain `tint(hue)` body the spec asks for, plus the 4px accent
+//     bar at its true start that says which hue it is at a glance.
+//
+// The hierarchy that falls out of this is the one a month grid wants: today's
+// mark first, the dates second, the banners third, the timed lines last. Before
+// this pass that order was exactly inverted.
+//
+// ## Strength splits past from future, not calendar from calendar
+//
+// Colour already says which calendar an event came from. The one thing the grid
+// could not say was *what has already happened*, so a reader had to find today's
+// row before the month meant anything. A finished event now recedes — the whole
+// row at `pastOpacity`, mark and text together, so the split is one gesture and
+// not a second colour system. The rule itself is `MonthPolicy.isPast`, which
+// compares the event's **end** against now, so a meeting running right now is
+// still future.
+//
+// ## One text column
+//
+// Both shapes start their text on one rule and the marks in front of it are the
+// same width, so a cell's timed lines and its banners' labels stand in a single
+// column. The previous pass had a banner's label at 8px from the body edge, a
+// timed title at 15px and a bar-chip title at 11px — three left edges inside one
+// cell.
 //
 // ## The atom is one line, laid out left to right, tight
 //
@@ -103,6 +120,19 @@ Item {
     property bool selected: false
     property bool use24: false
 
+    /// Already over at the view's `nowStamp` — decided by `MonthPolicy.isPast`,
+    /// never here. See the header: this is the grid's second axis and its only
+    /// one that is not colour.
+    property bool past: false
+
+    /// How far a finished **banner** recedes. A timed line spends its past-ness
+    /// on the title's ink instead (see `ink`); a banner cannot, because its ink
+    /// is solved against its own fill and moving one without the other breaks
+    /// the pair. So the pill dims as a whole, and 0.8 is where it stops: below
+    /// that the worst hue's ink-on-fill drops under 4.5:1 (0.75 measures 4.48,
+    /// 0.8 measures 4.81).
+    property real pastOpacity: 0.8
+
     /// Kept for callers that still name it; nothing draws a dot any more. See
     /// the header: on a tinted body the fill *is* the hue, and the dot was a
     /// second answer to a question already answered.
@@ -134,31 +164,65 @@ Item {
     /// Whether this event owns whole days rather than a slot in one.
     readonly property bool allDay: !!(chip.event && chip.event.allDay === true)
 
-    /// Ground and ink — **one step apart, not five.**
+    /// **A banner is filled; a timed chip has no ground at all.**
     ///
-    /// A banner was solid in the hue under `bgBase` ink for a pass, borrowed
-    /// from the week grid's all-day band. Measured on the month capture, the
-    /// borrow does not survive the change of scale: the week band holds two or
-    /// three bars against an empty strip, while a month row puts a saturated
-    /// slab across three columns of tinted chips, and the three-column tan of
-    /// "Nordic QML Days" was the loudest object in the window — louder than
-    /// today's marker, which is the one thing in a month grid that must win.
-    /// The spec's month section says it plainly: chip fill = `tint(hue)`.
+    /// The banner's fill is `HuePolicy.bannerAlpha` over the cell rather than
+    /// the chip table's `tintAlpha`, and the difference is what the fill is
+    /// being measured against. A week-grid chip's tint is one step from the
+    /// tinted chips beside it; a month banner has no tinted neighbours left, so
+    /// its step is against the bare cell, and at 0.16 the capture came back with
+    /// six banners that read as smudges rather than as pills — the one shape
+    /// carrying "this owns the day" was the faintest object in the grid.
     ///
-    /// So both shapes are tints of the same hue and the banner is one step up —
-    /// 15% of the bar colour mixed into the chip's own fill, plus a hairline of
-    /// the hue around it. That is enough to read as "a different kind of thing"
-    /// beside a chip and nowhere near enough to outrank the accent disc. The
-    /// ink is the same `text(hue)` both ways, which is what keeps the contrast
-    /// promise a single measurement instead of two (≥4.5:1 on both grounds, in
-    /// both modes).
-    readonly property color ground: chip.banner
-        ? Qt.tint(CalendarTokens.fill(chip.hue), Qt.alpha(CalendarTokens.bar(chip.hue), 0.15))
-        : CalendarTokens.fill(chip.hue)
+    /// A timed chip's ground is the cell, and the only time it paints one is
+    /// under the pointer or under a selection — where the mark being made is
+    /// "this row", not "this hue", so it is the shell's own `surfaceOverlay`
+    /// rather than a tint. That is also what keeps hover legible on a shape
+    /// with no edge of its own.
+    readonly property color bannerFill: CalendarTokens.hues.tint(
+        String(CalendarTokens.bar(chip.hue)), String(Theme.surfaceRaised),
+        CalendarTokens.hues.bannerAlpha(Theme.dark))
+
+    readonly property color ground: chip.banner ? chip.bannerFill : "transparent"
     readonly property color groundHover: chip.banner
-        ? Qt.tint(CalendarTokens.fillHover(chip.hue), Qt.alpha(CalendarTokens.bar(chip.hue), 0.15))
-        : CalendarTokens.fillHover(chip.hue)
-    readonly property color ink: CalendarTokens.text(chip.hue)
+        ? Qt.tint(chip.bannerFill, Qt.alpha(Theme.surfaceOverlay, 0.12))
+        : Theme.surfaceOverlay
+
+    /// The title's ink, and **the one thing a finished event changes.**
+    ///
+    /// A timed line's title is the page's own primary text, because that is what
+    /// it sits on: a month cell's list of the day should read as text first and
+    /// as colour-coding second. Past, it steps to `textMuted` — a whole token
+    /// down, not an opacity — which is what the reference does and what makes a
+    /// finished row recede without anything in it becoming unreadable. Both
+    /// values are measured on the cell ground: 13:1 and 4.56:1.
+    ///
+    /// This is deliberately *not* an opacity on the row. Dimming the whole line
+    /// to 0.55 took the time label with it, and a `textMuted` time at 0.55
+    /// composites to **2.35:1** — the smallest type in the surface, below any
+    /// reading threshold. The title is the only thing that has room to move.
+    readonly property color ink: chip.banner
+        ? CalendarTokens.text(chip.hue)
+        : (chip.past ? Theme.textMuted : Theme.textPrimary)
+
+    /// The time in front of the title, one rung quieter, and the **same** rung
+    /// whether the event has happened or not. On a banner it shares the title's
+    /// ink (there is no muted token solved against a hue fill); on a timed line
+    /// it is `textMuted` — 4.56:1 on the cell, which is all the headroom it has,
+    /// so past-ness is spent on the title instead.
+    readonly property color timeInk: chip.banner ? chip.ink : Theme.textMuted
+
+    /// The hue mark: a full-height accent bar down a banner's true start, and a
+    /// short rounded lozenge in front of a timed line. Same width and same left
+    /// rule for both, so one cell's marks make a column. Past, it drops to half
+    /// alpha over whatever ground it is on — still plainly its own colour, which
+    /// is the point of it, and plainly the quieter of two marks side by side.
+    readonly property color markInk: chip.past
+        ? Qt.alpha(CalendarTokens.bar(chip.hue), 0.5)
+        : CalendarTokens.bar(chip.hue)
+
+    readonly property int markW: 4
+    readonly property int markH: 13
 
     /// The start time, and only the start: an end time in a month cell's width
     /// is the thing that elides the title.
@@ -172,10 +236,25 @@ Item {
     readonly property string timeLabel: (!chip.event || chip.allDay || chip.continuesLeft)
         ? "" : chip.format.chipTime(chip.event.start, chip.use24)
 
-    /// **One text column, whatever the shape.** The body's own inset and
-    /// nothing else — a banner has no accent to clear and a tinted chip needs
-    /// none, so neither reserves a column for one. See the header.
-    readonly property real textX: chip.leadPad + chip.pad
+    /// Where the hue mark stands. A banner's accent bar is flush with the
+    /// pill's own left edge — it *is* the edge, in colour — while a timed
+    /// lozenge stands on the chip's left edge, which the view has already set
+    /// to the cell's content inset. Both therefore land on the same rule.
+    readonly property real markX: chip.banner ? 0 : chip.leadPad
+
+    /// **One text column, whatever the shape.** Mark width plus one gap, both
+    /// the same for a banner and for a timed line, so a cell's labels stand in
+    /// a single column no matter which shapes it happens to hold. A cut banner
+    /// draws no accent but still reserves its width, because the column is the
+    /// point.
+    readonly property real textX: chip.banner
+        ? chip.leadPad + chip.pad + chip.markW
+        : chip.markX + chip.markW + Theme.space2
+
+    /// The air after the last glyph. A banner has a body to stay inside; a
+    /// timed line's row is already inset by the cell, so a second inset there
+    /// would only shorten titles.
+    readonly property real tailPad: chip.banner ? chip.pad : 0
 
     /// The chevron a cut end carries, and the width it costs the title.
     readonly property int chevronSize: 12
@@ -184,14 +263,30 @@ Item {
     /// past that.** The threshold is `MonthPolicy.chipText` — a share of the
     /// title's own glyphs rather than a width of the chip — so the rule is
     /// stated once, tested at seam 1, and the same on every chip in the grid.
+    /// The room a title actually has: the body less its lead, its tail and any
+    /// chevron. **Handed to `chipText` already subtracted, with a zero inset**,
+    /// because that function's `inset` is one side of a symmetric pair and this
+    /// layout is not symmetric — a timed line leads with a mark and ends flush.
+    /// Passing the lead as if it were both sides charged every chip twice for
+    /// padding it does not have, and the measured cost was the *time* label
+    /// falling off chips with 146px of room and a 90px floor.
+    readonly property real titleRoom: chip.width - chip.textX - chip.tailPad
+        - (chip.continuesRight ? chip.chevronSize + chip.itemGap : 0)
+
     readonly property bool showsTime: chip.timeLabel.length > 0
-        && chip.policy.chipText(chip.width - (chip.continuesRight ? chip.chevronSize + chip.itemGap : 0),
-                                chip.label.length, timeMetrics.width, titleMetrics.width,
-                                chip.pad, chip.itemGap).showsTime
+        && chip.policy.chipText(chip.titleRoom, chip.label.length,
+                                timeMetrics.width, titleMetrics.width,
+                                0, chip.itemGap).showsTime
 
     signal activated
 
     implicitHeight: 21
+
+    /// Only a banner recedes as a whole object. See `pastOpacity`: a timed
+    /// line's smallest type has no headroom for an opacity, so its past-ness is
+    /// a token step on the title and a half-alpha mark, both of which are
+    /// measured on the ground they actually land on.
+    opacity: (chip.past && chip.banner) ? chip.pastOpacity : 1
 
     TextMetrics {
         id: titleMetrics
@@ -222,20 +317,45 @@ Item {
         topRightRadius: chip.continuesRight ? 0 : body.radius
         bottomRightRadius: chip.continuesRight ? 0 : body.radius
 
-        // Solid for a banner, tinted for a chip — see the header.
+        // Filled for a banner; for a timed line, nothing at all until the
+        // pointer or a selection asks for a row to be marked.
         color: (chip.selected || chip.hovered) ? chip.groundHover : chip.ground
 
         // Selection is a ring in the hue. Inside the chip rather than outside
         // it: at this pitch a ring 1px proud of the body would touch the chip
         // above it, and two selected chips in a stack would share an edge.
         //
-        // A banner carries the same hairline unselected at a third of the
-        // weight — the edge is what lets a one-step-stronger tint read as a
-        // different kind of object rather than as a chip caught mid-hover.
-        border.width: (chip.selected || chip.banner) ? 1 : 0
-        border.color: chip.selected
-            ? CalendarTokens.bar(chip.hue)
-            : Qt.alpha(CalendarTokens.bar(chip.hue), 0.45)
+        // **Only a selection draws one now.** A banner carried a permanent
+        // hairline while it had to out-read a grid of tinted chips; with the
+        // chips unfilled it is the only filled object in its cell and the edge
+        // was one more line in a picture already full of them.
+        border.width: chip.selected ? 1 : 0
+        border.color: CalendarTokens.bar(chip.hue)
+
+        /// The hue, as a mark rather than as a wash.
+        ///
+        /// A banner gets the reference's 4px accent bar down its true start —
+        /// full height, flush, sharing the pill's own left rounding, and absent
+        /// on a half the row cut, because a bar in the middle of a run would
+        /// claim that run started there.
+        ///
+        /// A timed line gets a short rounded lozenge on the same rule. It is
+        /// the *only* colour that line carries, which is why it is a solid bar
+        /// colour and not a tint: a 4x13 mark has to be legible at a glance
+        /// from four feet away, and a tint of it would not be.
+        Rectangle {
+            id: mark
+
+            x: chip.markX
+            width: chip.markW
+            height: chip.banner ? parent.height : chip.markH
+            anchors.verticalCenter: parent.verticalCenter
+            color: chip.markInk
+            radius: chip.banner ? 0 : chip.markW / 2
+            topLeftRadius: chip.banner ? body.topLeftRadius : mark.radius
+            bottomLeftRadius: chip.banner ? body.bottomLeftRadius : mark.radius
+            visible: !(chip.banner && chip.continuesLeft)
+        }
 
         /// The way the event went, at the end the grid cut. Only the sending
         /// half draws it, and it sits inside the gutter the bar already keeps,
@@ -262,7 +382,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: chip.timeLabel
             visible: chip.showsTime
-            color: chip.ink
+            color: chip.timeInk
             /// **Full strength, and the hierarchy comes from weight.** The time
             /// carried 0.62 alpha for a pass and measured 3.36–3.39:1 against
             /// its own fill on every hue — the smallest text in the view was
@@ -284,7 +404,7 @@ Item {
             id: title
 
             x: time.visible ? time.x + timeMetrics.width + chip.itemGap : chip.textX
-            width: Math.max(0, body.width - title.x - chip.pad
+            width: Math.max(0, body.width - title.x - chip.tailPad
                                - (chevron.visible ? chip.chevronSize + chip.itemGap : 0))
             anchors.verticalCenter: parent.verticalCenter
             text: chip.label

@@ -45,6 +45,18 @@ Item {
     /// content rule needs the duration that was floored, not the floor.
     property real minutes: 60
 
+    /// How many cascade steps into an overlap cluster this chip is — 0 for a
+    /// chip that shares its column side by side, higher for one drawn over a
+    /// neighbour. `EventLayoutPolicy.layout` decides it; the chip only reads it
+    /// as "am I a card lying on another card", which is a picture and so lives
+    /// here.
+    property int depth: 0
+
+    /// How many pixels of this chip a cascaded neighbour leaves visible.
+    /// `Infinity` — the default — is "all of them", which is every chip nothing
+    /// is drawn over.
+    property real clearHeight: Infinity
+
     property bool selected: false
 
     /// 12h or 24h, from the shell's one clock-format knob.
@@ -64,7 +76,8 @@ Item {
     /// with how much padding. One object, so the chip can never take its title
     /// rule from one branch and its padding from another.
     readonly property var content:
-        chip.layoutPolicy.chipContent(chip.width, chip.height, chip.minutes)
+        chip.layoutPolicy.chipContent(chip.width, chip.height, chip.minutes,
+                                      chip.clearHeight)
 
     readonly property string rawTitle:
         chip.event ? (chip.event.title || "Untitled") : ""
@@ -84,12 +97,36 @@ Item {
         visible: chip.selected
     }
 
+    /// The lift under a cascaded chip.
+    ///
+    /// A chip drawn over another needs an edge that is not the other chip's
+    /// fill, or the two tints run together and the stack reads as one chip with
+    /// a scratch down it. This is that edge and it is deliberately *one* pixel
+    /// of the page colour: the reference's own answer to the same problem is a
+    /// rail, a sliver of the chip beneath and a pale shadow gap stacked up to
+    /// about twelve pixels of decoration, which is a stripe pattern rather than
+    /// a shadow. One dark pixel outside the corner reads as a card lying on a
+    /// card and costs the chip underneath nothing.
+    Rectangle {
+        visible: chip.depth > 0
+        anchors.fill: parent
+        anchors.margins: -1
+        radius: (chip.content.tight ? 3 : Theme.radiusSm) + 1
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.alpha(Theme.bgBase, 0.85)
+    }
+
     Rectangle {
         id: body
 
         anchors.fill: parent
         clip: true
-        radius: Theme.radiusSm
+        // A 6px radius on a 40px chip eats the top and bottom of the accent
+        // bar clipped inside it, and the bar then reads as a floating tick
+        // rather than the chip's own edge. The packed tier corners at 3, which
+        // is still a corner and leaves the bar whole.
+        radius: chip.content.tight ? 3 : Theme.radiusSm
         color: chip.hovered ? CalendarTokens.fillHover(chip.hue) : CalendarTokens.fill(chip.hue)
         border.width: 1
         border.color: CalendarTokens.chipBorder(chip.hue)
@@ -119,7 +156,9 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.bottom: parent.bottom
+            // Bounded by the visible box for the reason the one-line row below
+            // is, even though both its children hang off the top edge.
+            height: Math.min(parent.height, chip.clearHeight)
             anchors.leftMargin: chip.content.padLeft
             anchors.rightMargin: chip.content.padRight
             anchors.topMargin: chip.content.padTop
@@ -134,7 +173,12 @@ Item {
                 // Wrapping is the packed column's whole answer: four glyphs on
                 // a line is `Des…` however it is cut, and the same chip has
                 // vertical room its duration already paid for.
-                wrapMode: chip.content.titleLines > 1 ? Text.WordWrap : Text.NoWrap
+                // `Text.Wrap`, not `WordWrap`: word boundaries first, and a
+                // break inside a word only where no boundary can fit. Under
+                // `WordWrap` a word wider than the box overhangs and is clipped
+                // by the body with no ellipsis to say so — a silent lie about
+                // the title, where `Wrap` at least admits the cut.
+                wrapMode: chip.content.titleLines > 1 ? Text.Wrap : Text.NoWrap
                 elide: Text.ElideRight
                 maximumLineCount: chip.content.titleLines
                 color: CalendarTokens.text(chip.hue)
@@ -147,7 +191,11 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: stackedTitle.bottom
-                anchors.topMargin: chip.content.narrow ? 0 : 1
+                // The banner tier has already spent its slack on the second
+                // line; a leading of even one pixel is the pixel that would
+                // clip its descenders against the card below.
+                anchors.topMargin:
+                    (chip.content.narrow || chip.content.banner) ? 0 : 1
                 visible: chip.content.showTime
                 text: chip.timeLabel
                 // A time that elides is not a time. Where the last pixel or two
@@ -158,10 +206,26 @@ Item {
                 minimumPointSize: Theme.pt(8)
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.78)
+                font.features: CalendarTokens.tabularFigures
+                // Full strength, not the 0.78 the spec asked for. Measured with
+                // `tools/measure-contrast.py`'s arithmetic: the eight dark texts
+                // on their own fills are 4.56-5.43:1 at alpha 1 and **3.44-4.00
+                // at 0.78** — so the fade the spec wanted for hierarchy was
+                // spending the one ratio a chip is not allowed to spend. Size
+                // and weight carry the hierarchy instead; they cost nothing
+                // legibility owns.
+                color: CalendarTokens.text(chip.hue)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
-                font.weight: Theme.weightRegular
+                // Regular carries the hierarchy at the roomy sizes; at the
+                // banner and tight tiers it stops carrying anything. A pt(9)
+                // stem is under a pixel wide, so half its coverage is
+                // antialiasing and the *measured* ratio off a capture drops
+                // roughly a point below the computed one. Medium puts the ink
+                // back without moving the size, and at 9 against a 10.5 title
+                // the size difference is still the hierarchy.
+                font.weight: (chip.content.banner || chip.content.tight)
+                    ? Theme.weightMedium : Theme.weightRegular
             }
         }
 
@@ -176,18 +240,26 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.bottom: parent.bottom
+            // **The box is the visible box, not the chip.** A one-line chip
+            // centres its line, and a cascaded chip covered 30 minutes into a
+            // 90-minute box centres it 42px down — behind the card that covers
+            // it. Bounding the row by the clear band puts the line where it can
+            // be read; on every chip nothing covers, `clearHeight` is infinite
+            // and this is the chip's own height, as it was.
+            height: Math.min(parent.height, chip.clearHeight)
             anchors.leftMargin: chip.content.padLeft
             anchors.rightMargin: chip.content.padRight
 
             Text {
                 id: inlineTime
 
-                visible: chip.content.showTime
+                visible: chip.content.showTime && chip.inlineTimeShown
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.timeLabel
-                color: Qt.alpha(CalendarTokens.text(chip.hue), 0.78)
+                // Full strength, for the reason the stacked time above is.
+                color: CalendarTokens.text(chip.hue)
+                font.features: CalendarTokens.tabularFigures
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
                 font.weight: Theme.weightRegular
@@ -196,7 +268,11 @@ Item {
             Text {
                 anchors.left: parent.left
                 anchors.right: inlineTime.visible ? inlineTime.left : parent.right
-                anchors.rightMargin: inlineTime.visible ? Theme.space2 : 0
+                // `space1` and not `space2`: on a one-line chip the gap is the
+                // only thing standing between a whole title and `Stand…`, and
+                // four pixels of air already separate two runs of type at
+                // different weights.
+                anchors.rightMargin: inlineTime.visible ? Theme.space1 : 0
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.clippedTitle
                 elide: Text.ElideRight
@@ -217,10 +293,11 @@ Item {
     readonly property string timeLabel: {
         if (!chip.event)
             return "";
+        const meridiem = chip.content.timeMeridiem;
         if (chip.continuesAbove)
-            return "→ " + chip.format.chipTime(chip.event.end, chip.use24);
+            return "→ " + chip.format.startTime(chip.event.end, chip.use24, meridiem);
         if (chip.continuesBelow || chip.content.timeForm === "start")
-            return chip.format.chipTime(chip.event.start, chip.use24);
+            return chip.format.startTime(chip.event.start, chip.use24, meridiem);
         return chip.format.timeRange(chip.event.start, chip.event.end, chip.use24);
     }
 
@@ -236,13 +313,22 @@ Item {
     /// The title, cut to fit at a word boundary. The width available is the
     /// text box the content rule sized, less whatever an inline time is taking
     /// off the end of the same line.
+    /// Whether the one-line row keeps its time. The two measurements are the
+    /// chip's; the rule is `EventLayoutPolicy.inlineTimeFits`.
+    readonly property bool inlineTimeShown:
+        chip.content.mode !== "inline"
+        || chip.layoutPolicy.inlineTimeFits(chip.content.textWidth,
+                                            titleMetrics.width,
+                                            inlineTime.implicitWidth,
+                                            Theme.space1)
+
     readonly property string clippedTitle: {
         // Wrapping already breaks at word boundaries and elides the last line,
         // so the hand-cut form is only for the chips held to one.
         if (chip.content.titleLines > 1)
             return chip.rawTitle;
-        const inlineCost = chip.content.mode === "inline"
-            ? inlineTime.implicitWidth + Theme.space2 : 0;
+        const inlineCost = (chip.content.mode === "inline" && chip.inlineTimeShown)
+            ? inlineTime.implicitWidth + Theme.space1 : 0;
         const avail = chip.content.textWidth - inlineCost;
         if (chip.rawTitle.length === 0 || titleMetrics.width <= avail)
             return chip.rawTitle;

@@ -59,6 +59,19 @@ Singleton {
     /// day separator, three starts to look like a gap in the schedule.
     readonly property int chipGap: 2
 
+    /// The lead-in between a column's own day separator and the first chip in
+    /// it. It was 1px — enough to clear the rule and nothing more, so a chip in
+    /// Tuesday's last lane and one in Wednesday's first were `2 + rule + 1` = 4
+    /// pixels apart and read as one block with a scratch down it. 2 makes the
+    /// pair `2 + rule + 2` = 5, and the chip's left edge sits *off* the rule
+    /// rather than on it, which is the whole complaint.
+    ///
+    /// 2 and not the 4 that would look tidier still, because the lead-in comes
+    /// out of the track every lane divides: at three lanes in a 124px column
+    /// each extra pixel of inset is a third of a pixel off a chip that has
+    /// none to give.
+    readonly property int chipInset: 2
+
     /// The shortest a chip is ever drawn, whatever its duration says. A 15
     /// minute event is 14px of grid and 14px of chip is not a hit target.
     readonly property int chipMinH: 20
@@ -77,6 +90,17 @@ Singleton {
     /// The chrome controls along the toolbar: chevrons, Today, and each
     /// segment of the view switcher all stand this tall.
     readonly property int controlH: 30
+
+    /// Lining, tabular figures — `font.features` for every number on this
+    /// surface that sits in a column with another number: the hour gutter, the
+    /// day-header numerals, the now stamp, and every time printed on a chip.
+    ///
+    /// Proportional figures are the default and they are wrong here for a
+    /// reason that only shows up in a grid: a `1` is narrower than a `0`, so
+    /// `10:00` and `11:00` are different widths, and a column of times ragged
+    /// by a pixel and a half per row reads as a column that is not aligned. It
+    /// is also what makes a live stamp jitter as the minute rolls over.
+    readonly property var tabularFigures: ({ "tnum": 1, "lnum": 1 })
 
     // --- the column washes ----------------------------------------------------
 
@@ -101,9 +125,20 @@ Singleton {
     /// at 0.55, which is 1.28:1: the same step light mode gets from `bgSunken`,
     /// and the first value at which Sat/Sun read as a pair without the columns
     /// looking disabled.
+    /// And once more, for the same reason and off the same measurement. 0.55
+    /// is 1.28:1 and reads as a pair *when you look for it*; the note that came
+    /// back off the picture was that Saturday and Sunday were indistinguishable
+    /// from a weekday, which is what a wash you have to look for means. 0.8 is
+    /// 1.44:1 — still under the 1.6:1 at which a column starts reading as
+    /// disabled rather than as quiet, and the first value that lands without
+    /// being hunted for.
+    ///
+    /// The header carries a second, independent cue at the same time: a weekend
+    /// numeral is `textSecondary` where a weekday's is `textPrimary`. Two weak
+    /// signals that agree beat one strong one, and neither has to shout.
     readonly property color weekendWash: Theme.dark
-        ? Qt.alpha(Theme.surfaceOverlay, 0.55)
-        : Qt.alpha(Theme.bgSunken, 0.75)
+        ? Qt.alpha(Theme.surfaceOverlay, 0.8)
+        : Qt.alpha(Theme.bgSunken, 0.9)
 
     /// Today's column. A hue against a neutral rather than a lightness against
     /// a lightness, so one alpha works in both modes.
@@ -111,7 +146,32 @@ Singleton {
     /// capture, today at 0.05 was *dimmer* than a Saturday, which inverts the
     /// two signals. Today has to be at least as loud as the column it may
     /// itself be.
-    readonly property color todayWash: Qt.alpha(Theme.accentPrimary, 0.11)
+    /// 0.17 now, and it moves whenever the weekend wash does, because the one
+    /// thing that must stay true is the *order*: today is louder than a
+    /// weekend, a weekend is louder than a weekday. Measured off the capture at
+    /// 0.11 against the stronger weekend wash, today came out 1.19:1 where
+    /// Saturday was 1.28 — today reading as the quietest column on the grid,
+    /// which is the signal exactly backwards.
+    /// 0.24 now, and this time the measurement is of the *pair* rather than of
+    /// either wash against the page. At 0.17 today came out rgb(28,45,44) and a
+    /// weekend rgb(31,41,36): two different hues at 1.05:1 of each other, which
+    /// is two colours doing one job — today was being carried entirely by the
+    /// teal pill in its header, and the wash under it was decoration. 0.24 puts
+    /// today at 1.23:1 over a weekend and 1.59:1 over a weekday, so the order
+    /// the two signals are supposed to state — today loudest, weekend next,
+    /// weekday quietest — is now a step you can see rather than one you can
+    /// only compute.
+    /// 0.30 now, and the measurement that moved it is a *value* one rather than
+    /// a colour one. At 0.24 today came out rgb(35,58,57) against a weekend's
+    /// rgb(31,42,36) — 1.23:1, which two hues can carry and one greyscale cannot:
+    /// desaturate the capture and today and Saturday are the same wash, so a
+    /// value-blind reader is left with the header pill alone. 0.30 is 1.42:1 over
+    /// a weekend and 1.83:1 over a weekday, which survives the desaturation. The
+    /// light alpha stays lower because there both washes move the same direction
+    /// — down, off paper — and 0.30 of a dark teal on paper is a selection, not a
+    /// wash.
+    readonly property color todayWash:
+        Qt.alpha(Theme.accentPrimary, Theme.dark ? 0.30 : 0.20)
 
     // --- the hues -------------------------------------------------------------
 
@@ -142,8 +202,16 @@ Singleton {
                                      "#5b9dd9", "#afbd7a", "#b295cf", "#9d9e8d"]
     readonly property var fillsDark: ["#325150", "#3d5132", "#554b3a", "#684235",
                                       "#304f65", "#464f37", "#50495d", "#484d44"]
-    readonly property var textsDark: ["#a5d3d3", "#b6d3a3", "#dec9af", "#e5b2a3",
-                                      "#9ac1e0", "#c6d2ac", "#c9bcda", "#bec1b6"]
+    /// Text on fill, at **6:1 and not 4.5**, and the extra 1.5 is not headroom
+    /// for its own sake. 4.5:1 is a threshold on two flat colours; a chip prints
+    /// pt(9)–pt(12.5) type, antialiased, so every glyph's edge pixels are blends
+    /// of ink and fill and the *measured* ratio off a capture comes in below the
+    /// computed one — 4.56 computed read 4.3 on the picture, and the second line
+    /// read 3.9. Solving at 6.0 puts the whole set over AA once the renderer has
+    /// had its say, and the hues are still the hues: each ink keeps its hue and
+    /// saturation and only its lightness moved.
+    readonly property var textsDark: ["#bbdede", "#c7ddb9", "#e6d6c2", "#efd0c7",
+                                      "#c3daed", "#d2dbbd", "#ddd5e8", "#d6d7d0"]
 
     readonly property var barsLight: ["#0c757b", "#4a7d35", "#8a5a2f", "#b0512f",
                                       "#23608f", "#59682c", "#6b4a8f", "#68695b"]
@@ -155,8 +223,8 @@ Singleton {
     /// on them. These are the same inks stepped down until every one clears
     /// 4.6:1 — still recognisably the hue, which is what a colour-coded
     /// calendar is for.
-    readonly property var textsLight: ["#0a6469", "#39612a", "#7c522b", "#8f4227",
-                                       "#215b88", "#515e28", "#6b4a8f", "#595a4e"]
+    readonly property var textsLight: ["#085256", "#305224", "#664323", "#783821",
+                                       "#1c4d74", "#434e21", "#593d77", "#4b4b41"]
 
     readonly property var bars: Theme.dark ? tokens.barsDark : tokens.barsLight
     readonly property var fills: Theme.dark ? tokens.fillsDark : tokens.fillsLight

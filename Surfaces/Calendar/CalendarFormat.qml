@@ -289,6 +289,33 @@ QtObject {
         return format.stampTime(startStamp, use24) + " – " + format.stampTime(endStamp, use24);
     }
 
+    /// A week chip's start-only time — **the first token of `timeRange`, and
+    /// nothing else**.
+    ///
+    ///   with meridiem     `"10:30 AM"` / `"10:30"` on a 24-hour clock
+    ///   without           `"10:30"`
+    ///
+    /// One surface, one clock grammar. A chip too narrow for a range prints the
+    /// half of the range it can carry, in the notation the wide chip beside it
+    /// already used; it does **not** switch to `chipTime`'s `"10:30a"`, which is
+    /// the month grid's notation and exists there because a month cell has one
+    /// line for a title and a time together. Two notations a column apart make
+    /// the eye re-learn the clock per chip width, and the reader who mistakes
+    /// `10a` for a duration has been failed by the calendar, not by their eyes.
+    ///
+    /// `withMeridiem` is the caller's, because only the caller knows how many
+    /// pixels the token has — `EventLayoutPolicy.chipContent` decides it, and
+    /// the 24-hour clock has no meridiem to decide about.
+    function startTime(stamp: string, use24: bool, withMeridiem: bool): string {
+        const s = format.time.parseStamp(stamp);
+        if (!s)
+            return "";
+        if (use24)
+            return format.time.pad2(s.hour) + ":" + format.time.pad2(s.minute);
+        const clock = (s.hour % 12 || 12) + ":" + format.time.pad2(s.minute);
+        return withMeridiem ? clock + (s.hour < 12 ? " AM" : " PM") : clock;
+    }
+
     /// How long something lasts, at most two units: `"45m"`, `"1h"`,
     /// `"1h 30m"`, `"2d"`, `"1d 4h"`.
     ///

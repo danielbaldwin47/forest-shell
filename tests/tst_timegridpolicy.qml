@@ -468,16 +468,42 @@ TestCase {
         const now = grid.nowLineY("2026-08-18T13:40", 56);
         fuzzyCompare(now, 13 * 56 + 40 * 56 / 60, 0.01);
 
-        // 14:00 is 18.7px below it and is the label actually being printed
-        // over — it goes.
+        // 14:00 is 18.7px below it, and that is the case the capture ruled on:
+        // `2 PM` twenty pixels under a live `1:40 PM` reads as a pair of numbers
+        // rather than as a rule name and a clock. Inside `labelCollapse` the
+        // hour label goes; the rule it names is still drawn, and 1 PM and 3 PM
+        // still bracket it.
         verify(grid.hourLabelHidden(14 * 56, now));
+        compare(grid.hourLabelShift(14 * 56, now), 0);
 
         // 13:00 is the *current hour* and is 37px away, with nothing near it.
         // Hiding it would blank a legible label and leave the illegible one.
         verify(!grid.hourLabelHidden(13 * 56, now));
+        compare(grid.hourLabelShift(13 * 56, now), 0);
 
         verify(!grid.hourLabelHidden(12 * 56, now));
         verify(!grid.hourLabelHidden(15 * 56, now));
+    }
+
+    function test_hourLabelShift_separates_to_the_gap_and_never_crosses() {
+        // Below the stamp, inside the nudge band: pushed down to exactly
+        // `labelGap`. Closer than `labelCollapse` and it would be hidden
+        // instead, which is the case below.
+        fuzzyCompare(112 + grid.hourLabelShift(112, 90), 90 + grid.labelGap, 0.001);
+        // Above it: pushed up to exactly `labelGap`, never through it.
+        fuzzyCompare(68 + grid.hourLabelShift(68, 90), 90 - grid.labelGap, 0.001);
+
+        // Outside the band nothing moves, and a hidden label is not nudged —
+        // a shift is a thing that happens to a label you can see.
+        compare(grid.hourLabelShift(100, 90 - grid.labelGap), 0);
+        compare(grid.hourLabelShift(90, 90), 0);
+        compare(grid.hourLabelShift(100, -1), 0);
+
+        // And the nudge is bounded by the two distances, so a label never
+        // leaves the neighbourhood of its own rule.
+        for (let d = -grid.labelGap; d <= grid.labelGap; d++)
+            verify(Math.abs(grid.hourLabelShift(90 + d, 90))
+                   <= grid.labelGap - grid.labelCollapse);
     }
 
     function test_hourLabelHidden_hides_nothing_without_a_now_line() {
@@ -488,11 +514,13 @@ TestCase {
     }
 
     function test_hourLabelHidden_gap_is_symmetric_and_overridable() {
-        compare(grid.labelGap, 20);
+        compare(grid.labelGap, 24);
+        compare(grid.labelCollapse, 20);
+        // Hiding is the inner distance; the outer one nudges.
         verify(grid.hourLabelHidden(100, 119));
         verify(grid.hourLabelHidden(100, 81));
         verify(!grid.hourLabelHidden(100, 120));
         verify(!grid.hourLabelHidden(100, 80));
-        verify(!grid.hourLabelHidden(100, 119, 5));
+        verify(!grid.hourLabelHidden(100, 106, 5));
     }
 }

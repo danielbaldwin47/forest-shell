@@ -383,4 +383,36 @@ TestCase {
             }
         }
     }
+
+    // --- the week chip's start-only time ---------------------------------------
+
+    function test_a_start_time_is_the_range_s_own_first_token() {
+        // One clock grammar per surface. `timeRange` opens `10:30 – 11:45 AM`;
+        // a chip too narrow for the range prints `10:30 AM`, and where even the
+        // meridiem will not fit, `10:30` — the same first token, never
+        // `chipTime`'s `10:30a`, which is the month grid's notation.
+        compare(format.timeRange("2026-08-18T10:30", "2026-08-18T11:45", false),
+                "10:30 – 11:45 AM");
+        compare(format.startTime("2026-08-18T10:30", false, true), "10:30 AM");
+        compare(format.startTime("2026-08-18T10:30", false, false), "10:30");
+        compare(format.startTime("2026-08-18T09:00", false, true), "9:00 AM");
+        // `:00` is kept, unlike `chipTime`: a stack of chips lines its times up
+        // only if every one of them is the same shape.
+        compare(format.startTime("2026-08-18T09:00", false, false), "9:00");
+        compare(format.startTime("2026-08-18T13:05", false, true), "1:05 PM");
+        compare(format.startTime("2026-08-18T12:00", false, true), "12:00 PM");
+        compare(format.startTime("2026-08-18T00:15", false, true), "12:15 AM");
+    }
+
+    function test_a_24_hour_start_time_has_no_meridiem_to_drop() {
+        compare(format.startTime("2026-08-18T09:00", true, true), "09:00");
+        compare(format.startTime("2026-08-18T09:00", true, false), "09:00");
+        compare(format.startTime("2026-08-18T13:05", true, false), "13:05");
+    }
+
+    function test_an_unparseable_start_time_prints_nothing() {
+        compare(format.startTime("2026-08-18", false, true), "");
+        compare(format.startTime("", false, true), "");
+        compare(format.startTime("2026-08-18T24:00", true, false), "");
+    }
 }

@@ -16,6 +16,9 @@
 //    order or an insertion time — any of which would repaint the whole week
 //    when one event is deleted and would make two captures of the same fixture
 //    two different pictures.
+// 3. **The hash never hands out grey.** See `autoCount`: grey is a status in
+//    every calendar anyone has used, so it cannot also be the colour a coin
+//    toss gives an ordinary meeting.
 pragma ComponentBehavior: Bound
 import QtQuick
 
@@ -30,6 +33,14 @@ QtObject {
     ]
 
     readonly property int count: policy.names.length
+
+    /// How many of them the **hash** may hand out. Seven, not eight: `stone` is
+    /// the grey one, and grey is not a colour in a calendar — it is a status.
+    /// Every calendar the reader has used paints a declined or tentative event
+    /// grey, so an event that was auto-coloured grey is an event wearing a
+    /// meaning nobody gave it. It stays on the wheel because a person may pick
+    /// it, and it stays last so picking it by index does not move anything else.
+    readonly property int autoCount: policy.count - 1
 
     /// A stable non-negative hash of a string. djb2, kept here rather than
     /// pulled from anywhere clever because the only property that matters is
@@ -69,7 +80,7 @@ QtObject {
                     return n;
             }
         }
-        return policy.hash(id) % policy.count;
+        return policy.hash(id) % policy.autoCount;
     }
 
     /// The same question asked of a whole event, which is what a surface has in
@@ -80,5 +91,97 @@ QtObject {
         if (!event)
             return 0;
         return policy.indexFor(event.colour, event.id);
+    }
+
+    // --- keeping neighbours apart ---------------------------------------------
+    //
+    // A hash spreads evenly over the *wheel*, which is not the same as spreading
+    // evenly over the *eye*. The fixture's Tuesday drew `ember` beside
+    // `lamplight` — 15° and 30° on the colour circle, two chips that touch, and
+    // at the low chroma these fills sit at they were reported as one colour with
+    // a rendering glitch down the middle. Hue is only information while two hues
+    // are different; two indistinguishable ones are worse than one, because the
+    // reader spends a beat deciding whether they mean the same thing.
+    //
+    // So a *day* of chips is checked for perceptual collisions and the collider
+    // is rotated. A day and not an overlap cluster: chips that overlap touch
+    // side to side, but a 2 pm meeting ending where a 3 pm one begins touches
+    // too — the fixture's Thursday drew that pair a family apart, one column,
+    // two chips, one apparent colour — and a day is the unit the eye compares
+    // in a glance. Three properties are held on purpose:
+    //
+    //   - **the hash still decides.** A hue only moves when it collides, so most
+    //     events keep the colour they always had.
+    //   - **an explicit colour never moves.** Someone chose it; a policy that
+    //     overrode a choice to improve a picture would be lying about the data.
+    //   - **it is per day, not per week.** Spreading a whole week would repaint
+    //     Friday because something moved on Monday, and two chips four columns
+    //     apart were never going to be confused with each other.
+
+    /// Where each hue sits on the colour circle, in degrees, measured off the
+    /// dark bar inks in `CalendarTokens`. `stone` is the grey one and has no
+    /// meaningful angle; it is parked at -1 and treated as far from everything,
+    /// which is true — a desaturated chip is never confusable with a saturated
+    /// one whatever their hues.
+    readonly property var angles: [185, 95, 30, 15, 210, 70, 275, -1]
+
+    /// Two hues closer than this on the circle are one colour to the reader at
+    /// chip size and chip chroma. 45 is the measured gap: `ember` to
+    /// `lamplight` is 15 and was called indistinguishable; `lichen` to `moss`
+    /// is 25 and is the next pair down; `moss` to `glacier` is 90 and nobody
+    /// has ever confused them.
+    readonly property int minSeparationDeg: 45
+
+    /// The angular distance between two hues, or a large number when either is
+    /// the grey.
+    function separation(a: int, b: int): real {
+        const x = policy.angles[a % policy.count];
+        const y = policy.angles[b % policy.count];
+        if (x < 0 || y < 0)
+            return 360;
+        const d = Math.abs(x - y) % 360;
+        return Math.min(d, 360 - d);
+    }
+
+    /// Hues for one day of events, in the order they were given:
+    /// `[hueIndex, ...]`, the same length as `events`.
+    ///
+    /// A colliding auto-hue is rotated by +3 at a time — 3 is coprime with the
+    /// seven the hash may hand out, so the rotation visits every one of them
+    /// before repeating, and the first clear hue wins. If the day is busy
+    /// enough that no hue is clear — five or more chips, where the wheel simply
+    /// runs out of 45° gaps — the hash's own answer stands: a repeated colour is
+    /// a smaller lie than a colour chosen by how far the loop happened to get.
+    function spread(events: var): var {
+        const list = events || [];
+        const out = [];
+        const taken = [];
+        for (let i = 0; i < list.length; i++) {
+            const event = list[i];
+            const base = policy.forEvent(event);
+            const fixed = !!(event && event.colour
+                             && String(event.colour).trim().length > 0);
+            let hue = base;
+            if (!fixed) {
+                for (let step = 0; step < policy.autoCount; step++) {
+                    const candidate = (base + step * 3) % policy.autoCount;
+                    let clear = true;
+                    for (let t = 0; t < taken.length; t++) {
+                        if (policy.separation(candidate, taken[t])
+                            < policy.minSeparationDeg) {
+                            clear = false;
+                            break;
+                        }
+                    }
+                    if (clear) {
+                        hue = candidate;
+                        break;
+                    }
+                }
+            }
+            taken.push(hue);
+            out.push(hue);
+        }
+        return out;
     }
 }

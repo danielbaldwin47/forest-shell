@@ -139,9 +139,41 @@ QtObject {
     }
 
     /// How close an hour label may come to the live-time label before one of
-    /// them has to go. Two labels at pt(11) are ~15px tall, so 20 is one gap
-    /// between them plus a little air.
-    readonly property int labelGap: 20
+    /// them has to move, and how close before one of them has to go.
+    ///
+    /// **The gap was 20 and it cost the grid its anchor.** At 13:40 with
+    /// `hourRow: 56` the 14:00 label is 18.7px below the stamp — inside 20, so
+    /// it was suppressed — while three chips in that band read `2:00 – 3:00 PM`
+    /// and the hour they named had no label. Losing the hour rule's name
+    /// exactly where the live time is pointing is the worst place on the grid
+    /// to lose it.
+    ///
+    /// So the rule is now two distances rather than one. Between `labelGap` and
+    /// `labelCollapse` the hour label is *nudged* clear (`hourLabelShift`) and
+    /// keeps its name; a nudge is at most `labelGap - labelCollapse` = 9px,
+    /// which is under a fifth of an hour row and reads as a label leaning off
+    /// its rule rather than as a label on the wrong one. Inside
+    /// `labelCollapse` the two are genuinely on top of each other and no nudge
+    /// short enough to be honest would separate them, so the hour label goes.
+    ///
+    /// 24, and the number is a *reading* distance rather than a collision one.
+    /// Two pt(11) labels clear each other's boxes at 16 apart, which is why 16
+    /// was the number; at 16 they still read as one stack of two numbers, and the
+    /// note off the capture was that `2 PM` crowded the live `1:40 PM` twenty
+    /// pixels under it. A gutter is a column of one number per rule, so the
+    /// exception has to be spaced like one — 24 is where the eye stops pairing
+    /// them.
+    readonly property int labelGap: 24
+
+    /// Where nudging stops and hiding starts, and it is now most of the band.
+    ///
+    /// A nudge moves an hour label off its own rule, which is the one convention
+    /// this gutter has; spending 17px of that to seat a label the live stamp is
+    /// already standing next to buys a worse picture than dropping it. Inside
+    /// 20px the hour label goes and the stamp speaks for the band — the rule is
+    /// still drawn, and the hour above and below still name it. Past 20 the
+    /// nudge is small enough to be honest.
+    readonly property int labelCollapse: 20
 
     /// Whether an hour label is suppressed because the live time is sitting on
     /// top of it.
@@ -155,8 +187,24 @@ QtObject {
     function hourLabelHidden(labelY: real, nowY: real, gap): bool {
         if (!(nowY >= 0) || !isFinite(labelY))
             return false;
-        const g = (gap === undefined || gap === null) ? grid.labelGap : gap;
+        const g = (gap === undefined || gap === null) ? grid.labelCollapse : gap;
         return Math.abs(labelY - nowY) < g;
+    }
+
+    /// How far an hour label moves to clear the live-time stamp: `0` almost
+    /// everywhere, and away from the stamp in the band between `labelCollapse`
+    /// and `labelGap`. Signed — a label above the stamp moves up, one below
+    /// moves down — so the nudge never carries a label *across* the line it is
+    /// making room for. A label already hidden gets no shift, because a shift
+    /// is a thing that happens to a label you can see.
+    function hourLabelShift(labelY: real, nowY: real, gap): real {
+        if (!(nowY >= 0) || !isFinite(labelY))
+            return 0;
+        const g = (gap === undefined || gap === null) ? grid.labelGap : gap;
+        const d = labelY - nowY;
+        if (Math.abs(d) >= g || grid.hourLabelHidden(labelY, nowY))
+            return 0;
+        return (d >= 0 ? g : -g) - d;
     }
 
     // --- the horizontal axis --------------------------------------------------

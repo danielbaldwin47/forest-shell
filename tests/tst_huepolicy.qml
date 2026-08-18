@@ -65,6 +65,24 @@ TestCase {
         }
     }
 
+    function test_the_hash_never_hands_out_grey() {
+        // `stone` is the grey one, and grey is a *status* in every calendar
+        // anyone has used — declined, tentative, someone else's. An event that
+        // was auto-coloured grey is wearing a meaning nobody gave it, which on
+        // the fixture week made `Retro` read as a meeting that had been turned
+        // down. So the hash draws from the seven chromatic hues; the eighth
+        // stays on the wheel for a person to pick.
+        compare(hues.autoCount, 7);
+        compare(hues.names[hues.count - 1], "stone");
+        for (let i = 1; i <= 400; i++)
+            verify(hues.indexFor("", "evt-" + i) < hues.autoCount,
+                   "evt-" + i + " -> " + hues.indexFor("", "evt-" + i));
+        // Picked by name or by index it is still reachable — the rule is about
+        // the coin toss, not about the colour.
+        compare(hues.indexFor("stone", "evt-1"), 7);
+        compare(hues.indexFor("7", "evt-1"), 7);
+    }
+
     function test_uncoloured_spreads_over_the_wheel() {
         // Not a distribution proof — just the guard against a hash that
         // collapses. The fixture's eleven events would be one colour if djb2
@@ -84,5 +102,89 @@ TestCase {
         const byId = hues.indexFor("", "evt-9");
         compare(hues.forEvent({ "id": "evt-9" }), byId);
         compare(hues.forEvent({ "id": "evt-9", "colour": null }), byId);
+    }
+
+    // --- keeping neighbours apart ---------------------------------------------
+
+    function test_two_hues_of_the_same_family_are_a_collision() {
+        // `ember` (15) beside `lamplight` (30) is the pair that was reported as
+        // one colour with a glitch down the middle.
+        verify(hues.separation(3, 2) < hues.minSeparationDeg);
+        // And the pair nobody has ever confused is not.
+        verify(hues.separation(1, 0) >= hues.minSeparationDeg);
+        // Grey has no angle and is far from everything, which is true of it.
+        compare(hues.separation(7, 3), 360);
+        compare(hues.separation(3, 7), 360);
+    }
+
+    function test_a_day_never_puts_two_near_hues_side_by_side() {
+        // The fixture's Tuesday: three concurrent events, none of them coloured
+        // by hand, and the hash's own answer put two neighbours a family apart.
+        const cluster = [
+            { "id": "evt-3", "colour": "" },
+            { "id": "evt-4", "colour": "" },
+            { "id": "evt-5", "colour": "" }
+        ];
+        const spread = hues.spread(cluster);
+        compare(spread.length, 3);
+        for (let i = 0; i < spread.length; i++)
+            for (let j = i + 1; j < spread.length; j++)
+                verify(hues.separation(spread[i], spread[j]) >= hues.minSeparationDeg);
+    }
+
+    function test_the_hash_still_decides_where_nothing_collides() {
+        // A hue only ever moves because it collided. The first event in a
+        // cluster has nothing to collide with, so it always keeps its own.
+        const cluster = [{ "id": "evt-3", "colour": "" }, { "id": "evt-4", "colour": "" }];
+        compare(hues.spread(cluster)[0], hues.forEvent(cluster[0]));
+        // And a lone event is its hash, spread or not.
+        compare(hues.spread([{ "id": "evt-9", "colour": "" }])[0],
+                hues.forEvent({ "id": "evt-9", "colour": "" }));
+    }
+
+    function test_a_chosen_colour_is_never_moved() {
+        // Someone picked it. A policy that overrode a choice to improve a
+        // picture would be lying about the data — even where it collides.
+        const cluster = [
+            { "id": "evt-1", "colour": "ember" },
+            { "id": "evt-2", "colour": "lamplight" }
+        ];
+        const spread = hues.spread(cluster);
+        compare(spread[0], 3);
+        compare(spread[1], 2);
+    }
+
+    function test_spread_is_stable_and_total() {
+        // Same input, same answer, every run — a picture that repainted itself
+        // between two captures of one fixture is not a picture.
+        const cluster = [
+            { "id": "evt-3", "colour": "" },
+            { "id": "evt-4", "colour": "" },
+            { "id": "evt-5", "colour": "" }
+        ];
+        const first = hues.spread(cluster);
+        const again = hues.spread(cluster);
+        for (let i = 0; i < first.length; i++) {
+            compare(first[i], again[i]);
+            verify(first[i] >= 0 && first[i] < hues.count);
+        }
+        // Nothing in, nothing out — a delegate mid-rebuild asks with whatever
+        // it has and must not take an exception back.
+        compare(hues.spread([]).length, 0);
+        compare(hues.spread(null).length, 0);
+        compare(hues.spread(undefined).length, 0);
+    }
+
+    function test_a_crowd_falls_back_rather_than_inventing() {
+        // Seven auto hues cannot all be 45 degrees apart. Past the point the
+        // wheel runs out, the hash's own answer stands: a repeated colour is a
+        // smaller lie than one chosen by how far the loop happened to get.
+        const crowd = [];
+        for (let i = 0; i < 7; i++)
+            crowd.push({ "id": "evt-" + i, "colour": "" });
+        const spread = hues.spread(crowd);
+        compare(spread.length, 7);
+        for (let i = 0; i < 7; i++)
+            verify(spread[i] >= 0 && spread[i] < hues.autoCount);
     }
 }

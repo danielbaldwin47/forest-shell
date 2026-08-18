@@ -165,12 +165,23 @@ Item {
     /// `layout` says how the width is shared, `eventRect` says where the top
     /// and bottom edges are. Joining is all this does — every number in the
     /// result was computed on the other side of a test.
-    function chipsFor(iso: string): var {
+    function chipsFor(iso: string, columnWidth: real): var {
         const onDay = view.layoutPolicy.eventPolicy.forDay(view.gridDayEvents, iso);
-        const placed = view.layoutPolicy.layout(onDay);
+        const placed = view.layoutPolicy.layout(onDay, columnWidth);
         const byId = {};
         for (let p = 0; p < placed.length; p++)
             byId[placed[p].id] = placed[p];
+
+        // Hues are spread across **the day**, not across the overlap cluster.
+        // The cluster is where chips touch side to side, but a 2 pm meeting
+        // ending where a 3 pm one begins touches too, and the fixture's
+        // Thursday drew those two a family apart — one column, two chips, one
+        // apparent colour. A day is the unit the eye compares, so it is the
+        // unit the spreading works over.
+        const daySpread = CalendarTokens.hues.spread(onDay);
+        const hueOf = {};
+        for (let h = 0; h < onDay.length; h++)
+            hueOf[onDay[h].id] = daySpread[h];
 
         const out = [];
         for (let e = 0; e < onDay.length; e++) {
@@ -188,8 +199,16 @@ Item {
                 "continuesBelow": rect.continuesBelow,
                 "xFrac": slot.xFrac,
                 "wFrac": slot.wFrac,
+                "depth": slot.depth,
+                // Minutes of clear box turned into pixels of it, on the one
+                // conversion the grid owns. `Infinity` stays infinite — the
+                // chip hands it straight back to a `Math.min`.
+                "clearH": isFinite(slot.clearMinutes)
+                          ? view.grid.minutesToY(slot.clearMinutes, view.hourRow)
+                          : Infinity,
                 "minutes": view.layoutPolicy.time.diffMinutes(event.start, event.end),
-                "hue": CalendarTokens.hues.forEvent(event)
+                "hue": hueOf[event.id] !== undefined
+                       ? hueOf[event.id] : CalendarTokens.hues.forEvent(event)
             });
         }
         return out;
@@ -278,7 +297,10 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: dayHead.header ? dayHead.header.day : ""
-                            color: dayHead.modelData.isToday ? Theme.bgBase : Theme.textPrimary
+                            color: dayHead.modelData.isToday ? Theme.bgBase
+                                 : dayHead.modelData.isWeekend ? Theme.textSecondary
+                                 : Theme.textPrimary
+                            font.features: CalendarTokens.tabularFigures
                             font.family: Theme.fontUi
                             font.pointSize: Theme.pt(17)
                             font.weight: Theme.weightMedium
@@ -371,10 +393,28 @@ Item {
                 readonly property var event: view.eventById(modelData.id)
                 readonly property int hue: CalendarTokens.hues.forEvent(bandBar.event)
 
-                x: view.columnX(modelData.startCol) + CalendarTokens.chipGap
-                width: Math.max(0, view.columnRight(modelData.startCol + modelData.span - 1)
-                                   - view.columnX(modelData.startCol)
-                                   - CalendarTokens.chipGap * 2)
+                /// The same lead-in a grid chip takes, so the two rows are one
+                /// language — and **the trailing gap is the continuation cue**.
+                ///
+                /// Two bars ended on the same pixel of the frame and only one
+                /// carried an arrow, which read as an arrow that had been
+                /// forgotten rather than as one bar ending and another running
+                /// on. The gap is what tells them apart before the glyph does: a
+                /// span that ends inside this week stops six pixels short with
+                /// both right corners rounded, and a span that continues runs
+                /// hard into the column edge and is cut by it. Same for the left
+                /// edge, so a span arriving from last week has no inset either.
+                readonly property bool runsOn: modelData.continuesRight === true
+                readonly property bool runsIn: modelData.continuesLeft === true
+
+                readonly property real lead: view.columnX(modelData.startCol)
+                    + (bandBar.runsIn ? 0 : CalendarTokens.chipInset)
+                readonly property real trail:
+                    view.columnRight(modelData.startCol + modelData.span - 1)
+                    - (bandBar.runsOn ? 0 : CalendarTokens.chipGap * 3)
+
+                x: Math.round(bandBar.lead)
+                width: Math.max(0, Math.round(bandBar.trail) - Math.round(bandBar.lead))
                 y: Theme.space1 + modelData.lane
                    * (CalendarTokens.allDayLaneH + CalendarTokens.allDayLaneGap)
                 height: CalendarTokens.allDayLaneH
@@ -392,15 +432,35 @@ Item {
                     color: CalendarTokens.bar(bandBar.hue)
                 }
 
+                /// The continuation marker, **outside the elided string**.
+                ///
+                /// It used to be concatenated onto the title, which meant the one
+                /// bar most likely to need it — a long title running off the week
+                /// — was the one whose arrow got elided away. Anchored, it is the
+                /// last thing the bar gives up rather than the first.
+                Text {
+                    id: runOn
+
+                    visible: bandBar.runsOn
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.space1
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "→"
+                    color: CalendarTokens.text(bandBar.hue)
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(11.5)
+                    font.weight: Theme.weightMedium
+                }
+
                 Text {
                     anchors.fill: parent
                     anchors.leftMargin: CalendarTokens.chipBar + Theme.space2
-                    anchors.rightMargin: Theme.space2
+                    anchors.rightMargin: bandBar.runsOn
+                        ? runOn.width + Theme.space1 * 2 : Theme.space2
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
-                    text: (modelData.continuesLeft ? "← " : "")
+                    text: (bandBar.runsIn ? "← " : "")
                           + (bandBar.event ? (bandBar.event.title || "Untitled") : "")
-                          + (modelData.continuesRight ? " →" : "")
                     color: CalendarTokens.text(bandBar.hue)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11.5)
@@ -476,7 +536,13 @@ Item {
                     width: content.width - view.gutterW
                     y: Math.round(view.grid.minutesToY(index * 60 + 30, view.hourRow))
                     height: 1
-                    color: Qt.alpha(Theme.borderSubtle, 0.4)
+                    // 0.22 and not 0.4. At 0.4 a half-hour hairline is within a
+                    // hair of an hour rule's own weight, so a two-hour block
+                    // reads as four identical bands and the hour — the thing the
+                    // gutter actually names — stops being the beat. The
+                    // half-hour is a *hint* for where 2:30 is; it only has to be
+                    // findable when looked for.
+                    color: Qt.alpha(Theme.borderSubtle, 0.22)
                 }
             }
 
@@ -511,17 +577,22 @@ Item {
                 delegate: Text {
                     required property var modelData
 
+                    readonly property real nowRef: view.nowColumn >= 0 ? view.nowY : -1
+
                     x: 0
                     width: view.gutterW - Theme.space2
-                    y: Math.round(modelData.y - height / 2)
+                    // Nudged clear of the live stamp where the two would crowd,
+                    // suppressed only where they are genuinely on top of each
+                    // other. Both are distances rather than "the current hour",
+                    // and both belong to `TimeGridPolicy`.
+                    y: Math.round(modelData.y
+                                  + view.grid.hourLabelShift(modelData.y, nowRef)
+                                  - height / 2)
                     horizontalAlignment: Text.AlignRight
                     text: modelData.label
-                    // Suppressed where the live time is printing over it —
-                    // a distance, not "the current hour". See
-                    // `TimeGridPolicy.hourLabelHidden`.
-                    visible: !view.grid.hourLabelHidden(
-                        modelData.y, view.nowColumn >= 0 ? view.nowY : -1)
+                    visible: !view.grid.hourLabelHidden(modelData.y, nowRef)
                     color: Theme.textMuted
+                    font.features: CalendarTokens.tabularFigures
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11)
                 }
@@ -557,30 +628,57 @@ Item {
                     height: content.height
 
                     Repeater {
-                        model: view.chipsFor(column.modelData.iso)
+                        model: view.chipsFor(column.modelData.iso, column.width
+                                             - CalendarTokens.chipInset
+                                             - CalendarTokens.chipGap)
 
                         delegate: EventChip {
                             required property var modelData
 
-                            // `chipGap` of air at the column's own edges and
-                            // between two packed chips — the gutter the
-                            // selection ring hangs in, and the thing that makes
-                            // three concurrent events read as three chips
-                            // rather than one striped block. Rounded, so two
-                            // neighbours never leave a half-pixel seam.
+                            // The packing, verbatim from the policy: `xFrac`
+                            // and `wFrac` are shares of one track. Side by side
+                            // wherever the lanes clear `minLaneWidth`, and a
+                            // cascade only past it — which the policy has
+                            // already resolved into these two numbers, so
+                            // nothing here offsets or stacks anything. `depth`
+                            // is only ever read as a paint order: a cascaded
+                            // chip must sit over the one it indents from.
+                            //
+                            // Both edges are rounded off the *same* track and
+                            // the width is their difference, so three shares of
+                            // a 122px column come out 38/38/38 with an exact
+                            // 2px between them — rounding a width independently
+                            // is what leaves a half-pixel seam under one
+                            // neighbour and a 3px canyon under the next.
+                            //
+                            // `chipInset` of lead-in clears the day separator
+                            // the grid draws at the column's own x and leaves a
+                            // visible gutter beside it; the gap is then taken
+                            // off each chip's right edge, so the air lands
+                            // between neighbours and once at the trailing edge.
+                            // Two chips in adjacent *days* are then
+                            // `chipGap + rule + chipInset` apart and never abut.
                             readonly property real track:
-                                column.width - CalendarTokens.chipGap * 2
+                                column.width - CalendarTokens.chipInset
+                            readonly property real lead:
+                                CalendarTokens.chipInset + modelData.xFrac * track
+                            readonly property real trail:
+                                CalendarTokens.chipInset
+                                + (modelData.xFrac + modelData.wFrac) * track
 
-                            x: Math.round(CalendarTokens.chipGap + modelData.xFrac * track)
+                            z: modelData.depth
+                            x: Math.round(lead)
                             width: Math.max(CalendarTokens.chipGap,
-                                            Math.round(modelData.wFrac * track)
-                                                - CalendarTokens.chipGap)
+                                            Math.round(trail) - CalendarTokens.chipGap
+                                                - Math.round(lead))
                             y: Math.round(modelData.y)
                             height: Math.max(CalendarTokens.chipMinH,
                                              Math.round(modelData.h) - 1)
 
                             event: modelData.event
                             hue: modelData.hue
+                            depth: modelData.depth
+                            clearHeight: modelData.clearH
                             minutes: modelData.minutes
                             continuesAbove: modelData.continuesAbove
                             continuesBelow: modelData.continuesBelow
@@ -590,6 +688,42 @@ Item {
                         }
                     }
                 }
+            }
+
+            /// The now-line's reach, and the thing that makes the gutter stamp
+            /// a label rather than an orphan.
+            ///
+            /// The rail itself is one column wide, because "now" happens on
+            /// today and marking six other days with it would be a lie. But the
+            /// *time* is printed in the gutter, and with only today's column
+            /// drawn there was a 270px hole between the number and the thing it
+            /// named — the reader had to guess they were the same fact. A hair
+            /// of the same ember runs the whole width and closes it: too faint
+            /// to read as a mark on any day it crosses, loud enough to be a line
+            /// the eye follows from the label to the rail.
+            ///
+            /// 0.38 and not 0.22. 0.22 of `accentEmber` on `bgBase` is 1.14:1 —
+            /// arithmetic rather than a line, and the note off the capture was
+            /// that the stamp sat two columns from its rail "with no connecting
+            /// rule". A connector that cannot be seen is not one. 0.38 is
+            /// 1.36:1: still a quarter of the rail's own weight, still no
+            /// competition for it, and now a thing the eye can actually run
+            /// along.
+            Rectangle {
+                visible: view.nowColumn >= 0
+                x: view.gutterW
+                width: content.width - view.gutterW
+                y: Math.round(view.nowY) + (Theme.rail - 1) / 2
+                height: 1
+                // **Under** the chips, where the rail itself is over them. The
+                // rail marks today and has to survive crossing a saturated fill;
+                // the connector only has to get the eye from the gutter to the
+                // rail, and drawing it across other days' chips scored a tinted
+                // line through the middle of a meeting on a day where nothing is
+                // happening now. Behind a chip it simply stops and starts again,
+                // which the eye completes for free.
+                z: -1
+                color: Qt.alpha(Theme.accentEmber, 0.38)
             }
 
             /// The now-line, above every chip it crosses.
@@ -620,8 +754,17 @@ Item {
                     color: Theme.accentEmber
                 }
 
+                /// The dot that says *which column* is now.
+                ///
+                /// It used to be centred on the column's own left edge, which
+                /// is the boundary it shares with yesterday — so half of it was
+                /// drawn on Monday, over the right edge of Monday's 1pm chip,
+                /// and it read as a mark on that event rather than on today.
+                /// A marker for a column belongs inside the column: the dot's
+                /// left edge sits on the boundary and every pixel of it is on
+                /// today's side.
                 Rectangle {
-                    x: -3
+                    x: 0
                     y: (Theme.rail - 7) / 2
                     width: 7
                     height: 7
@@ -641,6 +784,7 @@ Item {
                 horizontalAlignment: Text.AlignRight
                 text: view.format.stampTime(view.nowStamp, view.use24)
                 color: Theme.accentEmber
+                font.features: CalendarTokens.tabularFigures
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(11)
                 font.weight: Theme.weightMedium
@@ -652,6 +796,19 @@ Item {
     /// run up to it.
     Rectangle {
         x: view.gutterW
+        y: 0
+        width: 1
+        height: view.height
+        color: Theme.borderSubtle
+    }
+
+    /// And the grid's own right edge, which nothing drew. Every column has a
+    /// separator on its left, so the seventh had a rule on one side and open
+    /// air on the other — a bar or a chip in Saturday ended against nothing and
+    /// read as running off the window. The same hairline closes the frame, and
+    /// it is what the trailing gap on a band bar is a gap *from*.
+    Rectangle {
+        x: view.width - 1
         y: 0
         width: 1
         height: view.height

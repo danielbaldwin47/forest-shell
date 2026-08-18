@@ -738,20 +738,177 @@ TestCase {
         compare(c.timeForm, "start");
     }
 
-    function test_the_packed_tuesday_still_prints_a_start_time() {
-        // The critic's case, in its own numbers: three concurrent events in a
-        // 1180px window with a 248px sidebar and a 56px gutter share one
-        // ~125px column, so each is ~41px wide — and at 90 minutes each is
-        // 84px tall. That has to be a title *and* a start time, not `D…`.
+    function test_the_packed_tuesday_is_a_cascade_and_not_three_slivers() {
+        // The critic's case, in its own numbers and with the answer it got the
+        // second time. Three concurrent events in a 1180px window with a 248px
+        // sidebar and a 56px gutter share one ~123px column. Divided equally
+        // that is a 39px chip; the picture came back as three slivers reading
+        // one word per line. Divided by `minLaneWidth` it is a cascade, and the
+        // widths below are what the surface actually draws.
         const columnW = (1180 - 248 - 56) / 7;
-        const c = layoutPolicy.chipContent(columnW / 3 - 2, 84, 90);
+        const day = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T11:30"),
+            evt("b", "2026-08-18T10:30", "2026-08-18T12:00"),
+            evt("c", "2026-08-18T11:00", "2026-08-18T12:30")
+        ];
+        const placed = layoutPolicy.layout(day, columnW - 4);
+        const byId = {};
+        for (let i = 0; i < placed.length; i++)
+            byId[placed[i].id] = placed[i];
+
+        // One lane, three depths: painted in start order, each over the last.
+        compare(byId.a.columns, 1);
+        compare(byId.a.depth, 0);
+        compare(byId.b.depth, 1);
+        compare(byId.c.depth, 2);
+
+        // Every chip is wide enough to be a chip. 64px is the floor and the
+        // narrowest of the three clears it with the wider `cascadeFrac` step
+        // still in hand — the step buys the picture its three visible lanes and
+        // the last chip pays about ten pixels for them.
+        const track = columnW - 2;
+        for (const id of ["a", "b", "c"])
+            verify(byId[id].wFrac * track >= layoutPolicy.minLaneWidth - 0.001);
+        verify(byId.c.wFrac * track >= 72);
+        // And the steps are far enough apart to read as lanes rather than as one
+        // chip with two scratches down it: 0.20 of a 123px track is 24px, which
+        // is a bar, its fill and a margin.
+        verify((byId.b.xFrac - byId.a.xFrac) * track >= 20);
+        verify((byId.c.xFrac - byId.b.xFrac) * track >= 20);
+
+        // And what each of them prints. The last and narrowest is the test:
+        // at 90px it is `narrow`, never `tight`, and it stacks a wrapped title
+        // over a start time with the same inset on both sides.
+        const c = layoutPolicy.chipContent(byId.c.wFrac * track, 84, 90);
         compare(c.mode, "stacked");
         verify(c.showTime);
         compare(c.timeForm, "start");
         verify(c.narrow);
+        verify(!c.tight);
         compare(c.bar, 3);
-        compare(c.padLeft, 6);
+        compare(c.padLeft, 9);
+        compare(c.padRight, 6);
         compare(c.titleSize, 11);
+        // ~59px of box at pt(11) holds `Pairing:` / `grid` / `packing` over
+        // three lines, where the 39px sliver broke inside `packing` and still
+        // elided.
+        verify(c.textWidth >= 56);
+        verify(c.titleLines > 1);
+    }
+
+    function test_a_covered_chip_is_told_how_much_box_it_still_has() {
+        // The stagger buys a title line, not a chip. `Design review` is 90
+        // minutes tall and covered 30 minutes in, so 60 of its 84 pixels are
+        // behind another card — and the capture showed its `10:00 – 11:30 AM`
+        // sliced in half by that card's top edge. The layout reports the clear
+        // band; the content rule spends it.
+        const day = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T11:30"),
+            evt("b", "2026-08-18T10:30", "2026-08-18T12:00"),
+            evt("c", "2026-08-18T11:00", "2026-08-18T12:30")
+        ];
+        const placed = layoutPolicy.layout(day, 119);
+        const byId = {};
+        for (let i = 0; i < placed.length; i++)
+            byId[placed[i].id] = placed[i];
+        compare(byId.a.clearMinutes, 30);
+        compare(byId.b.clearMinutes, 30);
+        // Nothing is drawn over the last one, so it keeps its whole height.
+        verify(!isFinite(byId.c.clearMinutes));
+
+        // 30 minutes at `hourRow: 56` is 28px, which is under the two-line
+        // floor at the ordinary type — so the banner tier shrinks the type until
+        // two whole lines fit it, and the covered chip states its title *and*
+        // its time above the card that covers it. This is the case the picture
+        // was lost on: one line meant the title alone, and two of three chips in
+        // a cascade said nothing about when they were.
+        const covered = layoutPolicy.chipContent(119, 84, 90, 28);
+        compare(covered.mode, "stacked");
+        verify(covered.banner);
+        verify(covered.showTime);
+        compare(covered.titleLines, 1);
+        compare(covered.titleSize, layoutPolicy.bannerTitleSize);
+        compare(covered.timeSize, layoutPolicy.bannerTimeSize);
+        // And the two lines it promises actually fit the band it was given.
+        verify(covered.padTop
+               + Math.round(covered.titleSize * layoutPolicy.lineFactor)
+               + Math.round(covered.timeSize * layoutPolicy.lineFactor) <= 28);
+        // One pixel under the banner floor there is no honest second line.
+        compare(layoutPolicy.chipContent(119, 84, 90, 25).mode, "inline");
+        verify(!layoutPolicy.chipContent(119, 84, 90, 25).banner);
+        // Same chip, nothing over it — two lines, as before.
+        compare(layoutPolicy.chipContent(119, 84, 90).mode, "stacked");
+        compare(layoutPolicy.chipContent(119, 84, 90, Infinity).mode, "stacked");
+        // A clear band larger than the chip cannot invent height.
+        compare(layoutPolicy.chipContent(119, 32, 45, 400).mode,
+                layoutPolicy.chipContent(119, 32, 45).mode);
+    }
+
+    function test_an_inline_time_is_never_bought_with_an_ellipsis() {
+        // `Standup` beside `9:00 AM` in a 99px box: 46 + 4 + 46 = 96, and both
+        // print whole.
+        verify(layoutPolicy.inlineTimeFits(99, 46, 46, 4));
+        // `Design review` beside `10:00 AM` in the same box: 85 + 4 + 52 = 141,
+        // so the time goes and the title keeps all 99 — `Design review` rather
+        // than `Desig… 10:00 AM`.
+        verify(!layoutPolicy.inlineTimeFits(99, 85, 52, 4));
+        // Exactly filling the box is fitting.
+        verify(layoutPolicy.inlineTimeFits(100, 50, 46, 4));
+        verify(!layoutPolicy.inlineTimeFits(99, 50, 46, 4));
+        // A time with no width is not a time.
+        verify(!layoutPolicy.inlineTimeFits(99, 10, 0, 4));
+        // And a delegate mid-rebuild hands NaN rather than a number.
+        verify(!layoutPolicy.inlineTimeFits(NaN, NaN, NaN, NaN));
+    }
+
+    function test_the_text_inset_is_the_same_on_both_sides_at_every_tier() {
+        // `10:00 AM` finishing exactly on the fill boundary, hard against the
+        // next chip's rail, was the second thing the capture came back with.
+        // The right pad is the left gap now — at every tier, so no width can
+        // reintroduce the asymmetry.
+        for (const w of [39, 59, 90, 119, 186, 400]) {
+            const c = layoutPolicy.chipContent(w, 84, 90);
+            compare(c.padRight, c.padLeft - c.bar);
+            verify(c.padRight >= 3);
+        }
+    }
+
+    function test_the_two_way_split_stays_in_the_roomier_tier() {
+        // Half a 123px column is ~59, which must *not* take the tight tier's
+        // type: the step exists for the three-way case, and applying it to the
+        // two-way one would shrink the common overlap to fix the rare one.
+        const c = layoutPolicy.chipContent(59, 84, 90);
+        verify(c.narrow);
+        verify(!c.tight);
+        compare(c.titleSize, 11);
+        compare(c.bar, 3);
+        compare(c.padLeft, 9);
+        // 56 is the boundary and it is inclusive on the roomier side.
+        verify(!layoutPolicy.chipContent(56, 84, 90).tight);
+        verify(layoutPolicy.chipContent(55, 84, 90).tight);
+    }
+
+    function test_a_start_time_keeps_its_meridiem_wherever_it_fits() {
+        // One clock grammar per surface. The start-only time is the range's own
+        // first token; the only thing width may take off it is the meridiem,
+        // and only where `10:30 AM` (48px at 11) would not fit the text box.
+        compare(layoutPolicy.meridiemMinTextWidth, 30);
+        // Two-way split: 59px of chip, 44px of text box — meridiem stays.
+        verify(layoutPolicy.chipContent(59, 84, 90).timeMeridiem);
+        // Three-way split: 39px of chip, 31px of text box — and the meridiem
+        // stays here too, which is the change. A grid that printed
+        // `1:00 – 2:00 PM`, `9:00 AM` and a bare `10:00` within a centimetre of
+        // each other was running three clock notations at once; two is the
+        // floor, and the packed chip is held to the second rather than given a
+        // third of its own.
+        verify(layoutPolicy.chipContent(39, 84, 90).timeMeridiem);
+        // The floor still bites somewhere, or it is not a floor: a 33px chip is
+        // under the time rule entirely and prints no time to hang one off.
+        verify(!layoutPolicy.chipContent(33, 84, 90).showTime);
+        // A range already carries its own meridiem, whatever the box measures.
+        const wide = layoutPolicy.chipContent(186, 56, 60);
+        compare(wide.timeForm, "range");
+        verify(wide.timeMeridiem);
     }
 
     function test_a_tall_chip_spends_its_height_on_wrapping_the_title() {
@@ -764,15 +921,40 @@ TestCase {
         compare(layoutPolicy.chipContent(90, 400, 480).titleLines, 3);
     }
 
-    function test_a_chip_too_narrow_to_wrap_between_words_does_not_wrap() {
-        // The reversal this floor records: wrapping the packed 38px chip broke
-        // `Design review` inside its words — `Desig / n / rev…` — which reads
-        // worse than the one elided line it replaced, however much height the
-        // chip had going spare.
-        compare(layoutPolicy.wrapMinWidth, 72);
-        compare(layoutPolicy.chipContent(38, 84, 90).titleLines, 1);
-        compare(layoutPolicy.chipContent(71, 84, 90).titleLines, 1);
-        compare(layoutPolicy.chipContent(72, 84, 90).titleLines, 3);
+    function test_a_tight_chip_gets_a_fourth_line_because_a_line_is_a_word() {
+        // At 33px of box a line holds one word, so three lines is a three-word
+        // budget: `Pairing: grid packing` came out `Pairing: / grid / pack…` on
+        // the capture with height to spare. Four lines prints the title.
+        compare(layoutPolicy.maxTightTitleLines, 4);
+        compare(layoutPolicy.chipContent(39, 84, 90).titleLines, 4);
+        // The roomy tier keeps its three: there a line is a phrase.
+        compare(layoutPolicy.chipContent(186, 400, 480).titleLines, 3);
+        // Height still decides first — a fourth line is only offered where one
+        // fits, never taken out of the time's row.
+        compare(layoutPolicy.chipContent(39, 56, 60).titleLines, 3);
+    }
+
+    function test_the_wrap_floor_is_a_text_box_and_not_a_chip() {
+        // The reversal, and the reversal of the reversal. Wrapping the packed
+        // chip at pt(11) broke `Design review` inside its words — `Desig / n /
+        // rev…` — so wrapping was first gated on chip width. But what was too
+        // small was the type, not the chip: at the tight tier's 9.5 the same
+        // 33px box holds whole words, so the gate belongs on the box measured
+        // against the type that will be set in it.
+        compare(layoutPolicy.wrapMinTextWidth, 28);
+        // 31px of box at the tight tier — wraps. (35 before the inset became
+        // symmetric; the two pixels came off the right, where they were the
+        // difference between a time and a smear.)
+        compare(layoutPolicy.chipContent(39, 84, 90).textWidth, 31);
+        verify(layoutPolicy.chipContent(39, 84, 90).titleLines > 1);
+        // And the narrowest chip that still prints a time — 36px, a 28px box —
+        // wraps too, which is what says the floor is not silently disabling the
+        // packed case it was written for.
+        compare(layoutPolicy.chipContent(36, 84, 90).textWidth, 28);
+        verify(layoutPolicy.chipContent(36, 84, 90).titleLines > 1);
+        // One pixel narrower is under the time floor entirely — title only, one
+        // line, and no wrap to argue about.
+        compare(layoutPolicy.chipContent(35, 84, 90).titleLines, 1);
     }
 
     function test_one_line_modes_never_wrap() {
@@ -788,15 +970,22 @@ TestCase {
 
     function test_the_two_line_floor_is_a_height_and_it_is_32() {
         compare(layoutPolicy.twoLineMinHeight, 32);
-        compare(layoutPolicy.chipContent(60, 31, 45).mode, "titleOnly");
         compare(layoutPolicy.chipContent(60, 32, 45).mode, "stacked");
+        // Between the banner floor and the two-line floor a second line is still
+        // reachable, at the banner's smaller type.
+        verify(layoutPolicy.chipContent(60, 31, 45).banner);
+        compare(layoutPolicy.chipContent(60, 31, 45).mode, "stacked");
+        // Under the banner floor there is no second line to be had, and a 60px
+        // chip is too narrow to set the time inline either.
+        compare(layoutPolicy.chipContent(60, 25, 45).mode, "titleOnly");
     }
 
     function test_the_time_form_steps_down_before_it_disappears() {
         // Three bands, in order: range, start, nothing. A width that lost the
         // range straight to nothing is the bug this replaced.
-        compare(layoutPolicy.chipContent(104, 56, 60).timeForm, "range");
-        compare(layoutPolicy.chipContent(103, 56, 60).timeForm, "start");
+        compare(layoutPolicy.timeRangeMinWidth, 112);
+        compare(layoutPolicy.chipContent(112, 56, 60).timeForm, "range");
+        compare(layoutPolicy.chipContent(111, 56, 60).timeForm, "start");
         verify(layoutPolicy.chipContent(36, 56, 60).showTime);
         verify(!layoutPolicy.chipContent(35, 56, 60).showTime);
     }
@@ -814,8 +1003,26 @@ TestCase {
         compare(layoutPolicy.clipTitle("Design review", 7), "Design…");
         compare(layoutPolicy.clipTitle("Design review", 20), "Design review");
         compare(layoutPolicy.clipTitle("Design review", 13), "Design review");
-        // The boundary itself: 12 glyphs cannot hold all 13, so back to the space.
-        compare(layoutPolicy.clipTitle("Design review", 12), "Design…");
+        // The boundary itself: 12 glyphs cannot hold all 13, and the space is
+        // six glyphs back — past `wordCutBudget`, so the title is handed back
+        // whole for the surface to elide pixel-exactly rather than cut here and
+        // leave half the box empty.
+        compare(layoutPolicy.clipTitle("Design review", 12), "Design review");
+        // 8 glyphs: the space is two back, which is the cut this rule exists for.
+        compare(layoutPolicy.clipTitle("Design review", 8), "Design…");
+    }
+
+    function test_a_word_cut_that_wastes_the_box_is_not_made() {
+        compare(layoutPolicy.wordCutBudget, 3);
+        // `Coffee with Opal` in a fifteen-glyph box cut to `Coffee with…` and
+        // left a quarter of a full-width chip blank — the packed-column rule
+        // firing on a chip that was not packed. Four glyphs back is past the
+        // budget, so the surface elides instead and fills the box.
+        compare(layoutPolicy.clipTitle("Coffee with Opal", 15), "Coffee with Opal");
+        // Inside the budget it still cuts at the word, which is what keeps a
+        // genuinely packed chip from printing `D…`.
+        compare(layoutPolicy.clipTitle("Coffee with Opal", 14), "Coffee with…");
+        compare(layoutPolicy.clipTitle("Coffee with Opal", 13), "Coffee with…");
     }
 
     function test_a_first_word_too_long_for_the_box_falls_back_to_a_hard_cut() {
@@ -835,5 +1042,148 @@ TestCase {
         compare(layoutPolicy.clipTitle("Standup", NaN), "");
         // Leading space trimmed first, or the cut lands inside the padding.
         compare(layoutPolicy.clipTitle(" Standup meeting", 3), "St…");
+    }
+
+    // --- the minimum lane width ----------------------------------------------
+
+    function test_a_column_wide_enough_divides_equally_and_nothing_cascades() {
+        // The rule is a floor, not a mode: wherever the lanes clear it, the
+        // layout is exactly the side-by-side one it has always been.
+        const day = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T11:30"),
+            evt("b", "2026-08-18T10:30", "2026-08-18T12:00"),
+            evt("c", "2026-08-18T11:00", "2026-08-18T12:30")
+        ];
+        // 210px is a day view's column, and three lanes of 70 clear the floor.
+        const placed = layoutPolicy.layout(day, 210);
+        compare(placed.length, 3);
+        for (let i = 0; i < placed.length; i++) {
+            compare(placed[i].columns, 3);
+            compare(placed[i].depth, 0);
+            fuzzyCompare(placed[i].wFrac, 1 / 3, 0.0001);
+            fuzzyCompare(placed[i].xFrac, i / 3, 0.0001);
+        }
+    }
+
+    function test_a_cascade_needs_its_starts_staggered_or_it_is_occlusion() {
+        // The cascade's whole claim is that the chip covering another starts
+        // lower than that other one's title line. Where the starts are on top
+        // of each other the claim is false and the division comes back, even
+        // though the lanes are under the floor — a narrow chip you can read is
+        // worth more than a wide one hidden under a neighbour.
+        compare(layoutPolicy.cascadeClearMinutes, 20);
+        const together = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T11:30"),
+            evt("b", "2026-08-18T10:10", "2026-08-18T12:00")
+        ];
+        verify(!layoutPolicy.cascadeIsLegible(layoutPolicy.sortedSlots(together)));
+        const split = layoutPolicy.layout(together, 119);
+        compare(split[0].columns, 2);
+        compare(split[0].depth, 0);
+        compare(split[1].depth, 0);
+
+        // Twenty minutes apart is the boundary, and it cascades.
+        const staggered = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T11:30"),
+            evt("b", "2026-08-18T10:20", "2026-08-18T12:00")
+        ];
+        verify(layoutPolicy.cascadeIsLegible(layoutPolicy.sortedSlots(staggered)));
+        compare(layoutPolicy.layout(staggered, 119)[1].depth, 1);
+
+        // But only while a lane is still worth having. Three simultaneous
+        // events in a week column divide to 39px, which prints nothing, so the
+        // cascade is taken anyway — the least-bad of two bad arrangements.
+        compare(layoutPolicy.minSplitWidth, 40);
+        const crowd = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T12:00"),
+            evt("b", "2026-08-18T10:00", "2026-08-18T12:00"),
+            evt("c", "2026-08-18T10:00", "2026-08-18T12:00")
+        ];
+        compare(layoutPolicy.layout(crowd, 119)[2].depth, 2);
+    }
+
+    function test_laneCap_is_the_column_over_the_floor() {
+        compare(layoutPolicy.minLaneWidth, 64);
+        compare(layoutPolicy.laneCap(210), 3);
+        compare(layoutPolicy.laneCap(191), 2);
+        compare(layoutPolicy.laneCap(127), 1);
+        // A cap of zero is "the caller did not measure", not "no lanes".
+        compare(layoutPolicy.laneCap(0), 0);
+        compare(layoutPolicy.laneCap(NaN), 0);
+        // Never zero lanes for a column that exists, however thin.
+        compare(layoutPolicy.laneCap(4), 1);
+    }
+
+    function test_a_fifth_concurrent_event_cascades_instead_of_shrinking() {
+        // Five at once in a 122px column is a 24px equal lane, which prints one
+        // glyph — and it prints one glyph on the four beside it too, which is
+        // the part that makes the floor worth having. Three lanes stay, and the
+        // overflow indents into the last one and runs to the right edge.
+        const day = [
+            evt("a", "2026-08-18T10:00", "2026-08-18T12:00"),
+            evt("b", "2026-08-18T10:05", "2026-08-18T12:00"),
+            evt("c", "2026-08-18T10:10", "2026-08-18T12:00"),
+            evt("d", "2026-08-18T10:15", "2026-08-18T12:00"),
+            evt("e", "2026-08-18T10:20", "2026-08-18T12:00")
+        ];
+        const placed = layoutPolicy.layout(day, 122);
+        const byId = {};
+        for (let i = 0; i < placed.length; i++)
+            byId[placed[i].id] = placed[i];
+
+        // One lane and a four-step cascade: 122px does not hold two lanes over
+        // `minLaneWidth`, and five minutes apart is under `cascadeClearMinutes`
+        // — but a 24px equal lane is under `minSplitWidth` too, so the cascade
+        // is still the arrangement taken.
+        compare(byId.a.columns, 1);
+        compare(byId.a.depth, 0);
+        compare(byId.b.depth, 1);
+        compare(byId.c.depth, 2);
+        compare(byId.d.depth, 3);
+        compare(byId.e.depth, 4);
+        // Every cascaded chip still clears the floor it was cascaded to keep.
+        verify(byId.c.wFrac * 122 >= layoutPolicy.minLaneWidth - 0.001);
+        verify(byId.d.wFrac * 122 >= layoutPolicy.minLaneWidth - 0.001);
+        verify(byId.e.wFrac * 122 >= layoutPolicy.minLaneWidth - 0.001);
+        // Indented, in order, by a step nobody can mistake for a seam, and each
+        // runs to the column's right edge.
+        verify(byId.d.xFrac - byId.c.xFrac >= layoutPolicy.minCascadeFrac);
+        verify(byId.e.xFrac - byId.d.xFrac >= layoutPolicy.minCascadeFrac);
+        fuzzyCompare(byId.d.xFrac + byId.d.wFrac, 1, 0.0001);
+        fuzzyCompare(byId.e.xFrac + byId.e.wFrac, 1, 0.0001);
+    }
+
+    function test_the_cascade_never_indents_past_the_floor() {
+        // Eight at once: the indent would run off the right edge long before
+        // the eighth, so it clamps and the last chips stack at the same x
+        // rather than collapsing to nothing.
+        const day = [];
+        for (let i = 0; i < 8; i++)
+            day.push(evt("e" + i, "2026-08-18T10:00", "2026-08-18T12:00"));
+        const placed = layoutPolicy.layout(day, 122);
+        // One lane and a seven-step cascade: two lanes would have left the
+        // steps 4px apart, which is a seam rather than a stack.
+        compare(placed[0].columns, 1);
+        for (let p = 0; p < placed.length; p++) {
+            verify(placed[p].wFrac * 122 >= layoutPolicy.minLaneWidth - 0.001);
+            verify(placed[p].xFrac >= 0);
+            verify(placed[p].xFrac + placed[p].wFrac <= 1.0001);
+            if (p > 0)
+                verify(placed[p].xFrac - placed[p - 1].xFrac
+                       >= layoutPolicy.minCascadeFrac);
+        }
+    }
+
+    function test_no_width_means_no_cap_and_the_old_behaviour() {
+        // Every caller that never measured a column keeps the layout it had.
+        const day = [];
+        for (let i = 0; i < 5; i++)
+            day.push(evt("e" + i, "2026-08-18T10:00", "2026-08-18T12:00"));
+        const placed = layoutPolicy.layout(day);
+        for (let p = 0; p < placed.length; p++) {
+            compare(placed[p].columns, 5);
+            compare(placed[p].depth, 0);
+            fuzzyCompare(placed[p].wFrac, 0.2, 0.0001);
+        }
     }
 }

@@ -151,13 +151,144 @@ QtObject {
         return true;
     }
 
+    /// The narrowest a lane is ever divided to, **in pixels of column**.
+    ///
+    /// This is the floor equal division does not have on its own, and its
+    /// absence is what a packed column dies of. Five concurrent events in the
+    /// 124px column a 1180px window leaves is a 22px chip; 22px prints one
+    /// glyph at any type size that is not a joke, so a fifth equal lane does
+    /// not divide the information, it destroys it — and it destroys the four
+    /// beside it at the same time, which is the part that matters. The split
+    /// therefore stops at `minLaneWidth`, and everything past it **cascades**:
+    /// indented into the last lane, widened to the column's right edge, drawn
+    /// over its predecessors. Notion's week view makes the same move, and for
+    /// the same reason.
+    ///
+    /// **64, and it used to be 34.** The 34 was arrived at by asking how narrow
+    /// a chip could get and still print one word; the answer was "it can", and
+    /// the picture that came back was three 39px slivers reading
+    /// `Pairing: / grid / packing` down three lines with the time jammed against
+    /// the fill. A lane that prints one word per line is not a chip, it is a
+    /// column of syllables — the measurement was right and the question was
+    /// wrong.
+    ///
+    /// The question the cascade actually answers is *when is a title readable*,
+    /// and a cascaded chip's title is readable for a reason nothing here had
+    /// used: **a cascade is staggered in time as well as in x.** Chips are
+    /// painted in start order, so the chip that covers one starts later, and its
+    /// top edge sits below the covered chip's title line. Every title in a
+    /// staggered cascade therefore prints at the chip's *full* width and none of
+    /// them is occluded — which is exactly what Notion's week view does with an
+    /// overlapping cluster, and why its packed columns stay legible where an
+    /// equal division of the same pixels does not.
+    ///
+    /// So the floor is set at the width a chip needs to be a chip — 64px leaves
+    /// a ~50px text box at the narrow tier, which is a short word and a half —
+    /// and anything past it cascades rather than divides. `cascadeIsLegible`
+    /// guards the other side: where the starts are *not* staggered the cascade
+    /// would hide a title outright, and there the division is taken back.
+    readonly property int minLaneWidth: 64
+
+    /// How far apart two starts must be for the later chip to clear the earlier
+    /// one's title line. A title line is ~17px at the roomy tier and `hourRow`
+    /// is 56, so 20 minutes is 18.7px — one line box with a pixel over. Under
+    /// it the cascade stops being staggered and starts being occlusion.
+    readonly property int cascadeClearMinutes: 20
+
+    /// The width under which an equal division prints nothing at all, so a
+    /// cluster that cannot be cascaded legibly is still cascaded rather than
+    /// divided into slivers. 40px is the three-way split of a 123px week column
+    /// — the picture that started this section.
+    readonly property int minSplitWidth: 40
+
+    /// Whether a cluster's starts are staggered enough for a cascade to keep
+    /// every title visible. Sorted starts, adjacent gaps, all of them wide
+    /// enough — one pair too close is enough to lose a title, so one pair too
+    /// close is enough to refuse.
+    function cascadeIsLegible(group: var, clear): bool {
+        const need = (clear === undefined || clear === null)
+            ? policy.cascadeClearMinutes : clear;
+        const starts = (group || []).map(function (slot) {
+            return slot.from;
+        }).sort(function (a, b) {
+            return a - b;
+        });
+        for (let i = 1; i < starts.length; i++)
+            if (starts[i] - starts[i - 1] < need)
+                return false;
+        return true;
+    }
+
+    /// How many lanes a column this wide may be divided into. `0` means "no
+    /// opinion": the caller passed no width, so the division is uncapped and
+    /// `layout` behaves exactly as it did before there was a cap.
+    function laneCap(width: real): int {
+        if (!isFinite(width) || width <= 0)
+            return 0;
+        return Math.max(1, Math.floor(width / policy.minLaneWidth));
+    }
+
+    /// The widest one cascade step may be, as a fraction of the column.
+    ///
+    /// 0.12, down from 0.18, and the reason is the stagger. The indent used to
+    /// be asked to reveal the covered chip's *title*, which takes real pixels;
+    /// once `cascadeIsLegible` guarantees the covering chip starts a title line
+    /// lower, the title below is already whole and the indent only has to say
+    /// "there is a card under this one". 0.12 of a 121px track is 14px — the
+    /// accent bar and a sliver of its fill, which reads as a stack — and the
+    /// 7px it hands back goes to the last chip in the cascade, the one with the
+    /// least room and the most to lose.
+    /// 0.20 now, and the number that moved it is what the picture *reads as*
+    /// rather than what it contains. At 0.12 a 121px column steps 15px, which is
+    /// the accent bar and a sliver — three chips that look like one chip with two
+    /// scratches down it, and the note off the capture was "cascaded, not side by
+    /// side". At 0.20 the step is 24px: bar, fill and a clear left margin, so the
+    /// three read as three staggered lanes. The width it costs the last chip is
+    /// affordable because `banner` below bought the covered ones their times
+    /// back — the pixels the cascade was hoarding were being spent on a title
+    /// nobody could date.
+    readonly property real cascadeFrac: 0.20
+
+    /// And the narrowest. A cascade whose steps are two pixels apart is not a
+    /// cascade, it is five chips drawn on top of each other — the picture the
+    /// clamp produced the first time this was written, and it reads as a
+    /// rendering fault rather than as five overlapping meetings. Where the
+    /// indent cannot reach this, the cluster gives up a *lane* instead: fewer,
+    /// wider lanes leave room for the cascade to be visible, which is the whole
+    /// point of cascading rather than dividing.
+    readonly property real minCascadeFrac: 0.06
+
+    /// How many lanes a cluster of `wanted` columns actually takes in a column
+    /// `cap` lanes wide, given that the overflow has to have somewhere visible
+    /// to indent into. Never more than `cap`, never fewer than one, and never
+    /// so many that the cascade collapses onto itself.
+    function cascadeLanes(wanted: int, cap: int, minFrac: real): int {
+        let columns = (cap > 0) ? Math.min(wanted, cap) : wanted;
+        while (columns > 1 && wanted > columns) {
+            const baseX = (columns - 1) / columns;
+            if ((1 - minFrac - baseX) / (wanted - columns) >= policy.minCascadeFrac)
+                break;
+            columns--;
+        }
+        return Math.max(1, columns);
+    }
+
     /// Where every event on a day sits across the width of it:
-    /// `[{id, column, columns, span, xFrac, wFrac}]`, cluster by cluster and
-    /// in painting order within each. `columns` is the width of the *cluster*,
-    /// not of the day, so two clusters on one day are sized independently.
-    /// Events that are not events are dropped rather than laid out.
-    function layout(events: var): var {
+    /// `[{id, column, columns, span, depth, xFrac, wFrac}]`, cluster by cluster
+    /// and in painting order within each. `columns` is the width of the
+    /// *cluster*, not of the day, so two clusters on one day are sized
+    /// independently. Events that are not events are dropped rather than laid
+    /// out.
+    ///
+    /// `width` is the column's pixel width and is optional. Given one, the
+    /// division is capped by `minLaneWidth` and the overflow cascades;
+    /// `depth` is how many cascade steps in a chip is, and it is also the
+    /// order to paint them in — a chip must be drawn over the one it indents
+    /// from or the indent says nothing.
+    function layout(events: var, width: real): var {
         const groups = policy.slotClusters(events);
+        const cap = policy.laneCap(width);
+        const minFrac = (cap > 0) ? Math.min(1, policy.minLaneWidth / width) : 0;
         const out = [];
         for (let g = 0; g < groups.length; g++) {
             const group = groups[g];
@@ -171,23 +302,74 @@ QtObject {
                 group[i].column = column;
                 colEnd[column] = group[i].until;
             }
-            const columns = colEnd.length;
+            const wanted = colEnd.length;
+            // The cascade is only reached for; where the starts are not
+            // staggered it would hide a title outright, and an equal division
+            // is taken back — but only while a lane is still wide enough to
+            // print something. Under `minSplitWidth` neither arrangement works
+            // and the cascade is the least-bad of the two.
+            let columns = policy.cascadeLanes(wanted, cap, minFrac);
+            if (columns < wanted
+                && !policy.cascadeIsLegible(group)
+                && (cap <= 0 || width / wanted >= policy.minSplitWidth))
+                columns = wanted;
+            const overflow = wanted - columns;
+            const step = overflow > 0
+                ? Math.min(policy.cascadeFrac,
+                           Math.max(0, (1 - minFrac - (columns - 1) / columns) / overflow))
+                : 0;
 
             // Then widen rightwards, stopping at the first column that is not
             // free for the whole of this event.
             for (let j = 0; j < group.length; j++) {
                 const slot = group[j];
                 let span = 1;
-                while (slot.column + span < columns
+                while (slot.column + span < wanted
                        && policy.columnIsFree(group, slot.column + span, slot))
                     span++;
+
+                const lane = Math.min(slot.column, columns - 1);
+                const depth = slot.column - lane;
+                let xFrac = lane / columns;
+                let wFrac = Math.min(span, columns - lane) / columns;
+                if (depth > 0) {
+                    // Cascaded: indent from the last lane and run to the right
+                    // edge, never past `minLaneWidth` of remaining room.
+                    xFrac = Math.min(xFrac + depth * step, Math.max(0, 1 - minFrac));
+                    wFrac = 1 - xFrac;
+                }
+                // How long this chip has before something is drawn over it.
+                //
+                // The cascade's legibility comes from the stagger, and the
+                // stagger is a budget rather than a guarantee: a chip covered
+                // 30 minutes in has 30 minutes of clear box, which is one line
+                // and not two. Reporting it here is what lets `chipContent`
+                // spend the box it actually has — the alternative was measured,
+                // and it was a title that cleared the chip above and a time
+                // sliced in half by its top edge.
+                //
+                // `Infinity` for a chip nothing covers, so a caller that
+                // forwards it straight into a `Math.min` gets the chip's own
+                // height back.
+                let clear = Infinity;
+                for (let k = 0; k < group.length; k++) {
+                    const over = group[k];
+                    if (over === slot || over.column <= slot.column)
+                        continue;
+                    if (Math.min(over.column, columns - 1) !== lane)
+                        continue;
+                    clear = Math.min(clear, Math.max(0, over.from - slot.from));
+                }
+
                 out.push({
                     "id": slot.id,
                     "column": slot.column,
                     "columns": columns,
                     "span": span,
-                    "xFrac": slot.column / columns,
-                    "wFrac": span / columns
+                    "depth": depth,
+                    "clearMinutes": clear,
+                    "xFrac": xFrac,
+                    "wFrac": wFrac
                 });
             }
         }
@@ -348,6 +530,26 @@ QtObject {
     /// time is the complaint.
     readonly property int twoLineMinHeight: 32
 
+    /// The **banner** tier: two lines in a box too short for two lines at the
+    /// ordinary type.
+    ///
+    /// This is the cascade's own case and it is the one the whole surface was
+    /// judged on. A chip covered 30 minutes in has 28px of clear band, which is
+    /// under `twoLineMinHeight`, so the rule above collapsed it to one line — and
+    /// the one line it kept was the title, because `inlineTimeFits` will not buy
+    /// a time with an ellipsis. Two chips of a three-way overlap therefore stated
+    /// no time at all, and "a 28px title strip that never says when it is" is
+    /// exactly what a packed column must not be.
+    ///
+    /// The band cannot grow — it is the stagger, in minutes — so the type shrinks
+    /// instead, once, to the only tier where two whole lines fit 28px:
+    /// `bannerTitleSize` over `bannerTimeSize` is 14 + 12 = 26px of line box with
+    /// the top pad at zero. Both lines print whole; neither elides. Under 26 there
+    /// is no honest second line and the chip goes back to one.
+    readonly property int bannerMinHeight: 26
+    readonly property real bannerTitleSize: 10.5
+    readonly property real bannerTimeSize: 9
+
     /// At or under this many minutes a chip is *never* given two lines, however
     /// tall the grid happens to draw it. `chipMinH` floors a 15-minute event at
     /// 20px, and a taller `hourRow` would otherwise let a 15-minute event
@@ -362,35 +564,103 @@ QtObject {
 
     /// Under this many pixels a chip is *narrow*: the accent bar loses a pixel,
     /// the padding halves, and the type steps down one notch. This is the
-    /// packed-overlap case — three chips in one column of a 1180px window — and
-    /// the alternative measured worse than ugly: 11px of padding out of 40px of
-    /// chip left 22px for a title, which is one glyph and an ellipsis.
+    /// two-way overlap — half a week column — and the alternative measured worse
+    /// than ugly: 11px of padding out of 40px of chip left 22px for a title,
+    /// which is one glyph and an ellipsis.
     ///
     /// 100 and not 125: a chip that has a whole week column to itself is not
     /// narrow, and stepping its type down would shrink the common case to fix
     /// the rare one.
     readonly property int narrowWidth: 100
 
+    /// Under *this* many pixels a chip is **tight**, which is a second step and
+    /// not more of the first. This is the three-way overlap, and it is the case
+    /// the whole packed column exists for: a 1180px window with a 248px sidebar
+    /// and a 56px gutter gives a week column 123px, three equal columns of 41
+    /// less a 2px gap is a 39px chip, and 39px is not a small version of 59px —
+    /// it is a different problem.
+    ///
+    /// The numbers behind the tight tier are measured against IBM Plex Sans
+    /// Medium, which is what actually decides whether a packed chip says
+    /// anything. In a ~34px text box (39 less a 2px bar, 2 of left pad and 1 of
+    /// right), `packing` — the longest word on the fixture week — is 43.0px at
+    /// 12.5, 37.8 at 11, 34.0 at 9.5, 32.2 at 9 and **30.4 at 8.5**.
+    ///
+    /// 8.5 and not 9, and the extra step is the *measured* one: 9.5 and 9 were
+    /// both captured and both came out `packin / g`, because a laid-out line is
+    /// wider than the sum of its advances — Qt rounds per glyph at these sizes
+    /// and a seven-glyph word collects the rounding seven times. So the size is
+    /// chosen with a margin over the arithmetic rather than against it, which
+    /// is what the two captures cost to learn. At 11 the same chip can only ever
+    /// print `Des…`, so the step down is buying the whole title, not polish.
+    ///
+    /// 56 is where the two-way case stops: half a 123px column less the gap is
+    /// 59, which must stay in the roomier tier.
+    readonly property int tightWidth: 56
+
+    /// The type the tight tier sets, title and time alike.
+    ///
+    /// It was 8.5, chosen as the largest size at which `packing` — the longest
+    /// word on the fixture week — fit a 34px text box without breaking inside
+    /// itself. It read, at a magnifier. It did not read on the picture, and
+    /// "functionally unreadable" is the note that came back, so the box grew
+    /// instead of the type shrinking further: the tight tier's gap dropped from
+    /// 2px to 1, which is a pixel nobody can see and 36px of text box rather
+    /// than 34. `packing` is 34.0 at 9.5 against a 36px box, which is the same
+    /// one-pixel margin 8.5 had against 34 — the arithmetic is unchanged and
+    /// the glyphs are 12% taller.
+    ///
+    /// One size for both lines, and that is the second change. Title and time
+    /// at 8.5/9 put two different type sizes inside a 40px box, which reads as
+    /// a rendering accident rather than a hierarchy; weight carries the
+    /// hierarchy here, as it does everywhere else on this surface.
+    readonly property real tightTitleSize: 9.5
+
     /// The floor for printing a time at all, and the floor for printing it as a
-    /// *range*. Between them the time is the start alone (`10:30a`), which is
-    /// the half of it a neighbouring chip's edges cannot already tell you.
+    /// *range*. Between them the time is the start alone — and it is the range's
+    /// own first token, `10:30`, never a second grammar like `10:30a`. One
+    /// surface prints times one way; a chip that shrank into a different clock
+    /// notation would make the eye re-learn the format per column width.
     ///
     /// 36 is the measured packed case and not a round number: a 1180px window
     /// with a 248px sidebar and a 56px gutter gives a week column 125px, a
     /// three-way overlap takes a third of that, and 2px of gap leaves ~40 —
     /// so any floor above 40 means the case this whole section exists for
-    /// never prints a time. `"10:30a"` at pt(10) is 30px and the narrow
-    /// padding is 8, which is where 36 stops being arbitrary. 104 is
+    /// never prints a time. `"10:30"` at 9 is 24px and the tight padding is 6,
+    /// which is where 36 stops being arbitrary. 104 is
     /// `"10:30 – 11:45 AM"` at pt(11) — 90px — plus the roomy padding, measured
     /// against the same capture: a floor of 128 silently demoted every chip in
     /// a 125px week column to a bare start time.
+    /// 112 and no longer 104: the symmetric inset above costs a narrow chip
+    /// three pixels of text box, and 104 was measured against the old one. A
+    /// 106px cascade step printing `10:30 – 12:00 PM` into an 86px box elides
+    /// the meridiem off the end of a range, which is the one form that must
+    /// never lose its tail; 112 demotes it to its own first token instead.
     readonly property int timeMinWidth: 36
-    readonly property int timeRangeMinWidth: 104
+    readonly property int timeRangeMinWidth: 112
+
+    /// The floor, **in text-box pixels rather than chip pixels**, for hanging a
+    /// meridiem off a start-only time. `"10:30 AM"` is 48px at 11 and 44 at 10;
+    /// `"10:30"` is 30 and 27. A two-way split leaves a 51px text box and takes
+    /// the meridiem; the three-way split leaves 33 and does not, and printing it
+    /// anyway would elide to `"10:30 A…"`, which is worse than the unambiguous
+    /// half of the same token — the chip's own row in the grid already says
+    /// which half of the day it is in.
+    /// 30 and no longer 50, because the tier it silenced was the one that could
+    /// least afford a second grammar. A grid printing `1:00 – 2:00 PM` on one
+    /// chip, `9:00 AM` on the next and a bare `10:00` on the packed ones is
+    /// three clock notations a centimetre apart, and the eye re-learns which is
+    /// which per column width. Two forms are the floor — the whole range, or
+    /// **its own first token**, `10:00 AM` — and the packed chip is held to the
+    /// second rather than allowed a third. Where the last pixel is missing the
+    /// time shrinks to fit (`Text.HorizontalFit` in the chip), which costs a
+    /// point of size and keeps the notation.
+    readonly property int meridiemMinTextWidth: 30
 
     /// The floor for setting a one-line chip's time *inline* after its title.
     /// Lower than `timeRangeMinWidth` because the inline time is only ever the
-    /// *start* — `9a`, not a range — so it costs the title about 20px rather
-    /// than 90. Under this, the title is squeezed to nothing to make room for a
+    /// *start* — `9:00 AM`, not a range — so it costs the title about 45px
+    /// rather than 90. Under this, the title is squeezed to make room for a
     /// time it would have been better off without.
     readonly property int inlineTimeMinWidth: 96
 
@@ -402,39 +672,73 @@ QtObject {
     ///     is the `"range"` or just the `"start"`.
     ///   - `titleSize` / `timeSize` — point sizes, to hand to `Theme.pt`.
     ///   - `titleLines` — how many lines the title may wrap over. **This is
-    ///     what makes a packed column readable.** A 38px chip has room for
-    ///     four glyphs on a line, so a one-line rule prints `Des…` whatever
-    ///     else is done to it; the same chip is 84px tall, and `Design` /
-    ///     `review` over `10a` uses the space the event's own duration already
-    ///     bought. Notion wraps narrow chips for exactly this reason.
+    ///     what makes a packed column readable.** A 39px chip has room for
+    ///     four glyphs of pt(12.5) on a line, so a one-line rule prints `Des…`
+    ///     whatever else is done to it; the same chip is 84px tall, and
+    ///     `Design` / `review` over `10:00` at the tight tier's type uses the
+    ///     space the event's own duration already bought. Notion wraps narrow
+    ///     chips for exactly this reason.
+    ///   - `timeMeridiem` — whether the start-only time carries its `AM`/`PM`.
     ///   - `bar`, `padLeft`, `padRight`, `padTop` — the chip's own metrics, so
     ///     the narrow case tightens every one of them together or none.
     ///
     /// `width` and `height` are the drawn box; `minutes` is the event's real
     /// duration, which is not recoverable from the height once `chipMinH` has
     /// floored it.
-    function chipContent(width: real, height: real, minutes: real): var {
+    /// `clearHeight` is the fourth number and the newest: how much of the box
+    /// is still *visible* once a cascaded neighbour is drawn over it. It
+    /// defaults to the whole height, which is every chip that shares its column
+    /// side by side or has the column to itself. Where it is smaller, it is
+    /// what the content rule spends — a chip with 28px of clear box prints one
+    /// line whatever its 84px of height would otherwise buy, because the other
+    /// 56px are behind another card.
+    function chipContent(width: real, height: real, minutes: real, clearHeight): var {
         const w = isFinite(width) ? width : 0;
-        const h = isFinite(height) ? height : 0;
+        const full = isFinite(height) ? height : 0;
+        const clear = (clearHeight === undefined || clearHeight === null
+                       || !isFinite(clearHeight)) ? full : Math.max(0, clearHeight);
+        const h = Math.min(full, clear);
+        const tight = w < policy.tightWidth;
         const narrow = w < policy.narrowWidth;
 
-        const bar = narrow ? 3 : 4;
-        const gap = narrow ? 3 : policy.roomyGap;
-        const padRight = narrow ? 2 : gap;
-        const padTop = narrow ? 1 : 3;
+        // A box short enough to have lost its second line, but not so short that
+        // shrinking the type cannot buy it back. The tight tier is excluded: its
+        // type is already at the floor and there is nothing left to give.
+        const banner = !tight
+            && h >= policy.bannerMinHeight && h < policy.twoLineMinHeight;
+
+        const bar = tight ? 2 : (narrow ? 3 : 4);
+        const gap = tight ? 3 : (narrow ? 6 : policy.roomyGap);
+        // **The inset is symmetric, and it was not.** The right pad used to be
+        // cut to 1px where the left kept 3, on the argument that the right side
+        // buys nothing — which is true of a title that elides and false of the
+        // time, which ends where it ends. The picture that came back was
+        // `10:00 AM` finishing exactly on the fill boundary and abutting the
+        // next chip's rail: two chips reading as one smear. Text sits the same
+        // distance from both edges now, and the pixels come out of the lane
+        // rather than out of one side of it.
+        const padRight = gap;
         const textW = Math.max(0, w - bar - gap - padRight);
 
         const showTime = w >= policy.timeMinWidth;
         const timeForm = w >= policy.timeRangeMinWidth ? "range" : "start";
 
         let mode = "titleOnly";
-        if (!policy.isCompact(minutes) && h >= policy.twoLineMinHeight && showTime)
+        if (!policy.isCompact(minutes) && showTime
+            && (h >= policy.twoLineMinHeight || banner))
             mode = "stacked";
         else if (showTime && w >= policy.inlineTimeMinWidth)
             mode = "inline";
 
-        const titleSize = narrow ? 11 : 12.5;
-        const timeSize = narrow ? 10 : 11;
+        const bannerSet = banner && mode === "stacked";
+        const titleSize = bannerSet ? policy.bannerTitleSize
+            : (tight ? policy.tightTitleSize : (narrow ? 11 : 12.5));
+        const timeSize = bannerSet ? policy.bannerTimeSize
+            : (tight ? policy.tightTitleSize : (narrow ? 10 : 11));
+        // The banner spends its top pad on the second line; every other tier
+        // keeps it. Decided here rather than above because it follows the mode,
+        // and a chip that wanted a banner but got `titleOnly` keeps its pad.
+        const padTop = bannerSet ? 0 : (tight ? 2 : 3);
 
         // A line box is its point size and a bit; the exact metric belongs to
         // the font and the surface measures it, but the *count* is a decision
@@ -443,15 +747,21 @@ QtObject {
         const titleLine = Math.round(titleSize * policy.lineFactor);
         const timeLine = mode === "stacked" ? Math.round(timeSize * policy.lineFactor) : 0;
         const room = h - padTop - timeLine - 2;
-        const titleLines = (mode === "stacked" && w >= policy.wrapMinWidth)
-            ? Math.max(1, Math.min(policy.maxTitleLines, Math.floor(room / titleLine)))
+        const lineCap = tight ? policy.maxTightTitleLines : policy.maxTitleLines;
+        const titleLines = (mode === "stacked" && textW >= policy.wrapMinTextWidth)
+            ? Math.max(1, Math.min(lineCap, Math.floor(room / titleLine)))
             : 1;
+
+        const form = mode === "inline" ? "start" : timeForm;
 
         return {
             "mode": mode,
             "showTime": mode !== "titleOnly",
-            "timeForm": mode === "inline" ? "start" : timeForm,
+            "timeForm": form,
+            "timeMeridiem": form === "range" || textW >= policy.meridiemMinTextWidth,
             "narrow": narrow,
+            "tight": tight,
+            "banner": bannerSet,
             "titleSize": titleSize,
             "timeSize": timeSize,
             "titleLines": titleLines,
@@ -466,24 +776,58 @@ QtObject {
     /// Line box over point size, and the ceiling on wrapping. Three lines is
     /// where a chip stops being a label and starts being a paragraph — past
     /// that the title is long enough that the editor is the place to read it.
+    ///
+    /// The tight tier gets a fourth, because there a line is about *one word*:
+    /// three lines of `Pairing: / grid / pack…` spends its whole allowance on a
+    /// three-word title and still elides, where four prints the title. The rule
+    /// is words, not lines; four narrow lines and three roomy ones are the same
+    /// rule measured against the type each tier sets.
     readonly property real lineFactor: 1.35
     readonly property int maxTitleLines: 3
+    readonly property int maxTightTitleLines: 4
 
-    /// Under this width a chip does **not** wrap, whatever height it has.
+    /// Under this many pixels **of text box** a chip does not wrap, whatever
+    /// height it has.
     ///
-    /// Measured, and the measurement reversed a decision. Wrapping a 38px chip
-    /// looked like the answer — Notion wraps narrow chips — until it was
-    /// captured: a line that cannot hold one whole word breaks inside words,
-    /// and `Design review` came out `Desig / n / rev…`, which is worse to read
-    /// than the single elided line it replaced. 72 is about two short words at
-    /// pt(11) less the narrow padding, i.e. the narrowest chip on which a wrap
-    /// lands between words rather than through one.
-    readonly property int wrapMinWidth: 72
+    /// This measurement reversed a decision, and then the decision reversed
+    /// back. Wrapping a 39px chip at pt(11) came out `Desig / n / rev…`,
+    /// because a line that cannot hold one whole word breaks inside one — so
+    /// wrapping was ruled out on chip width. But the thing that was too small
+    /// was the *type*, not the chip: the tight tier's 9.5 puts every word in the
+    /// fixture inside the same 33px box, and the wrap lands between words. So
+    /// the gate is the text box against the type that will be set in it, and
+    /// 28 is a short word at 9.5 — below that a chip has no wrap worth making.
+    readonly property int wrapMinTextWidth: 28
 
     /// The padding a chip that is not narrow gets on each side of its text —
     /// `Theme.space2`, written out because this file is loaded by
     /// `qmltestrunner`, which cannot import `qs.Core`.
     readonly property int roomyGap: 8
+
+    /// Whether a one-line chip may carry its time on the same line as its
+    /// title — and the rule is **all or nothing**.
+    ///
+    /// The inline time costs a title about 50px, and on a covered cascade step
+    /// that is the difference between `Design review` and `Desig… 10:00 AM`.
+    /// One of those names a meeting and the other names nothing while printing
+    /// a fact the chip's own row in the grid already states: the top edge sits
+    /// on 10:00 and the hour is labelled a centimetre to the left. So a
+    /// one-line chip either says both things whole or says the title, and it
+    /// never buys the time with an ellipsis.
+    ///
+    /// The two widths are font metrics, which no policy can measure — the chip
+    /// measures them and hands the numbers back, exactly as it does for
+    /// `clipTitle`. The decision stays here.
+    function inlineTimeFits(textWidth: real, titleWidth: real,
+                            timeWidth: real, gap: real): bool {
+        const box = isFinite(textWidth) ? textWidth : 0;
+        const title = isFinite(titleWidth) ? titleWidth : 0;
+        const time = isFinite(timeWidth) ? timeWidth : 0;
+        const air = isFinite(gap) ? gap : 0;
+        if (time <= 0)
+            return false;
+        return title + air + time <= box;
+    }
 
     /// A title cut to fit, **at a word boundary wherever one exists**.
     ///
@@ -496,6 +840,23 @@ QtObject {
     /// this decides what to do with the number. A first word already too long
     /// for the box falls back to a hard cut, because a chip that printed
     /// nothing would be worse than one that printed a fragment.
+    /// How many glyphs a word boundary may throw away before the cut is not
+    /// worth making.
+    ///
+    /// `"Coffee with Opal"` in a box that holds fifteen glyphs cuts to
+    /// `"Coffee with Opa"`, whose last space is at eleven — so the word rule
+    /// printed `"Coffee with…"` and left a quarter of a full-width chip empty
+    /// to the right of it. That is the rule firing in reverse: it exists to stop
+    /// a *packed* chip printing `"D…"`, and on a chip with room it was spending
+    /// pixels to say less. Past this budget the title is handed back whole and
+    /// the surface's own `ElideRight` cuts it, which is pixel-exact where this
+    /// is an estimate and therefore always fills the box.
+    ///
+    /// Three, because the cases the word rule is for are one or two glyphs over
+    /// a boundary — `"Design r"` → `"Design…"` — and a boundary four or more
+    /// glyphs back is a whole short word being dropped for nothing.
+    readonly property int wordCutBudget: 3
+
     function clipTitle(title: var, maxChars: int): string {
         const t = (title === undefined || title === null) ? "" : String(title).trim();
         const n = Math.floor(maxChars);
@@ -507,7 +868,9 @@ QtObject {
         const cut = t.slice(0, n);
         const space = cut.lastIndexOf(" ");
         if (space > 0)
-            return cut.slice(0, space) + "…";
+            return (n - space <= policy.wordCutBudget)
+                ? cut.slice(0, space) + "…"
+                : t;
         return (n > 1 ? t.slice(0, n - 1) : "") + "…";
     }
 }

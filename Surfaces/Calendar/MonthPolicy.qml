@@ -58,6 +58,25 @@ QtObject {
     readonly property int cellHeaderHeight: 22
     readonly property int chipGap: 2
 
+    /// The chip's own text metrics, for `chipText`. `chipTextInset` is the air
+    /// either side of the line — the same 8 the cell's own content inset uses,
+    /// so a banner's label and a chip's title stand on one rule — `chipItemGap`
+    /// separates the time from the title, `glyphWidth` is the fallback average
+    /// for a caller with no font behind it, and `titleFloor` is the width a
+    /// title too long to fit whole still has to be left with before the time is
+    /// worth printing — the spec's "time only if >90px free", read from the
+    /// title's end rather than the chip's.
+    readonly property int chipTextInset: 8
+    readonly property int chipItemGap: 4
+    readonly property real glyphWidth: 6.4
+    readonly property real titleFloor: 90
+
+    /// The air between a banner's *true* end and the grid line it stops at —
+    /// the same gutter the chips below it keep, so nothing in a cell ever runs
+    /// into a rule or into the window frame. A **cut** end takes none of it:
+    /// see `barSpan`.
+    readonly property int barGutter: 8
+
     property CalendarPolicy month: CalendarPolicy {}
     property CalendarTime time: CalendarTime {}
     property EventPolicy events: EventPolicy {}
@@ -187,6 +206,46 @@ QtObject {
         if (!(pitch > 0) || isNaN(cellHeight))
             return 0;
         return Math.max(0, Math.floor((cellHeight - header + space) / pitch));
+    }
+
+    /// Whether a timed chip of `width` can afford to print its time as well as
+    /// its title: `{ showsTime, titleRoom, share }`.
+    ///
+    /// **The time is what goes first, and it never costs the title a glyph.**
+    /// A share rule (55% of the title's wanted width) was measured on the
+    /// capture and it trades the wrong way round: "12:30p Lunch w/ …",
+    /// "6:30p Dinner wit…" and "9:30a Quarter clo…" all kept five glyphs of
+    /// clock and lost the words that say what the event *is*. A month chip is
+    /// read for its title; the time is an ornament on it, and an ornament that
+    /// elides its subject is not worth the pixels.
+    ///
+    /// So the test is the title's own need, not a fraction of it: the time is
+    /// printed only while the title still gets the full width its glyphs want,
+    /// or `titleFloor` (90 — the spec's "time only if >90px free") for a title
+    /// too long to ever fit, whichever is smaller. Below that the time is
+    /// dropped and the whole body is the title's. A short title on a wide chip
+    /// keeps both, which is the case that made the rule worth having.
+    ///
+    /// The caller hands in measured widths (`TextMetrics`), because a policy
+    /// that guessed at glyph widths would answer a different question from the
+    /// one the chip actually draws; `titleLen` times `glyphWidth` is the
+    /// fallback for a test that has no font.
+    function chipText(width: real, titleLen: int, timeWidth, titleWidth, inset, gap): var {
+        const pad = inset === undefined || inset === null ? policy.chipTextInset : inset;
+        const space = gap === undefined || gap === null ? policy.chipItemGap : gap;
+        const glyphs = Math.max(0, isNaN(titleLen) ? 0 : titleLen);
+        const wanted = titleWidth === undefined || titleWidth === null || isNaN(titleWidth)
+            ? glyphs * policy.glyphWidth : titleWidth;
+        const time = timeWidth === undefined || timeWidth === null || isNaN(timeWidth) ? 0 : timeWidth;
+        const room = (isNaN(width) ? 0 : width) - 2 * pad;
+        const titleRoom = room - time - space;
+        const share = wanted > 0 ? Math.max(0, Math.min(1, titleRoom / wanted)) : 1;
+        const needed = Math.min(wanted, policy.titleFloor);
+        return {
+            "showsTime": time > 0 && titleRoom > 0 && titleRoom >= needed,
+            "titleRoom": titleRoom,
+            "share": share
+        };
     }
 
     /// How many chips fit *once the row's banner lanes have taken their share*.
@@ -379,6 +438,25 @@ QtObject {
             occupy(lane, segment);
         }
 
+        // **No empty lane above a bar.** A hint can seat a continuation in lane
+        // 1 of a row whose lane 0 nothing else claims — measured on the capture:
+        // Cabin weekend came into the week of Sun 23 holding lane 1, so Sunday's
+        // chips began one slot low and the cell carried an unexplained gap under
+        // its numeral while every other cell in the row started flush. Keeping a
+        // bar's lane across the wrap is worth something; keeping an *empty* lane
+        // is worth nothing, and the reader has no way to know what is missing
+        // from it. So the row's used lanes are compacted to 0..n-1 in order,
+        // which preserves the relative stacking a hint bought and drops the
+        // holes. `laneHintsOf` reads the compacted lane, so the next row hints
+        // with the number this one actually drew.
+        const used = [];
+        for (const segment of segments)
+            if (used.indexOf(segment.lane) < 0)
+                used.push(segment.lane);
+        used.sort(function (a, b) { return a - b; });
+        for (const segment of segments)
+            segment.lane = used.indexOf(segment.lane);
+
         segments.sort(function (a, b) {
             if (a.lane !== b.lane)
                 return a.lane - b.lane;
@@ -439,6 +517,64 @@ QtObject {
                 deepest = Math.max(deepest, segment.lane);
         }
         return deepest + 1;
+    }
+
+    /// How a segment's two ends are drawn: `{ roundLeft, roundRight, chevron,
+    /// leadAccent, showsTime }`.
+    ///
+    /// **A cut end and a true end have to look different, and only the true end
+    /// is round.** A rounded cap is the shape of an ending; a bar that keeps one
+    /// where the week wrapped has told the reader the event stopped on Saturday.
+    /// So the cut end squares off — and, because a square end alone is a subtle
+    /// thing at 21px, the *sending* end also carries a chevron pointing the way
+    /// the event went. The *receiving* half says the rest with what it leaves
+    /// out: no leading accent and no time, because it did not start there.
+    ///
+    /// Both ends keep the gutter regardless (`barSpan`): a flush bar reads as
+    /// running under the next cell, and in the last column it runs into the
+    /// window frame, which is the one line in the picture that is not the grid.
+    function barCaps(segment: var): var {
+        const left = !!(segment && segment.continuesLeft);
+        const right = !!(segment && segment.continuesRight);
+        return {
+            "roundLeft": !left,
+            "roundRight": !right,
+            "chevron": right,
+            "leadAccent": !left,
+            "showsTime": !left
+        };
+    }
+
+    /// Where a segment's bar starts and how wide it is, given the view's own
+    /// column edges: `{ x, width }`, gutter-inset at its **true** ends only.
+    ///
+    /// **A cut end runs flush into the grid line.** Both ends kept the gutter
+    /// for a pass, on the argument that a bar touching a rule reads as sliding
+    /// under the next cell — which is exactly what a continuation is supposed
+    /// to read as. Measured on the capture, the argument cost the cue: the
+    /// receiving half of Cabin weekend started on the same 8px inset as an
+    /// ordinary one-day chip, and with the square cap being 4px of radius at
+    /// 21px tall, nothing on that half said "continued" at reading distance. A
+    /// bar that stops 8px short of the rule has ended; one that touches it has
+    /// not. The gutter still guards every true end, so no event's real
+    /// beginning or ending ever runs into a rule or the window frame.
+    ///
+    /// The edges are handed in rather than derived from a column width, for the
+    /// same reason `MonthView` keeps one edge table: a bar computed from
+    /// `startCol * columnW` and a rule drawn at `Math.round(col * columnW)`
+    /// disagree by up to a pixel, and the bar is then the one thing in the row
+    /// that does not line up with its own column.
+    function barSpan(segment: var, colEdges: var, gutter): var {
+        const edges = colEdges || [];
+        const g = gutter === undefined || gutter === null || isNaN(gutter) ? policy.barGutter : gutter;
+        if (!segment || edges.length < policy.columns + 1)
+            return { "x": 0, "width": 0 };
+        const start = Math.max(0, Math.min(policy.columns - 1, Math.floor(segment.startCol)));
+        const end = Math.max(start + 1, Math.min(policy.columns, start + Math.floor(segment.span)));
+        const lead = segment.continuesLeft ? 0 : g;
+        const tail = segment.continuesRight ? 0 : g;
+        const x = edges[start] + lead;
+        return { "x": x, "width": Math.max(0, edges[end] - tail - x) };
     }
 
     // --- paging ---------------------------------------------------------------

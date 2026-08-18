@@ -462,14 +462,53 @@ TestCase {
         compare(hints["cabin"], 1);
         compare(hints["long"], undefined);   // it ended inside the row
 
-        // Week of Sun 23. Alone in the row, the greedy pass says lane 0.
+        // Week of Sun 23. Alone in the row, the greedy pass says lane 0 — and
+        // so does the hint, because a lane nothing else claims is compacted
+        // away rather than left standing empty (see the compaction test).
         const bare = policy.spans(events, "2026-08-23");
         compare(bare.filter(s => s.id === "cabin")[0].lane, 0);
 
         const carried = policy.spans(events, "2026-08-23", hints);
         const cabinSecond = carried.filter(s => s.id === "cabin")[0];
-        compare(cabinSecond.lane, 1);
+        compare(cabinSecond.lane, 0);
         verify(cabinSecond.continuesLeft);
+
+        // What the hint actually buys is the *order*: with another bar in the
+        // row, the carried one stays below it exactly as it was last week,
+        // where the greedy pass alone would have put it on top.
+        const busy = events.concat([
+            { "id": "sprint", "title": "Sprint", "start": "2026-08-25T00:00", "end": "2026-08-28T00:00", "allDay": true }
+        ]);
+        const stacked = policy.spans(busy, "2026-08-23", policy.laneHintsOf(policy.spans(busy, "2026-08-16")));
+        verify(stacked.filter(s => s.id === "cabin")[0].lane
+               > stacked.filter(s => s.id === "sprint")[0].lane);
+    }
+
+    /// **A hint may not leave a hole.** Cabin weekend came into the week of Sun
+    /// 23 holding lane 1, and with nothing in lane 0 the whole row's chips began
+    /// one slot low — measured on the capture as an unexplained empty band under
+    /// Sunday's numeral while every other cell in the row started flush. Keeping
+    /// a bar's lane across the wrap is worth something; keeping an *empty* lane
+    /// is worth nothing, because the reader cannot tell what is missing from it.
+    /// So a row's lanes are compacted to 0..n-1 with their order intact, and
+    /// `laneHintsOf` hands on the number the row actually drew.
+    function test_lanes_are_compacted_so_no_lane_is_empty() {
+        const events = [
+            { "id": "cabin", "title": "Cabin weekend", "start": "2026-08-22T00:00", "end": "2026-08-24T00:00", "allDay": true },
+            { "id": "trip", "title": "Trip", "start": "2026-08-21T00:00", "end": "2026-08-27T00:00", "allDay": true }
+        ];
+        // Both carried in from last week, hinted into lanes 2 and 5, and
+        // nothing else in the row occupies 0, 1, 3 or 4.
+        const row = policy.spans(events, "2026-08-23", { "cabin": 2, "trip": 5 });
+        compare(policy.laneCount(row), 2);
+        const lanes = row.map(s => s.lane).sort();
+        compare(lanes[0], 0);
+        compare(lanes[1], 1);
+        // Order survives the compaction: the deeper hint stays the deeper bar.
+        verify(row.filter(s => s.id === "trip")[0].lane
+               > row.filter(s => s.id === "cabin")[0].lane);
+        // And what the next row is told is the compacted lane, not the hint.
+        compare(policy.laneHintsOf(row)["cabin"], undefined);   // it ended here
     }
 
     /// A hint is a preference, not a reservation. Two bars carried into the same
@@ -487,10 +526,12 @@ TestCase {
         compare(carried.filter(s => s.id === "a")[0].lane, 1);
         compare(policy.laneCount(carried), 2);
 
-        // And a hint into an empty lane above the greedy answer is honoured, so
-        // a bar that was deep in one row does not jump to the top in the next.
+        // And a hint into a lane below the greedy answer is honoured in
+        // *order*, so a bar that was deep in one row does not jump to the top
+        // in the next — compacted afterwards, so lanes 1 and 2 stay empty of
+        // nothing.
         const deep = policy.spans(events, "2026-08-23", { "a": 3 });
-        compare(deep.filter(s => s.id === "a")[0].lane, 3);
+        compare(deep.filter(s => s.id === "a")[0].lane, 1);
         compare(deep.filter(s => s.id === "b")[0].lane, 0);
     }
 
@@ -741,5 +782,165 @@ TestCase {
         compare(policy.nextMonth("2026-02-30"), "");
         compare(policy.prevMonth("nope"), "");
         compare(policy.shiftMonths("", 3), "");
+    }
+
+    // --- the chip's own line ---------------------------------------------------
+
+    /// **The time never costs the title a glyph.** A share rule (55% of what
+    /// the title wanted) was measured on the capture and it trades the wrong
+    /// way: "12:30p Lunch w/ …" and "6:30p Dinner wit…" both kept five glyphs
+    /// of clock and lost the words that name the event. So the time prints only
+    /// while the title still gets its full width, or `titleFloor` for a title
+    /// too long to fit whole, whichever is smaller.
+    function test_a_wide_chip_keeps_its_time() {
+        // 190px chip, 8px either side, a 26px time and a 4px gap leaves 136 for
+        // a title that wants 90: the title keeps everything it asked for.
+        const wide = policy.chipText(190, 12, 26, 90);
+        verify(wide.showsTime);
+        compare(wide.titleRoom, 190 - 16 - 26 - 4);
+        compare(wide.share, 1);
+    }
+
+    function test_a_long_title_on_a_narrow_chip_drops_the_time() {
+        // 120px chip: 104 - 26 - 4 = 74 for a title wanting 160. The title
+        // cannot have all of it and 74 is under the 90px floor too, so the time
+        // goes and the whole 104 is the title's.
+        const tight = policy.chipText(120, 22, 26, 160);
+        verify(!tight.showsTime);
+        // The same chip with a short title keeps it: 74 of 60 is all of it.
+        verify(policy.chipText(120, 8, 26, 60).showsTime);
+        // And this is the case the share rule got wrong — a real month cell,
+        // 117px wide, with "Dinner with Cass" wanting 95. There is no width at
+        // which keeping "6:30p" and losing "with Cass" is the better line.
+        verify(!policy.chipText(117, 16, 34, 95).showsTime);
+    }
+
+    /// Two thresholds, tested as thresholds. A title that fits whole is the
+    /// first; a title too long to ever fit falls back to the 90px floor.
+    function test_the_title_takes_precedence_at_both_thresholds() {
+        // A title that *can* fit gets all of it: 110 - 16 - 30 - 4 = 60 for a
+        // title wanting exactly 60 keeps the time, and one pixel more drops it.
+        verify(policy.chipText(110, 8, 30, 60).showsTime);
+        verify(!policy.chipText(109, 8, 30, 60).showsTime);
+        // A title too long for any chip cannot be given all of it, so the floor
+        // takes over: 90px of it survives, and below that the reader is losing
+        // words to a clock.
+        verify(policy.chipText(140, 60, 30, 400).showsTime);      // room 90
+        verify(!policy.chipText(139, 60, 30, 400).showsTime);     // room 89
+        compare(policy.titleFloor, 90);
+    }
+
+    function test_a_chip_with_no_time_or_no_room_shows_none() {
+        verify(!policy.chipText(190, 12, 0, 90).showsTime);        // nothing to show
+        verify(!policy.chipText(30, 12, 26, 90).showsTime);        // no room at all
+        verify(!policy.chipText(190, 12, undefined, 90).showsTime);
+        // With no measured title the average glyph stands in, and the answer is
+        // still an answer rather than a NaN.
+        const guessed = policy.chipText(190, 12, 26);
+        verify(guessed.showsTime);
+        compare(guessed.share, Math.min(1, (190 - 16 - 26 - 4) / (12 * policy.glyphWidth)));
+    }
+
+    // --- how a cut bar is drawn ------------------------------------------------
+
+    /// **Only a true end is round.** A rounded cap is the shape of an ending, so
+    /// a bar that kept one where the week wrapped would say the event stopped on
+    /// Saturday. The cut end squares off, the sending half carries the chevron,
+    /// and the receiving half prints no time because it did not start there.
+    function test_a_bar_inside_one_row_is_round_at_both_ends() {
+        const caps = policy.barCaps({ "continuesLeft": false, "continuesRight": false });
+        verify(caps.roundLeft);
+        verify(caps.roundRight);
+        verify(!caps.chevron);
+        verify(caps.leadAccent);
+        verify(caps.showsTime);
+    }
+
+    function test_the_sending_half_squares_its_cut_and_points_the_way() {
+        const caps = policy.barCaps({ "continuesLeft": false, "continuesRight": true });
+        verify(caps.roundLeft);
+        verify(!caps.roundRight);
+        verify(caps.chevron);
+        verify(caps.showsTime);
+    }
+
+    function test_the_receiving_half_squares_its_cut_and_says_nothing_twice() {
+        const caps = policy.barCaps({ "continuesLeft": true, "continuesRight": false });
+        verify(!caps.roundLeft);
+        verify(caps.roundRight);
+        verify(!caps.chevron);
+        verify(!caps.leadAccent);
+        verify(!caps.showsTime);
+    }
+
+    function test_a_row_entirely_inside_a_span_is_square_at_both_ends() {
+        const caps = policy.barCaps({ "continuesLeft": true, "continuesRight": true });
+        verify(!caps.roundLeft);
+        verify(!caps.roundRight);
+        verify(caps.chevron);
+        verify(!caps.showsTime);
+        // A missing segment is a true-ended bar rather than a crash.
+        verify(policy.barCaps(null).roundLeft);
+    }
+
+    /// **A true end keeps the gutter; a cut end runs flush into the rule.** A
+    /// bar that stops 8px short of the grid line has ended — which is why every
+    /// real beginning and ending keeps that gutter, and why the receiving half
+    /// of a wrapped bar, measured on the capture with the same inset and the
+    /// same 4px rounding as a fresh chip, said nothing about being a
+    /// continuation. Touching the line is the cue.
+    function test_a_bar_is_gutter_inset_at_its_true_ends_only() {
+        const edges = [0, 100, 200, 300, 400, 500, 600, 700];
+        const inner = policy.barSpan({ "startCol": 1, "span": 3 }, edges, 8);
+        compare(inner.x, 108);
+        compare(inner.width, 400 - 8 - 108);
+
+        // The sending half runs to the rule; the receiving half starts on it.
+        const sending = policy.barSpan({ "startCol": 6, "span": 1,
+                                         "continuesRight": true }, edges, 8);
+        compare(sending.x, 608);
+        compare(sending.x + sending.width, edges[7]);
+
+        const receiving = policy.barSpan({ "startCol": 0, "span": 2,
+                                           "continuesLeft": true }, edges, 8);
+        compare(receiving.x, 0);
+        compare(receiving.x + receiving.width, 200 - 8);
+
+        // A row wholly inside a span touches both rules.
+        const through = policy.barSpan({ "startCol": 0, "span": 7,
+                                         "continuesLeft": true,
+                                         "continuesRight": true }, edges, 8);
+        compare(through.x, 0);
+        compare(through.width, 700);
+    }
+
+    function test_a_bar_span_is_clamped_to_the_row_and_never_negative() {
+        const edges = [0, 100, 200, 300, 400, 500, 600, 700];
+        const over = policy.barSpan({ "startCol": 5, "span": 9 }, edges, 8);
+        compare(over.x, 508);
+        compare(over.width, 700 - 8 - 508);
+        compare(policy.barSpan(null, edges, 8).width, 0);
+        compare(policy.barSpan({ "startCol": 0, "span": 1 }, [], 8).width, 0);
+        // A gutter wider than the column cannot give back a negative bar.
+        compare(policy.barSpan({ "startCol": 0, "span": 1 }, edges, 90).width, 0);
+    }
+
+    /// The gutter defaults to the one the surface uses, so a caller that does
+    /// not name it draws the same bar the grid does.
+    function test_the_bar_gutter_has_a_default() {
+        const edges = [0, 100, 200, 300, 400, 500, 600, 700];
+        compare(policy.barSpan({ "startCol": 0, "span": 1 }, edges).x, policy.barGutter);
+        compare(policy.barGutter, 8);
+    }
+
+    /// The month grid's drawn metrics, pinned: a 21px chip at a 2px gap under a
+    /// 16px "+N more" line. A capture that disagrees with these numbers is a
+    /// changed design, not a changed measurement.
+    function test_the_month_chip_metrics_are_pinned() {
+        compare(policy.chipCapacity(113, 0, 21, 26, 2, 21), 3);
+        compare(policy.chipCapacity(113, 1, 21, 26, 2, 21), 2);
+        const caps = policy.cellCapacity(113, 0, 21, 26, 2, 21, 16);
+        compare(caps.full, 3);
+        compare(caps.withMore, 3);
     }
 }

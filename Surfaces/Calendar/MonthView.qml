@@ -115,36 +115,30 @@ Item {
     readonly property int numeralClearance: 6
     readonly property int cellHeaderH: 26
 
-    /// What a neighbouring month's cell keeps — numeral and chips alike, so
-    /// the boundary is one change in weight rather than two half-changes.
-    readonly property real outsideOpacity: 0.45
+    /// What a neighbouring month's chips keep. **0.8, not 0.45.** The ground
+    /// under them has already moved 17 units of green; an opacity deep enough
+    /// to say "another month" a second time walked the chip's own ink to
+    /// 3.6:1 against its own fill, which breaks the spec's contrast promise on
+    /// events that are perfectly real — they just belong to September. At 0.8
+    /// the worst hue measures 4.7:1 and the cell still reads as outside.
+    readonly property real outsideOpacity: 0.8
 
     /// Breathing room at the bottom of a cell. Zero: the chip stack already
     /// stops 1px above the row edge by arithmetic, and a foot on top of that
     /// is the pixel that costs the third chip.
     readonly property int cellFootH: 0
 
-    /// **One left edge for the whole cell.** The numeral, the banner bars, the
-    /// chips and the "+N more" row all start here, and the chips' text column
-    /// starts one dot-plus-gap further in — which is also where a banner's own
-    /// label starts, so a cell reads as two columns and not five. Measured: the
-    /// previous pass had the banner at cell+2, the chip dot at cell+12 and the
-    /// "+N more" at cell+22, which is a ragged stack at a glance.
+    /// **One left edge for the whole cell.** The numeral, the today disc, the
+    /// banner bars, the chips and the "+N more" row all start here, and the
+    /// text inside a chip or a banner starts one `pad` further in — one rule
+    /// for the cell and one for its labels, and no third. Measured: an earlier
+    /// pass had the banner at cell+2, a chip's dot at cell+12 and the "+N more"
+    /// at cell+22, which is a ragged stack at a glance.
+    ///
+    /// It is also the gutter every banner keeps at both of its ends, so no bar
+    /// ever touches a rule or the window frame (`MonthPolicy.barSpan`).
     readonly property int contentInset: Theme.space2
 
-    /// The hue dot the chip carries. Handed down rather than left to the
-    /// chip's default so the grid owns every metric that repeats 42 times.
-    ///
-    /// **There is no title column, and that is the point.** A previous pass
-    /// gave the time a fixed slot measured off the widest string the formatter
-    /// can produce and right-aligned the digits inside it, so that every title
-    /// in a stack began at one x. Measured off the capture, that slot opened a
-    /// 42px void between the dot and the time on every short time — 22% of a
-    /// 194px cell spent on nothing — and elided four of six titles at widths
-    /// where the reference fits them whole. The chips already share a left
-    /// edge, because their bodies do; buying a second alignment with the
-    /// title's own width is the wrong trade at this size.
-    readonly property int chipDotD: 6
 
     // --- the cell ladder --------------------------------------------------------
     //
@@ -204,19 +198,57 @@ Item {
     // there is pure white and `bgSunken` is the bottom of the token set, so the
     // same two mixes land in the same relative places.
     readonly property color cellWeekday: Theme.surfaceRaised
-    readonly property color cellWeekend: Qt.tint(Theme.surfaceRaised,
-        Qt.alpha(Theme.bgSunken, 0.34))
 
-    /// How far out of the month a cell sinks, on whichever rung it started.
-    /// Applied as arithmetic rather than as a translucent layer so every cell
-    /// in the grid is one opaque colour — stacked washes are what let a
-    /// Saturday out-shout today in the pass before last.
-    function outsideOf(base: color): color {
-        return Qt.tint(base, Qt.alpha(Theme.bgSunken, 0.72));
+    /// **Two cues, two channels, and neither may borrow the other's.** The pass
+    /// before this moved the weekend off the ground and onto the numeral, which
+    /// collided head-on with the one cue that was already a numeral: measured
+    /// on the capture, an in-month Saturday's date (125,143,134) and an
+    /// out-of-month Thursday's (113,119,115) were the same grey saying two
+    /// different things, and an out-of-month *weekend* stacked both dimmings
+    /// onto one glyph and landed at 2.6:1 — below any reading threshold. The
+    /// reference never dims a weekend numeral, for exactly this reason.
+    ///
+    /// So the channels are separated by construction and each says one thing:
+    ///
+    ///     weekend        ground only    — a sink of 28% toward `bgSunken`
+    ///     out of month   ground + ink   — a sink of 62%, and a muted numeral
+    ///
+    /// A weekend's date is `textPrimary`, identical to a Tuesday's, because a
+    /// Saturday in this month is exactly as real as a Tuesday in it. The four
+    /// grounds, green channel, dark palette:
+    ///
+    ///     weekday, in      surfaceRaised                        g 38
+    ///     weekend, in      sunk 28%                             g 30   Δ  8
+    ///     weekday, out     sunk 62%                             g 21   Δ 17
+    ///     weekend, out     sunk 75%                             g 17
+    ///
+    /// which keeps the invariant the month boundary has to win:
+    ///
+    ///     |weekend − weekday|  <  |out-of-month − weekday|
+    ///
+    /// Light mode walks the same ladder downward from paper; `surfaceRaised`
+    /// there is pure white and `bgSunken` the bottom of the token set, so the
+    /// same four mixes land in the same relative places.
+    readonly property real weekendSink: 0.28
+    readonly property real monthSink: 0.62
+    readonly property real bothSink: 0.75
+
+    /// One opaque colour per cell rather than a stack of translucent layers —
+    /// stacked washes are what let a Saturday out-shout today two passes ago,
+    /// and what made the out-of-month weekend unreadable in the last one.
+    function cellGround(inMonth: bool, isWeekend: bool): color {
+        const sink = inMonth ? (isWeekend ? view.weekendSink : 0)
+                             : (isWeekend ? view.bothSink : view.monthSink);
+        return sink > 0 ? Qt.tint(view.cellWeekday, Qt.alpha(Theme.bgSunken, sink))
+                        : view.cellWeekday;
     }
 
-    /// Today's wash, the faintest thing in the grid. See the ladder above.
-    readonly property real todayWashAlpha: 0.022
+    /// A neighbouring month's date: `textMuted` at full strength, not
+    /// `textPrimary` behind an opacity. Measured on the sunk grounds it is
+    /// 5.4:1 and 5.6:1 — legible, plainly quieter than the 13:1 an in-month
+    /// numeral has, and, because it is one colour rather than an opacity that
+    /// composites differently on every ground, it means one thing everywhere.
+    readonly property color numeralOutside: Theme.textMuted
 
     /// The grid lines. `borderSubtle` at full strength: 18/255 over the weekday
     /// rung, which is the same order as the weekday→weekend step, so the rule
@@ -373,16 +405,6 @@ Item {
                 width: view.colEdges[cap.index + 1] - view.colEdges[cap.index]
                 height: heading.height
 
-                /// The weekend cue runs *through* the header rather than
-                /// starting under it, on the same rung the weekend cells take,
-                /// so the header cannot disagree with its own grid about which
-                /// two columns are quiet.
-                Rectangle {
-                    anchors.fill: parent
-                    color: view.cellWeekend
-                    visible: cap.isWeekend
-                }
-
                 Text {
                     // Left-aligned on the cell's own content inset, with every
                     // numeral, banner and chip below it. Centred caps over
@@ -391,8 +413,11 @@ Item {
                     x: view.contentInset
                     anchors.verticalCenter: parent.verticalCenter
                     text: cap.modelData
+                    /// Every cap the same weight. The weekend is said once, by
+                    /// the ground of the column beneath — a second, fainter
+                    /// version of it up here was the header disagreeing with
+                    /// itself about how much a Saturday matters.
                     color: Theme.textMuted
-                    opacity: cap.isWeekend ? 0.75 : 1
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(Theme.capsSize)
                     font.weight: Theme.weightMedium
@@ -473,29 +498,19 @@ Item {
                         width: view.colEdges[wash.index + 1] - view.colEdges[wash.index]
                         height: row.height
 
-                        /// **One rectangle, one colour.** The column's fill
-                        /// picks the rung; the month boundary sinks it. Both
-                        /// resolve to a single opaque value before anything is
-                        /// painted, so no cell can be lifted by a wash that
-                        /// belongs to another cue.
+                        /// **One rectangle, one colour, four possible values.**
+                        /// The ground is where both of the grid's quiet cues
+                        /// live — in/out of month and weekday/weekend — and
+                        /// `cellGround` composites them into a single opaque
+                        /// colour so nothing is ever painted twice. Today is
+                        /// still a disc and not a ground: a wash that answered
+                        /// "which day is it" would be a third cue competing
+                        /// with the mark that already answers it.
                         Rectangle {
                             anchors.fill: parent
-
-                            readonly property color base: wash.cell && wash.cell.isWeekend
-                                ? view.cellWeekend : view.cellWeekday
-
-                            color: wash.cell && wash.cell.inMonth
-                                ? base : view.outsideOf(base)
-                        }
-
-                        /// Today, and the only wash in the grid that is a
-                        /// *hue* rather than a rung. 3.5% — quieter than the
-                        /// weekend step, so it never reads as a cue of its
-                        /// own; the circle above is the mark.
-                        Rectangle {
-                            anchors.fill: parent
-                            color: Qt.alpha(Theme.accentPrimary, view.todayWashAlpha)
-                            visible: wash.cell ? wash.cell.isToday : false
+                            color: wash.cell
+                                ? view.cellGround(wash.cell.inMonth, wash.cell.isWeekend)
+                                : view.cellWeekday
                         }
                     }
                 }
@@ -558,17 +573,19 @@ Item {
                         /// header and the mini-month make, so one calendar
                         /// answers "which day is it" one way.
                         ///
-                        /// Centred on the digits, but **clamped so it never
-                        /// comes within 6px of a rule**. Centring alone put an
-                        /// 18px disc 3px off the vertical on a two-digit day
-                        /// and *negative* on a one-digit one, where it would
-                        /// have crossed the grid line into the previous
-                        /// column. The clamp costs a single-digit numeral a
-                        /// couple of pixels of centring and buys every day of
-                        /// the month the same clearance.
+                        /// **Its left edge is the numeral rule.** Centring the
+                        /// disc on the digits was measured to move it: 3px
+                        /// right on a two-digit day and hard against the
+                        /// vertical rule on a one-digit one, so today's mark
+                        /// landed in a different place depending on the date,
+                        /// and on the 1st it sat closer to the grid line than
+                        /// anything else in the cell. Pinned to the same rule
+                        /// every other numeral starts on, it is 8px clear of
+                        /// the rule (`contentInset`, above the 6px floor) on
+                        /// every day of the month, and the column of dates
+                        /// down the left of the grid stays a column.
                         Rectangle {
-                            x: Math.max(view.numeralClearance - view.contentInset,
-                                        (dayText.implicitWidth - view.numeralD) / 2)
+                            x: 0
                             width: view.numeralD
                             height: view.numeralD
                             anchors.verticalCenter: parent.verticalCenter
@@ -580,18 +597,23 @@ Item {
                         Text {
                             id: dayText
 
-                            anchors.left: parent.left
+                            /// Knocked out of the disc means centred in it;
+                            /// every other numeral sits on the rule the disc's
+                            /// left edge is on.
+                            x: numeral.cell && numeral.cell.isToday
+                                ? (view.numeralD - dayText.implicitWidth) / 2 : 0
                             anchors.verticalCenter: parent.verticalCenter
                             text: numeral.cell ? numeral.cell.day : ""
+                            /// **Today, in the month, or out of it — and a
+                            /// weekend is none of those.** Saturday's date is
+                            /// a Tuesday's date; the weekend lives in the
+                            /// ground (see `weekendSink`), so this ink carries
+                            /// exactly one meaning and no two states share a
+                            /// value.
                             color: !numeral.cell ? Theme.textSecondary
                                  : numeral.cell.isToday ? Theme.bgBase
-                                 : Theme.textPrimary
-                            /// 45%, the same as the chips below — out of month
-                            /// the numeral and its events fade together, so
-                            /// the boundary is one change in weight and not
-                            /// two.
-                            opacity: numeral.cell && !numeral.cell.inMonth
-                                ? view.outsideOpacity : 1
+                                 : numeral.cell.inMonth ? Theme.textPrimary
+                                 : view.numeralOutside
                             font.family: Theme.fontUi
                             font.pointSize: Theme.pt(12.5)
                             font.weight: Theme.weightMedium
@@ -624,42 +646,38 @@ Item {
                         readonly property var source: bar.segment
                             ? view.eventById(bar.segment.id) : null
 
-                        // **A week wrap is one bar cut in two, and the two
-                        // halves are not symmetric.**
+                        // **A week wrap is one bar cut in two, and the cut is
+                        // drawn rather than implied.** Both halves keep the
+                        // cell's gutter — the same one the chips below them
+                        // keep — because a bar run flush into the grid line
+                        // reads as sliding under the next cell, and in the last
+                        // column it runs into the *window frame*, the one line
+                        // in the picture that is not the grid. What says
+                        // "continued" is the pair of marks `MonthPolicy.barCaps`
+                        // states: a squared cap where the row cut it, a chevron
+                        // pointing the way it went on the sending half, and no
+                        // time on the receiving one.
                         //
-                        // The *sending* half — the one with `continuesRight` —
-                        // runs flush into the row's right edge and squares that
-                        // cap. It has to: a bar that stops short of the grid
-                        // line, or keeps its rounded end there, has *ended* as
-                        // far as the eye is concerned, and the reader has no
-                        // reason to look for the rest of it on the next row.
-                        // Measured on the pass before this, the sending half of
-                        // Saturday→Sunday was sized to its own text and stopped
-                        // 39px early with a rounded cap.
-                        //
-                        // The *receiving* half keeps the cell's ordinary
-                        // content inset, the same one the numeral and the chips
-                        // below it take, and squares its left cap. Starting it
-                        // at 0 put it hard against the vertical rule — the one
-                        // thing in the cell that did not share the column's
-                        // left edge — so the row read as misaligned rather than
-                        // as continued. The squared cap is what says
-                        // "continued"; the inset is what keeps it in its
-                        // column.
-                        readonly property real leftInset: view.contentInset
-                        readonly property real rightInset: bar.segment && bar.segment.continuesRight
-                            ? 0 : view.contentInset
-                        readonly property real startX: view.colEdges[
-                            bar.segment ? bar.segment.startCol : 0]
-                        readonly property real endX: view.colEdges[Math.min(
-                            view.policy.columns,
-                            (bar.segment ? bar.segment.startCol : 0)
-                            + (bar.segment ? bar.segment.span : 0))]
+                        // **The cut end runs flush into the rule; the text does
+                        // not move.** The receiving half kept the cell's inset
+                        // for a pass and was measured indistinguishable from a
+                        // fresh one-day event — same left edge, same rounding
+                        // at 4px on a 21px bar, and a repeated title. A bar
+                        // that touches the grid line has visibly not ended
+                        // there. `leadPad` then gives the *label* back the
+                        // gutter the body gave up, so the title still stands on
+                        // the one text rule the numeral and the chips below it
+                        // share, and only the colour crosses the line.
+                        readonly property var geometry: view.policy.barSpan(
+                            bar.segment, view.colEdges, view.contentInset)
 
-                        x: bar.startX + bar.leftInset
+                        leadPad: (bar.segment && bar.segment.continuesLeft)
+                            ? view.contentInset : 0
+
+                        x: bar.geometry.x
                         y: view.cellHeaderH + (bar.segment ? bar.segment.lane : 0)
                            * (view.chipH + view.chipGap)
-                        width: Math.max(0, bar.endX - bar.startX - bar.leftInset - bar.rightInset)
+                        width: bar.geometry.width
                         height: view.chipH
 
                         visible: !!bar.source
@@ -675,7 +693,7 @@ Item {
 
                         event: bar.source
                         hue: CalendarTokens.hues.forEvent(bar.source)
-                        dotD: view.chipDotD
+                        policy: view.policy
                         banner: true
                         continuesLeft: bar.segment ? bar.segment.continuesLeft : false
                         continuesRight: bar.segment ? bar.segment.continuesRight : false
@@ -739,7 +757,7 @@ Item {
 
                                     event: chipItem.source
                                     hue: CalendarTokens.hues.forEvent(chipItem.source)
-                                    dotD: view.chipDotD
+                                    policy: view.policy
                                     selected: chipItem.source
                                         ? view.selectedId === chipItem.source.id : false
                                     use24: view.use24

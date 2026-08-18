@@ -278,6 +278,177 @@ Singleton {
     /// than to replace it.
     readonly property color todayWash: Qt.alpha(Theme.accentPrimary, 0.10)
 
+    // --- the drag's three colours -----------------------------------------------
+    //
+    // A mid-drag grid has to say three different things at once, and the first
+    // pass said all three in the same register: the lifted chip wore the same
+    // `fill(hue)` as a resting one (measured 1.18:1 against the column it was
+    // over — no surface at all, so it read as *selected* rather than as
+    // *carried*), the vacated slot wore a 0.09 wash that measured 1.02:1 and
+    // vanished under its neighbours, and the target column wore a wash two
+    // levels off `todayWash`, which is one token doing two jobs.
+    //
+    // So the three separate by *kind* and not by alpha. The thing in the hand
+    // is solid; the thing left behind is an outline; the place it will land is
+    // a stroked slot. None of them can be mistaken for the others at a glance,
+    // and none of them is a wash.
+
+    /// **The lifted chip: the resting chip, raised.** A dragged event is off the
+    /// paper, and the first answer here was to paint it in the hue at full
+    /// strength — `bar(hue)`, no tint, ink flipped to the far end of the ramp.
+    ///
+    /// Measured against the grid it sits on, that is not the same chip lifted;
+    /// it is a different *kind* of object. Every resting chip on the surface is
+    /// a dark tint carrying a 3px rail and light text, and a solid light-blue
+    /// block with near-black ink on it reads as pasted in from another
+    /// application — which is what a blind read of the drag capture called it.
+    /// Identity is the one thing a move must not change: the whole gesture is
+    /// an argument about *when*, and a card that changes what it looks like on
+    /// the way across makes the reader check whether it is still the same
+    /// event.
+    ///
+    /// So the lift keeps the chip's grammar and changes only its *level*: the
+    /// same tint mixed on `surfaceRaised` instead of `surface`, at roughly
+    /// twice the hue. That is a step of about 1.9:1 against the resting fill —
+    /// plainly picked up, unmistakably the same event.
+    function liftFill(index: int): color {
+        return Qt.tint(Theme.surfaceRaised,
+                       Qt.alpha(tokens.bar(index), Theme.dark ? 0.34 : 0.24));
+    }
+
+    /// The rail every resting chip wears, kept on the lifted one — it is the
+    /// mark the eye matches the travelling card to its own row of neighbours by.
+    function liftRail(index: int): color {
+        return tokens.bar(index);
+    }
+
+    /// And its ink: the chip's own text colour rather than an inversion. The
+    /// fill is a tint again, so the ramp that carries a resting chip's title
+    /// carries this one at the same contrast.
+    function liftText(index: int): color {
+        return tokens.textFor(index, false);
+    }
+
+    /// The edge of a card held above the page. The hue itself, which only reads
+    /// now that the fill beneath it is a tint rather than that same hue solid.
+    function liftEdge(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.55);
+    }
+
+    /// **The lift shadow, as a falloff rather than a plate.**
+    ///
+    /// It was three hard rectangles inset −10/−4/−1, and it photographed as
+    /// exactly that: a square black slab sitting behind a rounded card with its
+    /// corners disagreeing with the corners it was under, offset far enough to
+    /// read as misregistration rather than as depth.
+    ///
+    /// The scene graph has no blur that survives an offscreen grab —
+    /// `Widgets/Icon.qml` measured `MultiEffect` drawing nothing there — so the
+    /// blur is stacked instead: six rings, each wider and fainter than the last
+    /// and each offset *down* by a share of its own spread, so the falloff is
+    /// heavier under the card than above it the way a lit one is. Composited
+    /// they integrate to about `0 8px 24px rgba(0,0,0,.45)` at the core, and no
+    /// single ring carries enough alpha to show an edge of its own.
+    readonly property var liftShadow: [
+        { spread: 20, drop: 12, alpha: 0.05 },
+        { spread: 15, drop: 10, alpha: 0.06 },
+        { spread: 11, drop: 8, alpha: 0.07 },
+        { spread: 7, drop: 6, alpha: 0.09 },
+        { spread: 4, drop: 4, alpha: 0.11 },
+        { spread: 2, drop: 2, alpha: 0.13 }
+    ]
+
+    function liftShadowInk(alpha: real): color {
+        return Qt.rgba(0, 0, 0, alpha);
+    }
+
+    /// Ink for the gutter stamp, which *is* a solid plate of `bar(hue)` and so
+    /// still needs the far end of the ramp: the page in dark mode and
+    /// white in light. The same inversion the today-disc already makes.
+    ///
+    /// Not `bgBase` in both. Dark mode's bars are light and `bgBase` clears
+    /// 6.5:1 on the worst of the eight (ember). Light mode's bars are dark and
+    /// its `bgBase` is a warm paper rather than white, which leaves moss at
+    /// **4.31:1** — under the bar, and the one hue that fails is the one a
+    /// spot check would not have been looking at. White carries the same eight
+    /// at 4.91 and up, so light mode spends the extra half-step of glare and
+    /// keeps the floor.
+    readonly property color liftInk: Theme.dark ? Theme.bgBase : "#ffffff"
+
+    /// **The vacated slot: an outline, not a fill.** 12% of the hue behind a
+    /// dashed hairline of it. The fill alone was invisible the moment a
+    /// cascaded neighbour was drawn over it; a dash survives, because a broken
+    /// line is a mark the eye reads as a *hole* rather than as a surface, and
+    /// the view draws it above the chips for the same reason.
+    function vacatedFill(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.12);
+    }
+
+    function vacatedEdge(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.85);
+    }
+
+    /// The pixel under each dash. `liftInk` is the one colour on the surface
+    /// guaranteed to separate from a full-strength hue, which is exactly what
+    /// the dashes have to survive during a resize.
+    readonly property color vacatedHalo: Qt.alpha(tokens.liftInk, 0.7)
+
+    /// The dash: 4 on, 4 off at 1px, so a 56px hour of outline carries seven
+    /// marks — enough to read as dashed at chip scale without turning a 20px
+    /// minimum chip into a dotted smudge.
+    readonly property int vacatedDash: 4
+
+    /// **The target slot: a rounded stroke on the chip's own footprint.**
+    /// Two pixels of the hue around the minute the drop will take, inset to the
+    /// same lane a chip takes so it is visibly the outline the card is about to
+    /// fill, with barely any fill of its own — the slot's job is to say *here*,
+    /// and a filled one competes with the chip being carried into it.
+    function targetEdge(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.9);
+    }
+
+    function targetFill(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.10);
+    }
+
+    /// **And the day, as a wash on the destination.**
+    ///
+    /// This was a 2px rail down the target column's leading edge, and a
+    /// column's leading edge is where the grid draws its day separator: the
+    /// rail landed exactly on the Tue/Wed rule and a blind read put the
+    /// destination on the *wrong side* of it. A mark on a boundary names
+    /// neither of the two things the boundary divides.
+    ///
+    /// A wash cannot be ambiguous that way — it has an area, and the area is
+    /// the answer. The earlier objection was that a hue wash at 0.09 was inside
+    /// two levels of `todayWash` and so said "today" instead; that is a
+    /// *strength* problem, and it is fixed by spending more of the hue here
+    /// than `todayWash` spends of the accent (0.05) rather than by giving up
+    /// the area. With the slot outline inside it there are two marks on the
+    /// destination and none anywhere else.
+    function targetWash(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.13);
+    }
+
+    /// The hair that ties the gutter stamp to the slot four columns away. Same
+    /// device, and same argument, as the now-line's own connector: a number on
+    /// the ruler and a box in the grid are one fact, and without a line between
+    /// them the reader has to guess that.
+    function targetConnector(index: int): color {
+        return Qt.alpha(tokens.bar(index), 0.4);
+    }
+
+    /// **The gap between the lifted card and its slot.** Five, and it is doing
+    /// the work of both marks: without it the ghost covers the outline exactly
+    /// (the ghost is pinned to the snapped minute, so the two rectangles are
+    /// the same rectangle) and the drop target has no visible existence at all.
+    ///
+    /// Five and not three because the ghost is also scaled 1.02 about its own
+    /// centre, which spends about 1.6px of the gap on the long edge and 0.8 on
+    /// the short one. Three would leave a hairline that photographs as a
+    /// rendering seam; five leaves a gap that reads as air.
+    readonly property int dragInset: 5
+
     /// The mini-month's band — the run of days the grid beside it is showing.
     ///
     /// The spec said `surfaceOverlay`, and measured on the sidebar's own ground

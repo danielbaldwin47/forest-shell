@@ -1297,8 +1297,16 @@ ShellRoot {
         "resize": {
             "mode": "resizeBottom",
             "eventId": "evt-6",
+            // **Not a whole hour.** This landed on 1020 — 5 PM exactly — and
+            // the picture that came back was a chip whose top and bottom both
+            // sat on hour rules, which is what a chip that is not being resized
+            // looks like. A resize is only legible as one when the edge under
+            // the finger is somewhere no rule is: 16:45 puts the bottom three
+            // quarters down the 4 PM band, and the duration beside the range
+            // reads 1h 45m rather than a round number the grid could have
+            // produced on its own.
             "fromIso": "2026-08-18", "fromMin": 945,
-            "toIso": "2026-08-18", "toMin": 1020
+            "toIso": "2026-08-18", "toMin": 1005
         }
     })
 

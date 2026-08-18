@@ -146,6 +146,37 @@ TestCase {
         compare(p.column, 2);
     }
 
+    function test_a_move_reports_the_slot_it_vacated() {
+        const c = testCase.withEvent("2026-08-17T09:00", "2026-08-17T10:30");
+        drag.begin("move", 210, 570, c);
+        const p = drag.update(310, 600);
+        compare(p.origin.active, true);
+        compare(p.origin.column, 1);            // still Monday's
+        compare(p.origin.y, 540);               // 09:00 at 60px an hour
+        compare(p.origin.h, 90);
+        compare(p.origin.start, "2026-08-17T09:00");
+        compare(p.origin.end, "2026-08-17T10:30");
+        compare(p.column, 2);                   // while the proposal has moved on
+    }
+
+    function test_a_resize_keeps_its_whole_pre_drag_extent_not_the_difference() {
+        const c = testCase.withEvent("2026-08-17T15:00", "2026-08-17T15:45");
+        drag.begin("resizeBottom", 210, 945, c);
+        const p = drag.update(210, 1005);
+        compare(p.end, "2026-08-17T16:45");
+        compare(p.origin.y, 900);
+        compare(p.origin.h, 45);                // the extent, not the 60 it grew by
+        compare(p.origin.column, p.column);
+    }
+
+    function test_a_create_vacates_nothing() {
+        drag.begin("create", 210, 540, testCase.ctx);
+        const p = drag.update(210, 640);
+        compare(p.origin.active, false);
+        compare(p.origin.column, -1);
+        compare(p.origin.h, 0);
+    }
+
     function test_a_move_at_the_bottom_of_the_day_gives_up_position_not_length() {
         const c = testCase.withEvent("2026-08-17T09:00", "2026-08-17T10:30");
         drag.begin("move", 210, 570, c);

@@ -21,10 +21,10 @@
 //
 // Position, size and label are the caller's, straight off
 // `DragPolicy.proposal` and `CalendarFormat.timeRange`. What is here is the
-// look: the hue's own fill so a moved chip keeps its colour under the finger, a
-// hard 2px edge in that hue so the ghost reads as a *proposal* rather than as a
-// second event, and the range on a plate so it survives whatever chip it is
-// dragged over.
+// look, and it is deliberately the *chip's* look one level up: the same tint
+// grammar, the same 3px rail, the same light ink, mixed on `surfaceRaised` and
+// standing on a stacked shadow. A moved chip must not change what it is on the
+// way across the week — only where it is.
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Core
@@ -66,43 +66,67 @@ Item {
     opacity: 0.92
     scale: Theme.animateTransforms ? 1.02 : 1
 
-    /// The elevation, two flat plates — see `CalendarTokens.shadowKey` for why
-    /// it is not a blur.
-    Rectangle {
-        anchors.fill: plate
-        anchors.margins: -6
-        radius: Theme.radiusSm + 6
-        color: CalendarTokens.shadowAmbient
+    /// Which end of the box the gesture has hold of, if either. A resize is the
+    /// one drag whose ghost sits almost exactly on top of the chip it came
+    /// from, so it is also the one that has to say *which edge is moving*.
+    readonly property bool gripBottom: ghost.mode === "resizeBottom"
+    readonly property bool gripTop: ghost.mode === "resizeTop"
+
+    /// The elevation — a stacked falloff, not a plate. The ramp itself and the
+    /// argument for it are `CalendarTokens.liftShadow`; what is here is only the
+    /// geometry, and the one thing the geometry has to get right is that every
+    /// ring is **concentric with the plate and rounded to match it**. The three
+    /// flat plates this replaced were offset down *and* left of a rounded card
+    /// with square corners of their own, which photographed as a second, badly
+    /// registered rectangle rather than as a shadow.
+    Repeater {
+        model: CalendarTokens.liftShadow
+
+        delegate: Rectangle {
+            required property var modelData
+
+            anchors.fill: plate
+            anchors.margins: -modelData.spread
+            anchors.topMargin: -modelData.spread + modelData.drop
+            anchors.bottomMargin: -modelData.spread - modelData.drop
+            radius: Theme.radiusSm + modelData.spread
+            color: CalendarTokens.liftShadowInk(modelData.alpha)
+        }
     }
 
-    Rectangle {
-        anchors.fill: plate
-        anchors.margins: -1
-        anchors.bottomMargin: -3
-        radius: Theme.radiusSm + 1
-        color: CalendarTokens.shadowKey
-    }
-
+    /// **The chip's own grammar, raised a level.**
+    ///
+    /// Two answers have been wrong here in opposite directions. `tint(hue)` at
+    /// 0.94 — the resting fill exactly — measured 1.18:1 against the column and
+    /// did not look picked up at all. `bar(hue)` solid, with the ink inverted
+    /// onto it, looked picked up and stopped looking like *this surface*: a
+    /// flat light block with near-black text, dropped into a week where every
+    /// chip is a dark tint with a rail and light type.
+    ///
+    /// `liftFill` is the middle the two of them bracket, and the rail and ink
+    /// below come back with it. See `CalendarTokens.liftFill` for the numbers.
     Rectangle {
         id: plate
 
         anchors.fill: parent
         radius: Theme.radiusSm
         clip: true
-        color: Qt.alpha(CalendarTokens.fill(ghost.hue), 0.94)
-        border.width: Theme.rail
-        border.color: CalendarTokens.bar(ghost.hue)
+        color: CalendarTokens.liftFill(ghost.hue)
 
-        /// The accent bar, exactly where the chip's own is, so the ghost lands
-        /// on the grid as the same object rather than as a differently drawn
-        /// one.
+        /// The rail, at the width and colour a resting chip wears it.
         Rectangle {
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: CalendarTokens.chipBar
-            color: CalendarTokens.bar(ghost.hue)
+            color: CalendarTokens.liftRail(ghost.hue)
         }
+
+        /// A hairline of the hue. A resting chip carries the same edge at 0.28;
+        /// the lifted one takes it at 0.55, which is the only place the card
+        /// still says out loud that it is off the page rather than on it.
+        border.width: 1
+        border.color: CalendarTokens.liftEdge(ghost.hue)
 
         Column {
             anchors.left: parent.left
@@ -112,6 +136,7 @@ Item {
             anchors.rightMargin: Theme.space2
             anchors.topMargin: ghost.roomy ? Theme.space1 : 1
             spacing: 0
+
 
             /// The range, **on one line and never elided**.
             ///
@@ -141,23 +166,76 @@ Item {
                 fontSizeMode: Text.HorizontalFit
                 minimumPointSize: Theme.pt(9)
                 lineHeight: 1.1
-                color: CalendarTokens.text(ghost.hue)
+                color: CalendarTokens.liftText(ghost.hue)
                 font.family: Theme.fontUi
                 font.features: CalendarTokens.tabularFigures
                 font.pointSize: Theme.pt(11)
                 font.weight: Theme.weightMedium
             }
 
-            Text {
+            /// The second line carries two facts and they are not the same
+            /// kind. The **title** says what is being moved; the **duration**
+            /// says how much of the day it will take, and during a resize that
+            /// is the number the gesture is choosing. So the title elides and
+            /// the duration never does — it is pinned to the right edge and the
+            /// title is given whatever is left.
+            ///
+            /// One label, and only one. The first resize capture drew this
+            /// number twice: the chip underneath kept rendering its own time
+            /// line while the ghost drew the live one on top of it, two `Text`
+            /// items a few pixels apart compositing into a smear. The view now
+            /// hides the chip it is dragging outright (see `WeekView`'s vacated
+            /// slot), which leaves the ghost as the only thing on the grid
+            /// saying a time.
+            Item {
                 width: parent.width
-                visible: ghost.tall && text.length > 0
-                text: ghost.creating ? (ghost.durationLabel || "New event")
-                                     : ghost.title
-                elide: Text.ElideRight
-                color: Qt.alpha(CalendarTokens.text(ghost.hue), 0.72)
-                font.family: Theme.fontUi
-                font.pointSize: Theme.pt(11)
+                height: ghost.tall ? titleText.implicitHeight : 0
+                visible: ghost.tall
+
+                Text {
+                    id: durationText
+
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    visible: ghost.durationLabel.length > 0
+                    text: ghost.durationLabel
+                    color: Qt.alpha(CalendarTokens.liftText(ghost.hue), 0.86)
+                    font.family: Theme.fontUi
+                    font.features: CalendarTokens.tabularFigures
+                    font.pointSize: Theme.pt(11)
+                    font.weight: Theme.weightMedium
+                }
+
+                Text {
+                    id: titleText
+
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.right: durationText.visible ? durationText.left
+                                                        : parent.right
+                    anchors.rightMargin: durationText.visible ? Theme.space2 : 0
+                    text: ghost.creating ? "New event" : ghost.title
+                    elide: Text.ElideRight
+                    color: Qt.alpha(CalendarTokens.liftText(ghost.hue), 0.92)
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(11)
+                }
             }
+        }
+
+        /// The grip, on the edge the gesture has hold of. The chip has one of
+        /// these on hover; a resize in flight is the moment it matters most,
+        /// and until now the ghost dropped it — so a resize mid-picture had
+        /// nothing on it saying which end was travelling and read as a plain
+        /// selected event that happened to be the wrong length.
+        Rectangle {
+            visible: ghost.gripBottom || ghost.gripTop
+            width: 24
+            height: 3
+            radius: Theme.radiusFull
+            color: Qt.alpha(CalendarTokens.liftRail(ghost.hue), 0.9)
+            x: Math.round((plate.width - width) / 2)
+            y: ghost.gripBottom ? plate.height - height - 3 : 3
         }
     }
 }

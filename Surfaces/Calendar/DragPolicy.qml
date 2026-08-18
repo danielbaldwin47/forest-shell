@@ -73,7 +73,9 @@ QtObject {
     /// bind `visible: dragPolicy.proposal.active` without a guard.
     readonly property var idle: ({
         "active": false, "mode": "", "dayIso": "", "start": "", "end": "",
-        "moved": false, "column": -1, "y": 0, "h": 0
+        "moved": false, "column": -1, "y": 0, "h": 0,
+        "origin": { "active": false, "column": -1, "y": 0, "h": 0,
+                    "start": "", "end": "" }
     })
 
     property var proposal: policy.idle
@@ -171,6 +173,23 @@ QtObject {
         return col < 0 ? "" : c.columns[col];
     }
 
+    /// The pre-drag rectangle, in the same grid coordinates as the proposal.
+    /// Empty for a create, which has nothing to vacate.
+    function _originRect(c: var, px: real): var {
+        if (policy._origStartStamp === "" || policy._origEndStamp === "")
+            return { "active": false, "column": -1, "y": 0, "h": 0,
+                     "start": "", "end": "" };
+        return {
+            "active": true,
+            "column": c.columns.indexOf(policy.time.dayOf(policy._origStartStamp)),
+            "y": policy.time.parseMinutes(policy._origStartStamp) * px,
+            "h": policy.time.diffMinutes(policy._origStartStamp,
+                                         policy._origEndStamp) * px,
+            "start": policy._origStartStamp,
+            "end": policy._origEndStamp
+        };
+    }
+
     /// A proposal from a day and two minute offsets from that day's midnight.
     /// The offsets may sit outside 0..1440 — a resize can push an end past
     /// midnight — so the day, the `y` and the `h` are all re-derived from the
@@ -184,6 +203,21 @@ QtObject {
         const dayIso = policy.time.dayOf(start);
         const px = c.hourHeight / 60;
         return {
+            /// **The rectangle the drag vacated**, so a view can draw the slot
+            /// the event is leaving rather than only the one it is taking.
+            ///
+            /// It is a decision and not a convenience: which rectangle is
+            /// "before" depends on the mode. A move vacates the whole chip; a
+            /// resize keeps its anchored edge and only one end travels, so the
+            /// before-rect and the proposal overlap and a view that drew the
+            /// difference itself would have to know which edge is pinned. The
+            /// policy already knows — it pinned it — so it answers with the
+            /// whole original rect and the view draws one outline.
+            ///
+            /// A create has no before, so `active` is false and every number is
+            /// dead rather than absent: a view binds without a guard, the same
+            /// contract `idle` makes.
+            "origin": policy._originRect(c, px),
             "active": true,
             "mode": mode,
             "dayIso": dayIso,

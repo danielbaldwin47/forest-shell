@@ -222,14 +222,72 @@ Item {
 
     implicitHeight: CalendarTokens.chipMinH
 
-    /// The hole a lifted chip leaves.
+    /// Dimmed because *something else* is being dragged. Not the same state as
+    /// `ghosted` and not the same number: a neighbour steps back so the gesture
+    /// is legible over it, it does not leave a hole.
+    property bool dimmed: false
+
+    /// The hole a lifted chip leaves — which is nothing at all.
     ///
-    /// `0.35` is the spec's and it has to be *visible* rather than gone: a chip
-    /// that vanished the moment it was picked up would take the answer to
-    /// "where was this before I started" with it, and the grid would re-pack
-    /// under the pointer. The chip that travels is `DragGhost`, drawn by the
-    /// view — this one stays exactly where it was and waits to be told.
-    opacity: chip.ghosted ? 0.35 : 1
+    /// It was `0.35`, on the argument that the reader needs to see where the
+    /// chip started. That argument survives; the implementation did not. A chip
+    /// at 0.35 measured 1.02:1 against its column, its title 1.57:1, and it sat
+    /// *under* the two chips cascading off it, which drew over the gap
+    /// completely. Worse on a resize, where the ghost lands on the same
+    /// rectangle: the faded chip kept rendering its own time line under the
+    /// ghost's live one, two `Text` items a few pixels apart, which photographs
+    /// as a smear and reads as a rendering fault.
+    ///
+    /// So the origin is not this chip's job any more. `WeekView` draws a dashed
+    /// slot at the vacated rectangle, above every chip and above the ghost, and
+    /// this one gets out of the way entirely. The grid still does not re-pack —
+    /// the chip is transparent, not absent.
+    /// And 0.62 for a neighbour, not 0.45.
+    ///
+    /// 0.45 was chosen so the gesture would read *over* the week, and it bought
+    /// that by half-erasing the week: a blind read of the drag capture reported
+    /// the remaining chips as text floating outside their own fills, because a
+    /// tint at 0.45 falls under the column it sits on before its title does.
+    /// The drag no longer needs the room — it now carries a washed destination
+    /// column, a stroked slot and a labelled origin, none of which a neighbour
+    /// competes with — so the week gets its legibility back.
+    opacity: chip.dimmed ? 0.62 : 1
+
+    /// **The origin of a move is this chip, hollowed — not a hole.**
+    ///
+    /// Three answers have been tried at this exact rectangle. The chip faded to
+    /// 0.35 measured 1.02:1 against its column and its title 1.57:1, which is a
+    /// smear rather than a placeholder. Hiding it outright and drawing a
+    /// separate dashed slot over the top fixed the contrast and broke something
+    /// worse: an unlabelled rectangle drawn *above* a column that still has two
+    /// cascaded meetings in it had its bottom edge cross one of their titles,
+    /// and a blind read called that a strikethrough. Giving that slot a label
+    /// only moved the collision onto the label.
+    ///
+    /// The collision was never really about z. The origin belongs to *one lane
+    /// of one column*, it has to be occluded by whatever cascades over it, and
+    /// it already has a title and a time set in the right place — because it is
+    /// a chip. So it stays a chip and gives up only its fill: hollow body,
+    /// dashed hue outline, rail and ink quieted. Every neighbour draws over it
+    /// exactly as it drew over the real card a moment ago, which is the one
+    /// arrangement no reader has to be taught.
+    ///
+    /// `WeekView` still draws its own outline for a **resize**, where the ghost
+    /// lands on this rectangle and would bury it.
+    readonly property real ghostInk:
+        chip.ghosted ? (chip.originCovered ? 0 : 0.62) : 1
+
+    /// **Set while the ghost is landing on this very rectangle**, which is only
+    /// ever a resize: one edge is pinned, so the proposal and the origin share
+    /// a corner and the lifted card is drawn straight over these two lines of
+    /// text. Two titles and two times a few pixels apart composite into a
+    /// smear, and it photographs as a rendering fault rather than as a state.
+    ///
+    /// So the words go and the rectangle stays. Nothing is lost by it: the card
+    /// on top is printing the same title and the live duration, and the dashed
+    /// outline `WeekView` draws above the pair is the only fact the chip was
+    /// still carrying — where the edge started.
+    property bool originCovered: false
 
     Behavior on opacity {
         enabled: Theme.animateTransforms
@@ -280,9 +338,12 @@ Item {
         // rather than the chip's own edge. The packed tier corners at 3, which
         // is still a corner and leaves the bar whole.
         radius: chip.content.tight ? 3 : Theme.radiusSm
-        color: chip.hovered ? CalendarTokens.fillHoverFor(chip.hue, chip.past) : CalendarTokens.fillFor(chip.hue, chip.past)
+        color: chip.ghosted ? CalendarTokens.vacatedFill(chip.hue)
+             : chip.hovered ? CalendarTokens.fillHoverFor(chip.hue, chip.past)
+             : CalendarTokens.fillFor(chip.hue, chip.past)
         border.width: 1
-        border.color: CalendarTokens.chipBorderFor(chip.hue, chip.past)
+        border.color: chip.ghosted ? "transparent"
+                                   : CalendarTokens.chipBorderFor(chip.hue, chip.past)
 
         Behavior on color {
             enabled: Theme.animateTransforms
@@ -297,7 +358,9 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: chip.content.bar
-            color: CalendarTokens.barFor(chip.hue, chip.past)
+            color: chip.ghosted
+                   ? Qt.alpha(CalendarTokens.barFor(chip.hue, chip.past), 0.45)
+                   : CalendarTokens.barFor(chip.hue, chip.past)
         }
 
         /// Title over time — the roomy case, and every packed chip tall enough
@@ -334,7 +397,7 @@ Item {
                 wrapMode: chip.content.titleLines > 1 ? Text.Wrap : Text.NoWrap
                 elide: Text.ElideRight
                 maximumLineCount: chip.content.titleLines
-                color: CalendarTokens.textFor(chip.hue, chip.past)
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
@@ -369,7 +432,7 @@ Item {
                 // spending the one ratio a chip is not allowed to spend. Size
                 // and weight carry the hierarchy instead; they cost nothing
                 // legibility owns.
-                color: CalendarTokens.textFor(chip.hue, chip.past)
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
                 // Regular carries the hierarchy at the roomy sizes; at the
@@ -433,7 +496,7 @@ Item {
                     visible: guestLabel.text !== ""
                     text: chip.guests ? (chip.guests.line || "") : ""
                     elide: Text.ElideRight
-                    color: CalendarTokens.textFor(chip.hue, chip.past)
+                    color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(chip.content.guestSize)
                     font.weight: Theme.weightRegular
@@ -470,7 +533,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: chip.timeLabel
                 // Full strength, for the reason the stacked time above is.
-                color: CalendarTokens.textFor(chip.hue, chip.past)
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
                 font.features: CalendarTokens.tabularFigures
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.timeSize)
@@ -489,7 +552,7 @@ Item {
                 text: chip.clippedTitle
                 elide: Text.ElideRight
                 maximumLineCount: 1
-                color: CalendarTokens.textFor(chip.hue, chip.past)
+                color: Qt.alpha(CalendarTokens.textFor(chip.hue, chip.past), chip.ghostInk)
                 font.family: Theme.fontUi
                 font.pointSize: Theme.pt(chip.content.titleSize)
                 font.weight: Theme.weightMedium
@@ -559,6 +622,57 @@ Item {
                     easing.type: Easing.OutCubic
                 }
             }
+        }
+    }
+
+    /// The dashes that say the card has been lifted off this rectangle.
+    ///
+    /// Drawn as a sibling *over* the body rather than as its border, for the
+    /// same reason the selection ring is: the body clips, and an outline inside
+    /// it would eat the two pixels a packed chip needs for its gap. Broken and
+    /// not solid because a broken line is read as an absence and a continuous
+    /// one as an object — a solid outline here reads as a second, selected
+    /// event sitting where the first one used to be.
+    Item {
+        anchors.fill: parent
+        visible: chip.ghosted
+
+        DashedEdge {
+            x: 0
+            y: 0
+            width: parent.width
+            height: 2
+            ink: CalendarTokens.vacatedEdge(chip.hue)
+            halo: CalendarTokens.vacatedHalo
+        }
+
+        DashedEdge {
+            x: 0
+            y: parent.height - 2
+            width: parent.width
+            height: 2
+            ink: CalendarTokens.vacatedEdge(chip.hue)
+            halo: CalendarTokens.vacatedHalo
+        }
+
+        DashedEdge {
+            x: 0
+            y: 0
+            width: 2
+            height: parent.height
+            vertical: true
+            ink: CalendarTokens.vacatedEdge(chip.hue)
+            halo: CalendarTokens.vacatedHalo
+        }
+
+        DashedEdge {
+            x: parent.width - 2
+            y: 0
+            width: 2
+            height: parent.height
+            vertical: true
+            ink: CalendarTokens.vacatedEdge(chip.hue)
+            halo: CalendarTokens.vacatedHalo
         }
     }
 

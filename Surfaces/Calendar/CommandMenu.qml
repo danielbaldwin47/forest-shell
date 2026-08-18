@@ -264,7 +264,15 @@ Item {
                 anchors.right: parent.right
                 anchors.top: header.bottom
                 height: 1
-                color: Theme.borderSubtle
+
+                /// `borderStrong`, not `borderSubtle`. This rule separates the
+                /// two halves of the menu — what you typed from what it found —
+                /// and it is the only thing doing that job, with no change of
+                /// ground either side of it. At `borderSubtle` it measured
+                /// 1.27:1 on the card, which is a hairline you have to be told
+                /// is there. The hairlines inside a *list* can be that quiet
+                /// because the rows carry the structure; this one cannot.
+                color: Theme.borderStrong
             }
 
             // --- the rows ------------------------------------------------------
@@ -340,12 +348,20 @@ Item {
                             // `surfaceOverlay` alone is 8 levels of grey away
                             // from `surfaceRaised` — measured on the first
                             // capture, where the selected row was almost
-                            // invisible next to the card. A tenth of the accent
+                            // invisible next to the card. A share of the accent
                             // mixed in ties the band to the rail beside it and
                             // makes the pair legible as one mark.
+                            //
+                            // 0.18 and not 0.10. A tenth composited to #2c3e38,
+                            // which is **1.37:1** on the card — under the 1.4
+                            // floor a band has to clear to be a band at all,
+                            // and a selected row you have to look for is the
+                            // exact failure the rail was added to cover for.
+                            // 0.18 lands 1.63:1 dark and 1.44:1 light, and the
+                            // row label still reads 7.96:1 on it.
                             color: rowItem.selected
                                  ? Qt.tint(Theme.surfaceOverlay,
-                                           Qt.alpha(Theme.accentPrimary, 0.10))
+                                           Qt.alpha(Theme.accentPrimary, 0.18))
                                  : "transparent"
 
                             /// The anchor the eye tracks — see the header.

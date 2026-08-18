@@ -98,6 +98,10 @@ Item {
     /// path a real pointer takes, driven by a day and a minute.
     property var posedDrag: null
 
+    /// The dashed rectangle the drag's origin is drawn with lives in
+    /// `DashedEdge.qml` beside this file — `EventChip` needs it too, and an
+    /// inline `component` is reachable from exactly one file.
+
     // --- the geometry, all of it from the policy -------------------------------
 
     readonly property int gutterW: CalendarTokens.gutterW
@@ -416,6 +420,22 @@ Item {
     /// picture would say "you are dragging" to somebody who had only clicked.
     readonly property bool dragShown:
         view.proposal.active && view.proposal.moved && view.proposal.column >= 0
+
+    /// The hue everything about the drag is drawn in: the event's own while one
+    /// is being carried, the accent while one is being made. Read once here
+    /// rather than five times down the file — the ghost, the vacated slot, the
+    /// target stroke, the column rail and the gutter pill are all one gesture
+    /// and drawing them in two hues would say they were two.
+    readonly property int dragHue: view.dragEventId
+        ? CalendarTokens.hues.forEvent(view.eventById(view.dragEventId))
+        : 0
+
+    /// The hour rule the proposal starts in, so the gutter can say which hour
+    /// this is landing in without the reader tracking a box back to the labels.
+    readonly property real dragHourY: view.dragShown
+        ? Math.floor(view.grid.yToMinutes(view.proposal.y, view.hourRow) / 60)
+          * view.hourRow
+        : -1
 
     // --- the quick-create panel -----------------------------------------------
 
@@ -870,9 +890,20 @@ Item {
 
                 readonly property real lead: view.columnX(modelData.startCol)
                     + (bandBar.runsIn ? 0 : view.colInset)
-                readonly property real trail:
+                ///
+                /// **Except against the frame.** A span that continues runs
+                /// hard into its column edge, and for a span that reaches
+                /// Saturday that edge is the window's own: the bar and its
+                /// arrow ended flush against the frame with no gutter at all,
+                /// which photographs as a chip clipped by the viewport rather
+                /// than as one carrying on into next week. There is nothing to
+                /// disambiguate it from there — no eighth column can follow —
+                /// so the last column keeps the ordinary lead-in and the arrow
+                /// gets air to sit in.
+                readonly property real trail: Math.min(
                     view.columnRight(modelData.startCol + modelData.span - 1)
-                    - (bandBar.runsOn ? 0 : CalendarTokens.chipGap * 3)
+                    - (bandBar.runsOn ? 0 : CalendarTokens.chipGap * 3),
+                    view.columnRight(view.columns.length - 1) - view.colInset)
 
                 /// What the bar's own contents measure, which is the one number
                 /// `bandBarWidth` cannot work out for itself — a font metric,
@@ -1083,6 +1114,20 @@ Item {
 
                     readonly property real nowRef: view.nowColumn >= 0 ? view.nowY : -1
 
+                    /// The hour the drag is landing in, lit in the drag's own
+                    /// hue. A ghost carries its range, but the range is inside
+                    /// the box the eye is already tracking; the gutter is where
+                    /// the reader goes to place a time *on the day*, and until
+                    /// now nothing there moved while a drag did.
+                    readonly property bool lit:
+                        view.dragShown && Math.abs(modelData.y - view.dragHourY) < 0.5
+
+                    /// And suppressed outright where the live pill would print
+                    /// over it — the same substitution the now-stamp makes.
+                    readonly property bool buried:
+                        view.dragShown
+                        && Math.abs(modelData.y - view.proposal.y) < height
+
                     x: 0
                     width: view.gutterW - Theme.space2
                     // Nudged clear of the live stamp where the two would crowd,
@@ -1095,10 +1140,72 @@ Item {
                     horizontalAlignment: Text.AlignRight
                     text: modelData.label
                     visible: !view.grid.hourLabelHidden(modelData.y, nowRef)
-                    color: CalendarTokens.gridMuted
+                             && !buried
+                    color: lit ? CalendarTokens.bar(view.dragHue)
+                               : CalendarTokens.gridMuted
                     font.features: CalendarTokens.tabularFigures
                     font.family: Theme.fontUi
                     font.pointSize: Theme.pt(11)
+                    font.weight: lit ? Theme.weightMedium : Theme.weightRegular
+                }
+            }
+
+            /// **The live start, in the gutter.** A pill at the proposal's own
+            /// top edge carrying the minute it would take.
+            ///
+            /// Notion prints nothing here: mid-drag its gutter is exactly the
+            /// gutter it always was, and the only live number on screen is the
+            /// one inside the card under the pointer. That is a number in the
+            /// wrong place to answer the question the gutter answers — *where
+            /// in the day* — and the reader has to sweep from a moving box back
+            /// to a static ruler to get it. The pill puts the answer on the
+            /// ruler, at the height the answer is true.
+            ///
+            /// It is a pill and not bare text because the gutter's own labels
+            /// are text: a second voice in the same register reads as one of
+            /// them having changed its mind. Filled in the drag's hue with the
+            /// lift ink on it, it is plainly the moving thing's own readout.
+            Rectangle {
+                id: dragStamp
+
+                /// **Sized to the gutter, not to the string.** The pill first
+                /// took its width from the text, and `"11:00 AM"` is wider than
+                /// the 56px gutter — so it was laid out at a negative `x`, the
+                /// `Flickable` clipped its left end, and the capture came back
+                /// reading `1:00 AM`. A live readout that can print the wrong
+                /// hour is worse than none. It now fills the gutter and the
+                /// type fits itself to that, the same `HorizontalFit` bargain
+                /// `DragGhost` makes with its range.
+                visible: view.dragShown
+                z: 12
+                height: dragStampText.implicitHeight + Theme.space1
+                x: 1
+                width: view.gutterW - Theme.space2 / 2
+                y: Math.round(view.proposal.y) - height / 2
+                radius: Theme.radiusSm - 2
+                color: CalendarTokens.bar(view.dragHue)
+
+                Text {
+                    id: dragStampText
+
+                    // Width off the parent's width and never off its height:
+                    // the pill takes its height from this label, so an
+                    // `anchors.fill` here would be a loop.
+                    x: Theme.space1
+                    width: parent.width - Theme.space1 * 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    maximumLineCount: 1
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPointSize: Theme.pt(8.5)
+                    text: view.dragShown
+                        ? view.format.stampTime(view.proposal.start, view.use24)
+                        : ""
+                    color: CalendarTokens.liftInk
+                    font.features: CalendarTokens.tabularFigures
+                    font.family: Theme.fontUi
+                    font.pointSize: Theme.pt(10.5)
+                    font.weight: Theme.weightMedium
                 }
             }
 
@@ -1221,55 +1328,106 @@ Item {
                 border.color: Qt.alpha(Theme.borderStrong, 0.7)
             }
 
-            /// **The drop slot.** A wash down the whole of the column the
-            /// proposal has landed in, plus a hairline at each end of the slot
-            /// itself, drawn in the dragged event's own hue.
+            /// **The drop target: a stroked slot, not a wash.**
             ///
-            /// The ghost alone answers "how long" and "at what minute", and it
-            /// answered "which day" badly: a chip dragged across a week is
-            /// under the pointer, the pointer is over a column boundary as
-            /// often as not, and the two columns either side of it look
-            /// identical. Washing the target column says which one will take it
-            /// before the finger lifts — the same job the today wash does for
-            /// the date, in the same grammar, in the hue of the thing being
-            /// moved so it is plainly *this* event's destination and not a
-            /// selection.
+            /// It was a wash down the whole column at 0.09 of the hue, and
+            /// measured off the capture that came to rgb(18,29,32) — inside two
+            /// levels of `todayWash`. Two different claims, one appearance:
+            /// the reader could not tell "today" from "this is where it lands",
+            /// and the wash was too faint to be either.
             ///
-            /// Under the ghost in z, so it never dulls the box the drag is
-            /// aimed with, and above the grid rules so it reads as a slot
-            /// rather than as a change of paper.
+            /// The rail that replaced it was worse, and worse in a way a
+            /// capture makes obvious the moment somebody reads it cold. A
+            /// column's leading edge is where the grid draws its **day
+            /// separator**, so a 2px mark there does not sit *in* the
+            /// destination column, it sits *on the rule between two columns* —
+            /// and the eye, offered a bright line on the Tue/Wed divider and a
+            /// wash on Tue (which was `todayWash`, a different claim
+            /// altogether), read Tue as the destination and the card in flight
+            /// as merely floating. The one job this state has, failed.
+            ///
+            /// So the wash comes back, on the **destination**, at full column
+            /// width and stronger than `todayWash` spends — an area cannot be
+            /// on the wrong side of a boundary. Inside it the range gets the
+            /// stroked slot, and the slot is inset to `colInset` like every
+            /// chip in the column: it is the footprint the card is about to
+            /// take, so it has to be the shape of a chip and not the shape of
+            /// a column. Two marks, both on the destination, neither anywhere
+            /// else.
+            ///
+            /// The wash and the ring are two items and not one because they
+            /// belong on opposite sides of the chips. A wash **over** a chip
+            /// tints an event that is not moving, which is a lie about it; the
+            /// ring has to clear them, because the slot may land on a column
+            /// that already has something in it. So the wash is declared here,
+            /// before the column `Repeater` and at its `z`, and the ring is
+            /// declared with the wash but lifted above every chip.
             Rectangle {
+                visible: view.dragShown
+                x: view.columnX(Math.max(0, view.proposal.column))
+                width: view.columnWidthFor(Math.max(0, view.proposal.column))
+                y: 0
+                height: content.height
+                color: CalendarTokens.targetWash(view.dragHue)
+            }
+
+            Item {
                 id: dropSlot
 
                 readonly property int col: Math.max(0, view.proposal.column)
-                readonly property int hue: view.dragEventId
-                    ? CalendarTokens.hues.forEvent(view.eventById(view.dragEventId))
-                    : 0
 
                 visible: view.dragShown
-                z: 2
+                z: 8
                 x: view.columnX(dropSlot.col)
                 width: view.columnWidthFor(dropSlot.col)
                 y: 0
                 height: content.height
-                color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.09)
 
-                /// The two ends of the slot, full column width, so the minute
-                /// the proposal starts and ends on is readable across the day
-                /// rather than only along the ghost's own edge.
+                /// **The slot is drawn at the footprint; the card floats
+                /// inside it.** The first version of this was the same
+                /// rectangle the ghost occupies, which is a stroke nobody can
+                /// see: the lifted card sits exactly on its landing minute —
+                /// that is the whole contract `DragGhost` makes — so an
+                /// outline underneath it is covered by it, pixel for pixel.
+                ///
+                /// `dragInset` is what makes the ring visible: the ghost gives
+                /// up a few pixels on every side, and what shows in the gap is
+                /// the outline of the slot it is about to fill. The ring keeps
+                /// the *exact* footprint — flush to the gridline, inset like
+                /// any chip in the column — so it is the card that is drawn
+                /// small and hovering, and the mark on the grid that is true.
                 Rectangle {
+                    x: view.colInset
                     y: Math.round(view.proposal.y)
-                    width: parent.width
-                    height: 1
-                    color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.45)
+                    width: Math.max(CalendarTokens.chipMinH,
+                                    parent.width - view.colInset * 2)
+                    height: Math.max(CalendarTokens.chipMinH,
+                                     Math.round(view.proposal.h))
+                    radius: Theme.radiusSm
+                    color: CalendarTokens.targetFill(view.dragHue)
+                    border.width: Theme.rail
+                    border.color: CalendarTokens.targetEdge(view.dragHue)
                 }
+            }
 
-                Rectangle {
-                    y: Math.round(view.proposal.y + view.proposal.h) - 1
-                    width: parent.width
-                    height: 1
-                    color: Qt.alpha(CalendarTokens.bar(dropSlot.hue), 0.45)
-                }
+            /// The hair between the gutter stamp and the slot it names.
+            ///
+            /// The stamp reads `11:00 AM` in a 56px gutter and the slot it
+            /// belongs to can be four columns away; with nothing between them
+            /// they are two facts and the reader has to work out that they are
+            /// one. The now-line already solved this on this very grid — a
+            /// connector too faint to mark any day it crosses and loud enough
+            /// to follow — and this is that device again, in the drag's hue,
+            /// running only as far as the slot rather than across the week.
+            Rectangle {
+                visible: view.dragShown
+                z: 1
+                x: view.gutterW
+                width: Math.max(0, view.columnX(Math.max(0, view.proposal.column))
+                                - view.gutterW)
+                y: Math.round(view.proposal.y)
+                height: 1
+                color: CalendarTokens.targetConnector(view.dragHue)
             }
 
             /// One column of chips per day. The model is the column array, so a
@@ -1283,6 +1441,14 @@ Item {
 
                     required property var modelData
                     required property int index
+
+                    /// The chips sit on a stated `z` so the drag's own marks
+                    /// can be placed on either side of them: the destination
+                    /// wash and the vacated slot go under (they must not tint
+                    /// or strike through an event that is not moving), the
+                    /// landing ring and the ghost go over. Left at the default
+                    /// 0 every one of those is a declaration-order accident.
+                    z: 5
 
                     x: view.columnX(index)
                     width: view.columnWidthFor(column.index)
@@ -1391,6 +1557,21 @@ Item {
                             ghosted: view.dragShown
                                      && view.dragEventId === modelData.id
 
+                            /// A resize pins one edge, so the ghost lands on
+                            /// the chip it came from and buries its two lines
+                            /// of text under its own. See `originCovered`.
+                            originCovered:
+                                view.proposal.mode === "resizeTop"
+                                || view.proposal.mode === "resizeBottom"
+
+                            /// Every other chip steps back while a drag is in
+                            /// flight. The vacated slot is drawn over them, so
+                            /// this is not what makes it visible — it is what
+                            /// stops a busy Tuesday reading as loudly as the
+                            /// one thing on the grid that is actually moving.
+                            dimmed: view.dragShown
+                                    && view.dragEventId !== modelData.id
+
                             /// The chip reports in its own coordinates; the two
                             /// offsets that turn those into the grid's are the
                             /// column's x and the chip's own, both of which are
@@ -1411,6 +1592,142 @@ Item {
                         }
                     }
                 }
+            }
+
+            /// **The slot the drag vacated**, drawn over everything the grid
+            /// has in it.
+            ///
+            /// The first pass left this to the chip itself, faded to 0.35. Two
+            /// things went wrong and they compound. The fade measured 1.02:1
+            /// against the column and its label 1.57:1 — a hole, not a
+            /// placeholder. And a faded chip is still *underneath* its
+            /// neighbours, so on a cascaded morning the two chips indenting off
+            /// it drew straight over the gap and the reader could not see that
+            /// anything had left. Notion keeps a filled placeholder at ~2.4:1
+            /// there, and that is the half of this it gets right.
+            ///
+            /// So the chip is hidden outright and the slot is drawn here, at
+            /// `z` above every chip and above the ghost: a dashed hairline of
+            /// the hue with a 12% fill inside it. Dashed because a broken edge
+            /// is read as an absence and a solid one as an object — and because
+            /// during a resize this outline lies *across* the ghost, where it
+            /// says "this is where the edge was" and a solid box would say
+            /// "there are two events here".
+            ///
+            /// It carries no fill during a resize for the same reason: the
+            /// ghost is under it, and 12% of anything over a saturated card
+            /// only dulls the card.
+            Item {
+                id: vacated
+
+                readonly property var origin: view.proposal.origin
+                readonly property bool resizing:
+                    view.proposal.mode === "resizeTop"
+                    || view.proposal.mode === "resizeBottom"
+
+                /// **Resize only.** A move leaves its origin drawn by the
+                /// chip itself, hollowed in place (see `EventChip.ghostInk`) —
+                /// which puts the outline in the right lane, under the right
+                /// neighbours, carrying the title and the pre-drag time
+                /// already, for free. A resize is the one mode where that is
+                /// not enough: the ghost lands on the same rectangle and
+                /// buries it, so the extent has to be restated above
+                /// everything, and the halo under each dash is what carries it
+                /// over a saturated card.
+                visible: view.dragShown && vacated.origin.active
+                         && vacated.origin.column >= 0 && vacated.resizing
+
+                /// **Above everything during a resize, under the chips during
+                /// a move**, and the difference is which object the outline is
+                /// in danger of being confused with.
+                ///
+                /// A resize lands the ghost on the rectangle this is drawing,
+                /// so the only place the pre-drag extent can be stated is over
+                /// the top of it — that is what the halo under each dash is
+                /// for and it stays.
+                ///
+                /// A move leaves the outline in a column that still has the
+                /// event's old neighbours in it, and drawn over them the dashes
+                /// stop reading as a box: the bottom edge crossed the middle of
+                /// a cascaded chip's title and photographed as a strikethrough
+                /// through that chip's own words. Under them it reads exactly
+                /// as what it is — a slot with two later meetings lying across
+                /// its far corner — and the top edge, the left edge and the
+                /// label are all in clear air, which is all the outline needs
+                /// to close in the eye.
+                z: vacated.resizing ? 16 : 3
+                x: view.columnX(Math.max(0, vacated.origin.column)) + view.colInset
+                width: Math.max(CalendarTokens.chipMinH,
+                                view.columnWidthFor(Math.max(0, vacated.origin.column))
+                                - view.colInset * 2)
+                y: Math.round(vacated.origin.y)
+                height: Math.max(CalendarTokens.chipMinH,
+                                 Math.round(vacated.origin.h))
+
+                /// **Translucent, and it stays that way.** An opaque ground was
+                /// tried here, on the argument that a hole should show the page
+                /// rather than the neighbours. It photographed as two chips
+                /// sawn in half: the cascade indents *over* this rectangle, so
+                /// painting the page back in truncates `Vendor call` and
+                /// `Pairing` mid-word and leaves their tails hanging below the
+                /// dashes, which reads as a clipping fault and, worse, deletes
+                /// two events from a day that still has them.
+                ///
+                /// A drag is not allowed to lie about the rest of the week. So
+                /// the slot tints rather than covers, the dashes carry the
+                /// claim from above, and the neighbours step back to 0.45 —
+                /// present, legible, and plainly not the thing in the hand.
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radiusSm
+                    visible: !vacated.resizing
+                    color: CalendarTokens.vacatedFill(view.dragHue)
+                }
+
+                DashedEdge {
+                    x: 0
+                    y: 0
+                    width: parent.width
+                    height: 2
+                    ink: CalendarTokens.vacatedEdge(view.dragHue)
+                    halo: CalendarTokens.vacatedHalo
+                }
+
+                DashedEdge {
+                    x: 0
+                    y: parent.height - 2
+                    width: parent.width
+                    height: 2
+                    ink: CalendarTokens.vacatedEdge(view.dragHue)
+                    halo: CalendarTokens.vacatedHalo
+                }
+
+                DashedEdge {
+                    x: 0
+                    y: 0
+                    width: 2
+                    height: parent.height
+                    vertical: true
+                    ink: CalendarTokens.vacatedEdge(view.dragHue)
+                    halo: CalendarTokens.vacatedHalo
+                }
+
+                DashedEdge {
+                    x: parent.width - 2
+                    y: 0
+                    width: 2
+                    height: parent.height
+                    vertical: true
+                    ink: CalendarTokens.vacatedEdge(view.dragHue)
+                    halo: CalendarTokens.vacatedHalo
+                }
+
+                /// **No label here.** The words are the chip's, and during a
+                /// resize the chip is right underneath this outline still
+                /// printing them — a second title and a second time a few
+                /// pixels off the first is the smear that made the first pass
+                /// of this state read as a rendering fault. This says one
+                /// thing, which is where the edge was.
             }
 
             /// **The empty week says so.** One quiet line, centred in the
@@ -1453,11 +1770,14 @@ Item {
 
                 visible: view.dragShown
                 z: 15
-                x: view.columnX(col) + view.colInset
+                x: view.columnX(col) + view.colInset + CalendarTokens.dragInset
                 width: Math.max(CalendarTokens.chipMinH,
-                                view.columnWidthFor(col) - view.colInset * 2)
-                y: Math.round(view.proposal.y)
-                height: Math.max(CalendarTokens.chipMinH, Math.round(view.proposal.h))
+                                view.columnWidthFor(col) - view.colInset * 2
+                                - CalendarTokens.dragInset * 2)
+                y: Math.round(view.proposal.y) + CalendarTokens.dragInset
+                height: Math.max(CalendarTokens.chipMinH,
+                                 Math.round(view.proposal.h)
+                                 - CalendarTokens.dragInset * 2)
 
                 mode: view.proposal.mode
                 // A create ghost wears the accent — it has no identity yet and
@@ -1472,7 +1792,14 @@ Item {
                     ? view.format.timeRange(view.proposal.start, view.proposal.end,
                                             view.use24)
                     : ""
-                durationLabel: view.dragShown
+                /// **Only where the length is the thing being chosen.** A
+                /// create and a resize are both arguments about duration, and
+                /// the figure beside the range is the answer. A move preserves
+                /// its duration by definition — printing it there spends the
+                /// second line's width on a number that cannot change, and the
+                /// capture showed exactly that: `Design review` elided to
+                /// `Design r…` to make room for a `1h 30m` nobody was choosing.
+                durationLabel: view.dragShown && view.proposal.mode !== "move"
                     ? view.format.duration(view.layoutPolicy.time.diffMinutes(
                           view.proposal.start, view.proposal.end))
                     : ""

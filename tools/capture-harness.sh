@@ -334,6 +334,13 @@ case "$CAL_STATE" in
     # and `command-filtered` is the same menu with `to` typed into it, which is
     # the narrower claim that filtering picks a row and the highlight follows.
     command|command-filtered|shortcuts|guests) ;;
+    # The sidebar's Google source row, in each of the three states that draw
+    # one: an account synced, a shell that never authorised one (which is the
+    # state carrying the Connect button), and a round that failed with a code.
+    # Rail poses rather than grid ones, so they are legal on every view — and
+    # posed as a property on the view (`calendarSyncPose`), so no settings file
+    # is written and no helper is ever spawned by a capture.
+    sync-connected|sync-connect|sync-error) ;;
     *) echo "unknown calendar state: $CAL_STATE" >&2; exit 2 ;;
 esac
 

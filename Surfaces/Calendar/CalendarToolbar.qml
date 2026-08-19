@@ -102,12 +102,29 @@ Item {
     /// one should still know whether its Today button is live.
     property KeyNavPolicy keyNav: KeyNavPolicy {}
 
+    /// The Google half's status, handed down from the view — `{status, account,
+    /// lastSync, ago, error, connecting}`. The default is the off state, which
+    /// draws nothing at all.
+    property var syncFacts: ({ "status": "off", "connecting": false })
+
+    /// Which colour the sync glyph is and what its label says, on the same terms as
+    /// `keyNav` above: pure, default-instantiated, and checked in
+    /// `tests/tst_syncstatuspolicy.qml`.
+    property SyncStatusPolicy syncPolicy: SyncStatusPolicy {}
+
+    readonly property var syncSpec: toolbar.syncPolicy.dot(toolbar.syncFacts)
+
     /// The verbs. `CalendarWindow` owns what they do — this file owns only
     /// where you press to ask for them.
     signal viewRequested(string name)
     signal stepRequested(int delta)
     signal todayRequested
     signal createRequested
+
+    /// A manual sync round. The toolbar owns this verb because it is an action
+    /// on the calendar; the rail's Google row owns the *fact* about the account
+    /// and does not repeat the button.
+    signal syncRequested
 
     /// The views, left to right. The same array `CalendarWindow.views` holds,
     /// but stated here in *display* order rather than borrowed: the singleton's
@@ -369,8 +386,11 @@ Item {
     Rectangle {
         id: switcher
 
-        anchors.right: parent.right
-        anchors.rightMargin: Theme.space4
+        // The sync button takes the far right when there is one, and collapses
+        // to nothing when there is not — so a shell with sync switched off
+        // draws the toolbar it drew before this existed, `space4` inset and all.
+        anchors.right: syncControl.left
+        anchors.rightMargin: syncControl.visible ? Theme.space3 : Theme.space4
         anchors.verticalCenter: parent.verticalCenter
 
         width: switcher.segmentW * toolbar.segments.length + switcher.inset * 2
@@ -479,6 +499,140 @@ Item {
         }
     }
 
+    // --- the Google sync control ------------------------------------------------
+
+    /// **A refresh button, in the rank the chevrons already hold.**
+    ///
+    /// This was a 6px dot floating at the far right of the bar. It measured
+    /// 1.84:1 against the chrome band — under every text colour on this
+    /// surface, greys included, and under the 3:1 a non-text mark needs to be
+    /// a mark at all — so it read as a stray pixel rather than as state. And
+    /// it said, in colour, what the rail's Google row was already saying in
+    /// words, while the *action* (a manual round) was a bare tinted text link
+    /// down in the rail inventing a fourth button rank.
+    ///
+    /// Both problems have one answer: the toolbar keeps the verb and the rail
+    /// keeps the fact. This is the same 30x30 ghost tile the chevrons are —
+    /// no new rank — inked at full strength by `SyncStatusPolicy`, so idle is
+    /// quiet by being `textMuted` rather than by being invisible, and the
+    /// three states worth a glance are told apart by hue. It is drawn only
+    /// when a round could actually run: mid-consent, or on a shell that never
+    /// connected, the rail's *Connect* is the only honest control.
+    Item {
+        id: syncControl
+
+        anchors.right: parent.right
+        // Collapses rather than hides: the switcher anchors to this edge, so a
+        // button that kept its width while invisible would leave a hole.
+        anchors.rightMargin: syncControl.visible ? Theme.space4 : 0
+        anchors.verticalCenter: parent.verticalCenter
+        width: syncControl.visible ? CalendarTokens.controlH : 0
+        height: CalendarTokens.controlH
+        visible: toolbar.syncSpec.visible && toolbar.syncSpec.actionable === true
+
+        readonly property color ink: {
+            const role = toolbar.syncSpec.role;
+            if (role === "accentPrimary")
+                return Theme.accentPrimary;
+            if (role === "accentEmber")
+                return Theme.accentEmber;
+            if (role === "accentWarm")
+                return Theme.accentWarm;
+            return Theme.textMuted;
+        }
+
+        IconButton {
+            id: syncButton
+
+            anchors.fill: parent
+            glyph: "refresh-cw"
+            glyphColor: syncControl.ink
+
+            onTapped: toolbar.syncRequested()
+
+            Behavior on opacity {
+                enabled: Theme.animateTransforms
+                NumberAnimation { duration: Theme.duration(Theme.motionFast) }
+            }
+
+            /// The breath, and only while a round is actually running. Not a
+            /// spinner: a spinner promises a duration a sync does not have.
+            /// The floor is 0.55 rather than the old dot's 0.3 — the glyph has
+            /// to stay legible at the bottom of the breath, which is the whole
+            /// complaint this control was rebuilt to answer.
+            SequentialAnimation {
+                running: toolbar.syncSpec.pulse && Theme.animateTransforms
+                loops: Animation.Infinite
+                alwaysRunToEnd: true
+
+                NumberAnimation {
+                    target: syncButton
+                    property: "opacity"
+                    from: 1
+                    to: 0.55
+                    duration: 450
+                    easing.type: Easing.InOutQuad
+                }
+
+                NumberAnimation {
+                    target: syncButton
+                    property: "opacity"
+                    from: 0.55
+                    to: 1
+                    duration: 450
+                    easing.type: Easing.InOutQuad
+                }
+
+                /// An animation stopped mid-breath leaves the glyph at whatever
+                /// opacity it had reached, so a round that later failed would
+                /// go ember-but-faded — the state this control exists to make
+                /// loud. The rest value is put back explicitly.
+                onRunningChanged: {
+                    if (!running)
+                        syncButton.opacity = 1;
+                }
+            }
+        }
+
+        /// The label — which is what turns a glyph into an answer, and what the
+        /// dot never had. Not a `ToolTip`: nothing else in this shell uses
+        /// `QtQuick.Controls`, and the one thing wanted here is a line of text
+        /// under a tile. It hangs below the toolbar's own hairline and is
+        /// right-aligned to the window edge, because this is the last control
+        /// on the bar and a centred bubble would overhang it.
+        Rectangle {
+            id: syncLabel
+
+            anchors.right: parent.right
+            anchors.top: parent.bottom
+            anchors.topMargin: Theme.space2
+            width: syncLabelText.implicitWidth + Theme.space3 * 2
+            height: 26
+            radius: Theme.radiusSm
+            color: Theme.surfaceRaised
+            border.width: 1
+            border.color: Theme.borderSubtle
+            opacity: syncButton.hovered ? 1 : 0
+            visible: syncLabel.opacity > 0
+
+            Behavior on opacity {
+                enabled: Theme.animateTransforms
+                NumberAnimation { duration: Theme.duration(Theme.motionFast) }
+            }
+
+            Text {
+                id: syncLabelText
+
+                anchors.centerIn: parent
+                text: toolbar.syncPolicy.dotTitle(toolbar.syncFacts)
+                color: Theme.textSecondary
+                font.family: Theme.fontUi
+                font.pointSize: Theme.pt(11.5)
+                font.weight: Theme.weightRegular
+            }
+        }
+    }
+
     /// A 30x30 icon button in two dresses — bare (the chevrons) and filled (the
     /// create button). Inline rather than in `Widgets/` because it is this
     /// bar's three icon buttons and nothing else: the moment a second surface
@@ -504,6 +658,10 @@ Item {
         property color glyphColor: Theme.textSecondary
         property color restFill: "transparent"
         property color hoverFill: CalendarTokens.chromeHover
+
+        /// Whether the pointer is on it, for the one caller that draws
+        /// something outside the tile on hover (the sync control's label).
+        readonly property alias hovered: chevronPointer.containsMouse
 
         signal tapped
 

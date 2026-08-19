@@ -264,6 +264,19 @@ Singleton {
                 // singleton calls today.
                 shellStamp: root.nowStamp
 
+                // The Google half, in the same direction as everything above.
+                // Gathered here rather than read in the view because the view
+                // is also built by `tools/capture-harness.sh`, where no
+                // singleton exists — which is what makes the connected state a
+                // picture somebody can take.
+                syncState: ({
+                    "status": GoogleSync.status,
+                    "account": GoogleSync.account,
+                    "lastSync": GoogleSync.lastSync,
+                    "error": GoogleSync.lastError,
+                    "connecting": GoogleSync.connecting
+                })
+
                 // Closed by something that is not one of the functions above:
                 // the compositor's own close button, or Escape inside the
                 // window. The reason travels with the signal so the log says
@@ -295,6 +308,11 @@ Singleton {
                         root.closeEditor("deleted");
                     CalendarStore.deleteEvent(id);
                 }
+                // The rail's two Google buttons, landing on exactly what `ipc
+                // call calendar sync` and `syncConnect` land on.
+                onSyncRequested: GoogleSync.sync()
+                onSyncConnectRequested: GoogleSync.connect()
+
                 onOverlayToggled: (name, open) =>
                     Logger.log("calendar", name + (open ? " open" : " closed"))
             }

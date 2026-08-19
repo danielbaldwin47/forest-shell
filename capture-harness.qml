@@ -1311,6 +1311,53 @@ ShellRoot {
         }
     })
 
+    /// The Google half's poses. `sync-connected` is the ordinary state,
+    /// `sync-connect` the shell that has never authorised one, and `sync-error`
+    /// a round that failed with the helper's own code — which is the state
+    /// whose *wording* is hardest to judge from theory, and the reason it is
+    /// photographable at all.
+    ///
+    /// Posed as a *property* rather than by arranging `GoogleSync` — the whole
+    /// reason `CalendarView.syncState` is handed in is that this harness builds
+    /// the view with no singleton, no settings file and no helper anywhere near
+    /// it. So the connected state costs nothing to photograph and cannot drift
+    /// into running a subprocess.
+    ///
+    /// The stamp is three minutes before the frozen `--cal-now` rather than a
+    /// typed-out one, which is what makes the row read "Synced 3 min ago" in
+    /// any timezone the capture runs in — `relativeAgo` compares instants, and
+    /// a literal UTC stamp would say something different in Auckland.
+    readonly property string calSyncStamp:
+        new Date(Date.parse(root.calNow) - 3 * 60 * 1000).toISOString()
+
+    readonly property var calendarSyncPose: {
+        // `.example` is the reserved TLD: a fixture address that cannot ever be
+        // somebody's.
+        if (root.calState === "sync-connected") {
+            return {
+                "status": "idle", "account": "rowan@forest.example",
+                "lastSync": root.calSyncStamp, "error": "", "connecting": false
+            };
+        }
+        if (root.calState === "sync-connect") {
+            return {
+                "status": "auth", "account": "", "lastSync": "",
+                "error": "", "connecting": false
+            };
+        }
+        if (root.calState === "sync-error") {
+            return {
+                "status": "error", "account": "rowan@forest.example",
+                "lastSync": root.calSyncStamp, "error": "invalid_grant",
+                "connecting": false
+            };
+        }
+        return {
+            "status": "off", "account": "", "lastSync": "",
+            "error": "", "connecting": false
+        };
+    }
+
     function poseCalendarDrag(page: var): void {
         const pose = root.calendarPoses[root.calState];
         if (!pose)
@@ -1448,6 +1495,10 @@ ShellRoot {
             editorId: root.calState === "guests" ? "evt-3" : ""
             editorQuery: root.calState === "guests" ? "a" : ""
             editorListOpen: root.calState === "guests"
+
+            // The Google half. See `calendarSyncPose` for why this is the one
+            // way to photograph an account at all.
+            syncState: root.calendarSyncPose
         }
 
         onLoaded: {

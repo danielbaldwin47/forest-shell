@@ -292,3 +292,46 @@ Nineteen of them exist so far:
 
 The rest are empty until their ticket lands; the directories exist so nothing
 has to move when they do.
+
+## Google Calendar sync
+
+Off until someone turns it on: a shell that has never been told about Google
+spawns no helper and makes no request.
+
+**Connecting** takes a person at a browser — a Google Cloud project, an OAuth
+client of type *Desktop app*, and a consent screen you are a test user on.
+`tools/gcal-connect-wizard.sh` walks all of it, writes the credentials file, runs
+the consent flow and prints the account it connected. Then Settings → Calendar →
+*Sync with Google*, which is `calendar.google.enabled`; the same tab picks the
+calendar (`primary`, or a shared one's `…@group.calendar.google.com` address —
+`python3 tools/gcal-sync.py calendars` lists them) and the round interval.
+
+**Where the secrets live**, and nowhere else: client credentials in
+`$XDG_CONFIG_HOME/forest-shell/google-oauth.json`, tokens in
+`$XDG_DATA_HOME/forest-shell/calendar/google-token.json`, both 0600 and both
+written by `tools/gcal-sync.py`. Neither reaches `settings.json`, the shell, or
+the log — the only field of a token that ever leaves the helper is the account's
+address. Every Google request lives in that one helper, for the reasons in
+[docs/adr/0003-google-sync-one-python-helper.md](../docs/adr/0003-google-sync-one-python-helper.md).
+
+**What syncs**, both ways: title, start and end, all-day, guests and colour. A
+round runs when the calendar window opens, when you edit
+something, and every `intervalMin` minutes otherwise; edits made offline queue
+and drain on the next round. `qs ipc call calendar sync` forces one and
+`syncStatus` answers `off`, `idle`, `syncing`, `auth` or `error`.
+
+**Limits worth knowing before you rely on it:**
+
+- **Recurring events are per-instance.** Google is asked for expanded instances
+  (`singleEvents=true`), so an edit here changes that occurrence and never the
+  series. Change the rule in Google.
+- **A remote cancellation wins.** An event cancelled on the server is dropped
+  locally and any queued edit to it is discarded — a push would either 404 or
+  re-invite everyone to a meeting that was called off.
+- **Otherwise last write wins**, compared on the server's `updated` stamp rather
+  than this machine's clock.
+- **Eleven Google colours map to eight hues**, so a pulled colour can shift:
+  Tomato, Flamingo and Tangerine all arrive as `ember`, and `ember` pushes back
+  as Tangerine.
+- **A consent screen left in Testing** issues refresh tokens that expire after
+  seven days; re-run the wizard's authorise step when sync says `auth`.

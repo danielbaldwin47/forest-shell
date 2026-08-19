@@ -34,7 +34,13 @@ focus, anything `Quickshell.*`. Drive it over IPC, with `nested_key`, or with
 `tools/settings-harness.sh` are the worked examples; a harness that edits config
 sets `NESTED_ENV` to a scratch `XDG_CONFIG_HOME` so it does not touch the
 session running it, and one that needs the *compositor* configured differently —
-two keyboard layouts, say — sets `NESTED_CONFIG`.
+two keyboard layouts, say — sets `NESTED_CONFIG`. A surface that reaches the
+network reaches it through a helper process, so `NESTED_ENV` names a stand-in
+instead and the seam keeps its subject: `tools/calendar-harness.sh` points
+`FOREST_GCAL_HELPER` at `tools/fixtures/gcal-fake.sh`, which speaks the real
+helper's contract and records what was pushed, so the run asserts on the wiring —
+does a trigger reach a process, does an answer reach the store — while the
+requests themselves stay at seam 1.
 
 **Pointer delivery is drivable here too, and it is not the same seam as IPC**
 (#187). `nested_click x y` warps with `hyprctl` and presses through a virtual

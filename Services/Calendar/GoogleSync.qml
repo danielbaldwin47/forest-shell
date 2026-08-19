@@ -75,6 +75,22 @@ Singleton {
     /// When the last round finished, UTC. Empty until one has.
     property string lastSync: ""
 
+    /// The address of the connected account, and the only field of the token
+    /// file that ever leaves the helper. Empty until a consent flow has
+    /// finished.
+    ///
+    /// Persisted beside the queue rather than asked for at startup: the helper's
+    /// `status` subcommand would answer it, but running one on every launch is a
+    /// subprocess on every machine that never connected an account — the exact
+    /// thing `tools/calendar-harness.sh` checks does not happen while sync is
+    /// off. The state file is already read at arm time and costs nothing.
+    property string account: ""
+
+    /// Whether a consent flow is in flight — the window between the browser
+    /// opening and the person finishing with it, which is long enough that a
+    /// surface saying nothing about it looks broken.
+    readonly property bool connecting: auth.running
+
     /// The last thing that went wrong, for the status line. Never a token, never
     /// a URL with one in it — the helper's error strings are API messages and
     /// exit codes.
@@ -371,6 +387,7 @@ Singleton {
         stateWriteTimer.stop();
         stateFile.setText(JSON.stringify({
             "version": 1,
+            "account": root.account,
             "syncToken": root.state.syncToken,
             "pendingOps": root.state.pendingOps
         }, null, 2) + "\n");
@@ -379,6 +396,7 @@ Singleton {
     function readState(): void {
         const text = stateFile.text();
         const parsed = root.parse(text) || {};
+        root.account = typeof parsed.account === "string" ? parsed.account : "";
         root.state = {
             "syncToken": typeof parsed.syncToken === "string" ? parsed.syncToken : "",
             "pendingOps": root.policy.dedupe(parsed.pendingOps)
@@ -530,9 +548,13 @@ Singleton {
             }
             const answer = root.parse(authOut.text) || {};
             // The address, and nothing else the token file holds.
+            const email = typeof answer.email === "string" ? answer.email : "";
             Logger.log("calendar", "sync connected "
-                       + (typeof answer.email === "string" && answer.email.length > 0
-                          ? answer.email : "(no address reported)"));
+                       + (email.length > 0 ? email : "(no address reported)"));
+            // Kept, so the sidebar can name the account on the next launch
+            // without another consent flow or another subprocess.
+            root.account = email;
+            root.persist();
             root.status = root.enabled ? "idle" : "off";
             root.lastError = "";
             if (root.enabled)

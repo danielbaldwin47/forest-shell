@@ -207,6 +207,69 @@ def _rfc3339(epoch):
         "%Y-%m-%dT%H:%M:%SZ")
 
 
+def machine_timezone():
+    """This machine's IANA zone name, e.g. `Europe/London`. `UTC` if unknowable.
+
+    Wanted because a timed `dateTime` with no offset and no `timeZone` is a
+    naive local time the API refuses outright, and the shell can reach this
+    machine's zone name only awkwardly. The caller normally states the zone; this
+    is the backstop that keeps a missing one from turning into a failed push.
+
+    `time.tzname` is deliberately not used: it yields abbreviations (`BST`,
+    `CEST`) which are ambiguous across regions and not what the API accepts. The
+    zoneinfo symlink is the only spelling on a systemd machine that is a real
+    zone id, and `TZ` is honoured first because a caller who set it means it.
+    """
+    tz = os.environ.get("TZ", "").strip().lstrip(":")
+    if tz and (tz == "UTC" or "/" in tz):
+        return tz
+    try:
+        link = os.path.realpath("/etc/localtime")
+        marker = "/zoneinfo/"
+        if marker in link:
+            return link.split(marker, 1)[1]
+    except OSError:
+        pass
+    try:
+        with open("/etc/timezone", encoding="utf-8") as handle:
+            named = handle.read().strip()
+        if named:
+            return named
+    except OSError:
+        pass
+    return "UTC"
+
+
+def fill_timezone(body, zone=None):
+    """A push body with a zone on every naive `dateTime`.
+
+    Only naive ones. A `dateTime` that already carries an offset states its own
+    instant, and an all-day `date` has no time of day to place, so both are left
+    exactly as the shell wrote them — this adds the one piece of information
+    that has no other source, and never overrides an answer already given.
+    """
+    if not isinstance(body, dict):
+        return body
+    named = zone or machine_timezone()
+    for end in ("start", "end"):
+        slot = body.get(end)
+        if not isinstance(slot, dict):
+            continue
+        stamp = slot.get("dateTime", "")
+        if not isinstance(stamp, str) or not stamp:
+            continue
+        if slot.get("timeZone"):
+            continue
+        # A sign after the date part is an offset. The date's own hyphens are
+        # skipped by starting at the `T`, which is why this is a slice and not
+        # an `in`.
+        after_date = stamp[10:]
+        if stamp.endswith("Z") or "+" in after_date or "-" in after_date:
+            continue
+        slot["timeZone"] = named
+    return body
+
+
 def window_bounds(days, now=None):
     """`--window DAYS` means DAYS in *each* direction around now.
 
@@ -578,15 +641,20 @@ def _push_one(op, tok, url_base):
         result["error"] = "missing-google-id"
         return result
 
+    # The shell states the zone; this is the backstop. A naive `dateTime` with
+    # no `timeZone` beside it is rejected by the API, and it is rejected per op,
+    # so one unstated zone would fail exactly the events people had just made.
+    body = fill_timezone(op.get("body") or {})
+
     headers = _auth_header(tok)
     if kind == "create":
         status, obj = _http("POST", url_base, params={"sendUpdates": "none"},
-                            json_body=op.get("body") or {}, headers=headers)
+                            json_body=body, headers=headers)
     else:
         target = f"{url_base}/{urllib.parse.quote(google_id, safe='')}"
         if kind == "patch":
             status, obj = _http("PATCH", target, params={"sendUpdates": "none"},
-                                json_body=op.get("body") or {}, headers=headers)
+                                json_body=body, headers=headers)
         else:
             status, obj = _http("DELETE", target,
                                 params={"sendUpdates": "none"}, headers=headers)

@@ -188,8 +188,14 @@ Singleton {
         // calendar that already has eleven events. Measured: the first
         // `ipc call calendar create` against a lazily-constructed store logged
         // `create evt-1` and the file's own evt-1 was still in it.
+        //
+        // GoogleSync is here for the same shape of reason: its queue is read
+        // from disk at construction, and every trigger it owns — the round
+        // timer, the debounce behind a local edit — only exists once it does. A
+        // sync service first constructed by the IPC call asking it to sync is a
+        // service that has never run a background round.
         report("deferred", [ShellState, Themes, Theming, Matugen, Notifications, Compositor,
-                            CalendarStore,
+                            CalendarStore, GoogleSync,
                             Audio, Networking, Bluetooth, Power, Backlight,
                             SystemTray, Mpris, Apps, Calculator, Claude, Clipboard,
                             PowerProfiles, NightLight, Vpn,

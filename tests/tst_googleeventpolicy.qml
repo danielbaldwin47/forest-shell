@@ -281,11 +281,69 @@ TestCase {
         compare(body.attendees.map(a => a.email).indexOf("ghost"), -1);
     }
 
-    function test_an_event_with_no_guests_sends_no_attendee_list() {
+    // An omitted `attendees` in a PATCH means "leave the guest list alone", so
+    // an empty list has to be spelled out or removing the last guest is a write
+    // that silently does nothing. This is the one edit that cannot be expressed
+    // by omission, and the failing version of it looks identical from here.
+    function test_an_event_with_no_guests_sends_an_empty_attendee_list() {
         const body = policy.toGoogle({
             "title": "Solo", "start": "2026-08-18T09:15", "end": "2026-08-18T09:45", "guests": []
         }, "Europe/Berlin", testCase.byId);
-        verify(body.attendees === undefined);
+        verify(body.hasOwnProperty("attendees"));
+        compare(body.attendees.length, 0);
+    }
+
+    // --- the meeting room -----------------------------------------------------
+    //
+    // `attendeesOf` drops rooms so the guest row draws faces, and `toGoogle`
+    // sends the whole attendee list. Those two together, with nothing between
+    // them, un-book the room of every event we ever patch — and the calendar
+    // still looks right, because the room was never drawn in the first place.
+
+    function test_a_room_rides_along_on_the_event_it_came_with() {
+        const e = policy.fromGoogle(testCase.timed({
+            "attendees": [
+                { "email": "room-3@example.com", "resource": true },
+                { "email": "me@example.com", "self": true },
+                { "email": "juno@example.com" }
+            ]
+        }), 120, testCase.byEmail);
+        compare(e.otherAttendees.length, 1, "the room, and not the account");
+        compare(e.otherAttendees[0].email, "room-3@example.com");
+        compare(e.otherAttendees[0].resource, true);
+    }
+
+    function test_a_patched_event_keeps_its_room() {
+        const pulled = policy.fromGoogle(testCase.timed({
+            "attendees": [
+                { "email": "room-3@example.com", "resource": true },
+                { "email": "juno@example.com" }
+            ]
+        }), 120, testCase.byEmail);
+        const body = policy.toGoogle(pulled, "Europe/Berlin", testCase.byId);
+        compare(body.attendees.length, 2);
+        compare(body.attendees[0].email, "room-3@example.com");
+        compare(body.attendees[0].resource, true);
+        compare(body.attendees[1].email, "juno@example.com");
+    }
+
+    function test_the_account_is_not_carried_back_up() {
+        // `self` is output-only, and Google re-adds the signed-in user to
+        // anything we write. Echoing it is at best a no-op and at worst a
+        // rejected field.
+        const carried = policy.otherAttendeesOf(testCase.timed({
+            "attendees": [{ "email": "me@example.com", "self": true }]
+        }));
+        compare(carried.length, 0);
+    }
+
+    function test_a_room_is_not_duplicated_by_a_guest_with_the_same_address() {
+        const body = policy.toGoogle({
+            "title": "Standup", "start": "2026-08-18T09:15", "end": "2026-08-18T09:45",
+            "guests": ["mira"],
+            "otherAttendees": [{ "email": "mira@example.com", "resource": true }]
+        }, "Europe/Berlin", testCase.byId);
+        compare(body.attendees.length, 1);
     }
 
     // --- identity ------------------------------------------------------------

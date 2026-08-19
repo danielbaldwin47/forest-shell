@@ -132,6 +132,12 @@ Singleton {
         // of the surface's documented API.
         if (typeof loader.item.requestActivate === "function")
             loader.item.requestActivate();
+
+        // Somebody is about to look at the calendar, which is the one moment a
+        // stale one is worth a request. Inert when sync is off, and dropped when
+        // a round is already in flight, so a window opened three times is not
+        // three helpers.
+        GoogleSync.syncOnOpen();
     }
 
     /// Closes the window. `reason` is for the log and travels with whatever
@@ -327,6 +333,26 @@ Singleton {
             return CalendarStore.addGuest(id, contact);
         }
         function deleteEvent(id: string): bool { return CalendarStore.deleteEvent(id); }
+
+        // --- Google sync (#calendar) ---------------------------------------
+        //
+        // Three verbs and no more, because there are only three things a script
+        // can usefully say about a sync: do one, how did the last one go, and
+        // connect an account.
+
+        /// Run a round now. Inert while `calendar.google.enabled` is off, and
+        /// dropped while one is already running — a round is not about a
+        /// particular edit, and the queue is what remembers those.
+        function sync(): void { GoogleSync.sync(); }
+
+        /// One word: `off`, `idle`, `syncing`, `auth` or `error`. A word and not
+        /// a sentence because both readers — a status line and a shell script —
+        /// want to branch on it.
+        function syncStatus(): string { return GoogleSync.status; }
+
+        /// Connect an account: the helper's consent flow, which opens a browser
+        /// and listens on loopback. Not a settings row for exactly that reason.
+        function syncConnect(): void { GoogleSync.connect(); }
     }
 
     Component.onCompleted: Logger.stage("calendar window armed (ipc target: calendar)")

@@ -154,6 +154,39 @@ QtObject {
         return out;
     }
 
+    /// The attendees `attendeesOf` threw away, in the shape a write accepts.
+    ///
+    /// This exists because dropping them from the guest row and dropping them
+    /// from the *event* are different things. A pulled meeting carries its room
+    /// as `{email: "…@resource.calendar.google.com", resource: true}`; our row
+    /// draws faces and must not show it, but a later PATCH sends the full
+    /// attendee list, so an event pushed back without it books a meeting out of
+    /// its room. They ride along on the local event as `otherAttendees` and go
+    /// back up untouched.
+    ///
+    /// `self` is not carried: Google puts the signed-in account in its own
+    /// attendee list and re-adds it on every write, so echoing it back is at
+    /// best a no-op — and `self` is output-only, so it is stripped here rather
+    /// than sent. `resource` is kept, because it is what makes a room a room.
+    function otherAttendeesOf(gevent: var): var {
+        const raw = (gevent && Array.isArray(gevent.attendees)) ? gevent.attendees : [];
+        const out = [];
+        for (let i = 0; i < raw.length; i++) {
+            const a = raw[i];
+            if (!a || typeof a !== "object")
+                continue;
+            if (a.resource !== true && a.self !== true)
+                continue;
+            if (a.self === true && a.resource !== true)
+                continue;
+            const email = typeof a.email === "string" ? a.email.trim() : "";
+            if (email.length === 0)
+                continue;
+            out.push({ "email": email, "resource": true });
+        }
+        return out;
+    }
+
     /// The guest id for one address: the id of the contact that already owns it,
     /// or a synthetic one. `byEmail` is the caller's address book — a function
     /// from an address to a contact (or null), passed in so this file needs no
@@ -254,6 +287,7 @@ QtObject {
             "allDay": allDay,
             "colour": policy.hues.hueForGoogleColor(g.colorId),
             "guests": guests,
+            "otherAttendees": policy.otherAttendeesOf(g),
             "googleId": googleId,
             "etag": typeof g.etag === "string" ? g.etag : "",
             "updated": typeof g.updated === "string" ? g.updated : "",
@@ -275,6 +309,14 @@ QtObject {
     /// `recurringEventId` and `originalStartTime` are deliberately absent: they
     /// are read-only on the API, and an instance edit is a PATCH *at the
     /// instance's own id*, which is transport, not body.
+    ///
+    /// `attendees` is **always** present and always the whole list — our guests
+    /// plus whatever `otherAttendees` carried through from the pull. See the
+    /// note at the assignment: an omitted list is unchanged, not cleared.
+    ///
+    /// `tz` must be a real zone. An empty one leaves a naive `dateTime` the API
+    /// rejects outright, so the caller states the machine's zone; the helper
+    /// (`tools/gcal-sync.py`) fills one in as a backstop.
     function toGoogle(event: var, tz: var, byId: var): var {
         const e = event || {};
         const zone = typeof tz === "string" ? tz : "";
@@ -296,15 +338,33 @@ QtObject {
         if (colorId.length > 0)
             body.colorId = colorId;
 
-        const guests = Array.isArray(e.guests) ? e.guests : [];
         const attendees = [];
+        const seen = [];
+        const carried = Array.isArray(e.otherAttendees) ? e.otherAttendees : [];
+        for (let i = 0; i < carried.length; i++) {
+            const other = carried[i] || {};
+            const email = typeof other.email === "string" ? other.email.trim() : "";
+            if (email.length === 0 || seen.indexOf(email) >= 0)
+                continue;
+            seen.push(email);
+            const entry = { "email": email };
+            if (other.resource === true)
+                entry.resource = true;
+            attendees.push(entry);
+        }
+        const guests = Array.isArray(e.guests) ? e.guests : [];
         for (let i = 0; i < guests.length; i++) {
             const email = policy.emailFor(guests[i], byId);
-            if (email.length > 0 && attendees.map(a => a.email).indexOf(email) < 0)
-                attendees.push({ "email": email });
+            if (email.length === 0 || seen.indexOf(email) >= 0)
+                continue;
+            seen.push(email);
+            attendees.push({ "email": email });
         }
-        if (attendees.length > 0)
-            body.attendees = attendees;
+        // Always spelled out, empty included. `attendees` absent from a PATCH
+        // means "leave the guest list alone", so an event whose last guest was
+        // removed here would keep every one of them over there — the one shape
+        // of edit that cannot be expressed by omission.
+        body.attendees = attendees;
 
         return body;
     }

@@ -1,6 +1,6 @@
 // The settings window's tab list (#54, #55) — the navigation skeleton as data.
 //
-// Ten tabs, and they are the config sections: `settings.json` mirrors this list
+// Eleven tabs, and they are the config sections: `settings.json` mirrors this list
 // 1:1 (#21), About excepted because there is nothing to configure about a
 // version number. That mapping is the whole reason hand-editing the file and
 // using the window are the same mental model, so it is enforced by a test
@@ -38,6 +38,8 @@ QtObject {
           section: "notifications", built: true },
         { id: "weatherTime", title: "Weather & Time", icon: "cloud-sun",
           section: "weatherTime", built: true },
+        { id: "calendar", title: "Calendar", icon: "calendar-days",
+          section: "calendar", built: true },
         { id: "wallpaper", title: "Wallpaper", icon: "image",
           section: "wallpaper", built: true },
         { id: "system", title: "System", icon: "monitor-cog",

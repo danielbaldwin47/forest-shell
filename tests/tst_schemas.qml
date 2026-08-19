@@ -24,7 +24,7 @@ TestCase {
         // 1:1 with the GUI tabs (#54, #55), so hand-editing and the settings
         // window are the same mental model.
         const expected = ["appearance", "bar", "launcher", "controlCenter", "dashboard",
-                          "notifications", "weatherTime", "wallpaper", "system"];
+                          "notifications", "weatherTime", "calendar", "wallpaper", "system"];
         compare(Object.keys(settings.spec).length, expected.length);
         for (const section of expected)
             verify(settings.spec[section] !== undefined, "missing section " + section);
@@ -221,7 +221,7 @@ TestCase {
 
     function test_the_osd_keys_live_under_the_control_centre() {
         // #46's geometry and timeout. Here rather than in a tenth section
-        // because #21 fixes the section list at nine and the tabs at ten
+        // because #21 fixes the OSD's home under the controls it reports on
         // (tests/tst_settingstabs.qml), and because the OSD reports exactly the
         // three channels the control centre puts sliders on — Core/
         // SettingsSchema.qml argues it where the keys are.

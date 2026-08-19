@@ -386,6 +386,83 @@ def test_push(root):
           calls[1]["url"])
 
 
+def test_machine_timezone():
+    """The zone name the push backstop uses when the shell states none.
+
+    Abbreviations are the trap: `time.tzname` says `BST`, which is not a zone id
+    and which the API will not take. Every branch here has to produce something
+    with a slash in it or the literal `UTC`.
+    """
+    saved = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "Europe/London"
+        check("TZ is honoured when it names a zone",
+              gcal.machine_timezone() == "Europe/London")
+        os.environ["TZ"] = ":Europe/Berlin"
+        check("a leading colon in TZ is stripped",
+              gcal.machine_timezone() == "Europe/Berlin")
+        os.environ["TZ"] = "BST"
+        named = gcal.machine_timezone()
+        check("an abbreviation in TZ is refused in favour of the system's answer",
+              named == "UTC" or "/" in named, named)
+        os.environ.pop("TZ", None)
+        fallback = gcal.machine_timezone()
+        check("with no TZ the answer is still a zone id",
+              fallback == "UTC" or "/" in fallback, fallback)
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+
+
+def test_fill_timezone():
+    naive = {"start": {"dateTime": "2026-08-18T09:15:00"},
+             "end": {"dateTime": "2026-08-18T09:45:00"}}
+    filled = gcal.fill_timezone(naive, zone="Europe/London")
+    check("a naive dateTime gets the machine's zone",
+          filled["start"]["timeZone"] == "Europe/London"
+          and filled["end"]["timeZone"] == "Europe/London", json.dumps(filled))
+
+    stated = {"start": {"dateTime": "2026-08-18T09:15:00", "timeZone": "Asia/Tokyo"}}
+    check("a stated zone is never overridden",
+          gcal.fill_timezone(stated, zone="Europe/London")["start"]["timeZone"]
+          == "Asia/Tokyo")
+
+    offset = {"start": {"dateTime": "2026-08-18T09:15:00+01:00"},
+              "end": {"dateTime": "2026-08-18T09:45:00Z"}}
+    done = gcal.fill_timezone(offset, zone="Europe/London")
+    check("a dateTime that carries its own offset is left alone",
+          "timeZone" not in done["start"] and "timeZone" not in done["end"],
+          json.dumps(done))
+
+    allday = {"start": {"date": "2026-08-18"}, "end": {"date": "2026-08-19"}}
+    check("an all-day body has no time of day to place",
+          gcal.fill_timezone(allday, zone="Europe/London") == allday)
+    check("a body that is not a dict comes back unharmed",
+          gcal.fill_timezone(None) is None)
+
+
+def test_push_fills_a_missing_timezone(root):
+    """The API rejects a naive `dateTime`, and it rejects it per op.
+
+    So an unstated zone does not fail the sync — it fails exactly the events
+    somebody had just made, which is the failure that looks like nothing.
+    """
+    workspace(root, "push-tz", token=stored_token())
+    calls = fake_http(lambda call, n: (201, fixture("push-create-201.json")))
+    ops = [{"id": "evt-1", "op": "create",
+            "body": {"summary": "Dentist",
+                     "start": {"dateTime": "2026-08-18T09:15:00"},
+                     "end": {"dateTime": "2026-08-18T09:45:00"}}}]
+    code, _obj, _ = run(["push", "--stdin"], stdin_text=json.dumps(ops))
+    sent = calls[0]["body"]
+    check("the push exits 0", code == 0, str(code))
+    check("a naive body reaches the wire with a zone on both ends",
+          bool(sent["start"].get("timeZone")) and bool(sent["end"].get("timeZone")),
+          json.dumps(sent))
+
+
 def test_push_all_auth_is_exit_3(root):
     workspace(root, "push-auth", token=stored_token())
     fake_http(lambda call, n: (401, {"error": {"code": 401,
@@ -742,6 +819,9 @@ def main():
         test_status(root)
         test_calendars(root)
         test_push(root)
+        test_machine_timezone()
+        test_fill_timezone()
+        test_push_fills_a_missing_timezone(root)
         test_push_all_auth_is_exit_3(root)
         test_push_needs_stdin(root)
         test_auth_happy(root)

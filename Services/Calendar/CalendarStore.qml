@@ -59,10 +59,16 @@ Singleton {
     readonly property string eventsPath: Paths.calendarFile
     readonly property string contactsPath: Paths.contactsFile
 
-    /// The schema version stamped into the events file. There is nothing to
-    /// migrate yet; the number exists so that when there is, the file says
-    /// which shape it was written in.
-    readonly property int version: 1
+    /// The schema version stamped into the events file. The number itself lives
+    /// in `EventPolicy` beside the migration that reads it, so the file and the
+    /// arithmetic that upgrades it can never disagree about which version this
+    /// build writes.
+    readonly property int version: root.policy.version
+
+    /// The contacts file has its own version and its own (so far empty) history.
+    /// Sharing one number would have made a events-only migration silently
+    /// restamp contacts.json as something it is not.
+    readonly property int contactsVersion: 1
 
     property EventPolicy policy: EventPolicy {}
     property GuestPolicy guestPolicy: GuestPolicy {}
@@ -74,15 +80,33 @@ Singleton {
 
     // --- reading --------------------------------------------------------------
 
+    /// Now, as an RFC3339 instant in UTC.
+    ///
+    /// UTC and not a local wall-clock stamp, on purpose: `modifiedAt` is only
+    /// ever compared against Google's `updated`, which is an instant. Comparing
+    /// an instant against a bare local time would be off by the offset, and
+    /// right twice a year in London.
+    function nowStamp(): string {
+        return new Date().toISOString();
+    }
+
     function readEvents(): void {
         const text = eventsFile.text();
         const parsed = JSON.parse(text.length > 0 ? text : "{}");
-        const raw = Array.isArray(parsed) ? parsed : parsed.events;
-        const clean = root.policy.sanitize(raw);
+        const upgraded = root.policy.migrate(parsed, root.nowStamp());
+        const clean = root.policy.sanitize(upgraded.events);
         for (const complaint of clean.rejected)
             Logger.warn("calendar", "dropping an event in " + root.eventsPath
                         + " — " + complaint);
         root.events = clean.events;
+        if (!upgraded.changed)
+            return;
+        // Once, on the read that found the old file. `write()` is what makes it
+        // stick, and the cooldown inside it is what stops our own write coming
+        // back round as another migration.
+        Logger.log("calendar", "migrated " + root.eventsPath + " to v" + root.version
+                   + " (" + root.events.length + " event(s) stamped)");
+        root.write();
     }
 
     function readContacts(): void {
@@ -127,9 +151,109 @@ Singleton {
             root.write();
     }
 
+    /// Every verb below ends here, which is why the local edit clock is here and
+    /// not in any of them: `stampChanged` dates the events that actually moved,
+    /// and a verb added later cannot forget to.
     function commit(next: var): void {
-        root.events = next;
+        root.events = root.policy.stampChanged(root.events, next, root.nowStamp());
         writeTimer.restart();
+        root.mutated();
+    }
+
+    /// A local edit landed. `Services/Calendar/GoogleSync.qml` debounces a push
+    /// off this; nothing else listens. Emitted from `commit` and therefore from
+    /// every verb, present and future, rather than from each of them.
+    ///
+    /// Deliberately **not** emitted by `applyRemote` below: a pull that fired a
+    /// push would push back what it had just been given, on a loop that only
+    /// ends when the debounce and the round trip happen to miss each other.
+    signal mutated()
+
+    // --- what the server said ---------------------------------------------------
+
+    /// Apply what a sync round decided: `upserts` are whole events, `removes`
+    /// are local ids. Answers how many of each actually landed, as
+    /// `{added, updated, removed}`.
+    ///
+    /// Three things separate this from the verbs above, and each is a bug it
+    /// exists to avoid:
+    ///
+    ///   - **no `stampChanged`.** `modifiedAt` is the local half of the
+    ///     last-writer-wins comparison, and `SyncPolicy.applied` has already set
+    ///     it to the server's own `updated`. Re-dating it now would make every
+    ///     pulled event look newer than the server that sent it, and every pull
+    ///     would be chased by a push of what had just arrived.
+    ///   - **no `mutated`.** See the signal above.
+    ///   - **an empty `id` means "new here".** `SyncPolicy.applied` leaves the id
+    ///     blank for a remote event nothing local matched, because which local
+    ///     event a `googleId` is belongs to the store. An id that *is* set but
+    ///     names nothing is the opposite case — the event was deleted here while
+    ///     the round was in flight — and is skipped rather than re-created, or a
+    ///     delete the user just made would be undone by its own round trip.
+    function applyRemote(upserts: var, removes: var): var {
+        const gone = Array.isArray(removes) ? removes : [];
+        let next = (root.events || []).filter(function (event) {
+            return gone.indexOf(event.id) < 0;
+        });
+        const removed = root.events.length - next.length;
+        let added = 0;
+        let changed = 0;
+
+        for (const raw of (Array.isArray(upserts) ? upserts : [])) {
+            const event = root.policy.normalize(raw);
+            if (event.id.length === 0) {
+                event.id = root.policy.nextId(next);
+                next = next.concat([event]);
+                added += 1;
+                continue;
+            }
+            const at = root.policy.indexOf(next, event.id);
+            if (at < 0)
+                continue;   // deleted here while the round was in flight
+            next = next.slice();
+            next[at] = event;
+            changed += 1;
+        }
+
+        const clean = root.policy.sanitize(next);
+        for (const complaint of clean.rejected)
+            Logger.warn("calendar", "dropping a synced event — " + complaint);
+        root.events = clean.events;
+        writeTimer.restart();
+        return { "added": added, "updated": changed, "removed": removed };
+    }
+
+    /// People a pull mentioned that the address book does not have, kept for as
+    /// long as the shell runs and no longer.
+    ///
+    /// In memory and **not** written to `contacts.json`, which is the one
+    /// decision here worth stating: that file is config — hand-written,
+    /// hand-copied between machines, owned by the user — and a sync that grew it
+    /// by one line per stranger on a meeting invitation would be the shell
+    /// editing something the user thinks is theirs. Losing these on restart
+    /// costs a display name: the guest id carries the address (`gmail:<email>`),
+    /// so `GoogleEventPolicy.emailFor` still finds it and a push still invites
+    /// the right person.
+    function rememberContacts(people: var): int {
+        const fresh = [];
+        for (const person of (Array.isArray(people) ? people : [])) {
+            if (!person || typeof person.id !== "string" || person.id.length === 0)
+                continue;
+            if (root.contactById(person.id))
+                continue;
+            if (fresh.some(function (seen) { return seen.id === person.id; }))
+                continue;
+            fresh.push({
+                "id": person.id,
+                "name": typeof person.name === "string" && person.name.length > 0
+                        ? person.name : person.id,
+                "email": typeof person.email === "string" ? person.email : "",
+                "colour": ""
+            });
+        }
+        if (fresh.length > 0)
+            root.contacts = root.contacts.concat(fresh);
+        return fresh.length;
     }
 
     // --- the verbs ------------------------------------------------------------
@@ -438,6 +562,6 @@ Singleton {
         id: makeContactsDir
         command: ["mkdir", "-p", root.contactsPath.slice(0, root.contactsPath.lastIndexOf("/"))]
         onExited: contactsFile.setText(
-            JSON.stringify({ "version": root.version, "contacts": root.contacts }, null, 2) + "\n")
+            JSON.stringify({ "version": root.contactsVersion, "contacts": root.contacts }, null, 2) + "\n")
     }
 }

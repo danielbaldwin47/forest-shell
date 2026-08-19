@@ -1,0 +1,51 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p32ofplf4pcbnu0g\"",
+  "summary": "daniel@example.com",
+  "updated": "2026-08-18T08:12:44.221Z",
+  "timeZone": "Europe/London",
+  "accessRole": "owner",
+  "defaultReminders": [{ "method": "popup", "minutes": 10 }],
+  "nextPageToken": "CigKGjBpNDdzZG1nMHNvcXR",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3421118928000000\"",
+      "id": "6r2p9c1h6cpj2b9k6phm4b9k",
+      "status": "confirmed",
+      "htmlLink": "https://www.google.com/calendar/event?eid=NnIycDlj",
+      "created": "2026-08-10T09:00:00.000Z",
+      "updated": "2026-08-17T11:22:04.000Z",
+      "summary": "Standup",
+      "colorId": "5",
+      "creator": { "email": "daniel@example.com", "self": true },
+      "organizer": { "email": "daniel@example.com", "self": true },
+      "start": { "dateTime": "2026-08-18T09:15:00+01:00", "timeZone": "Europe/London" },
+      "end": { "dateTime": "2026-08-18T09:30:00+01:00", "timeZone": "Europe/London" },
+      "iCalUID": "6r2p9c1h6cpj2b9k6phm4b9k@google.com",
+      "sequence": 0,
+      "attendees": [
+        { "email": "daniel@example.com", "organizer": true, "self": true, "responseStatus": "accepted" },
+        { "email": "sam@example.com", "displayName": "Sam Okafor", "responseStatus": "tentative" }
+      ],
+      "eventType": "default"
+    },
+    {
+      "kind": "calendar#event",
+      "etag": "\"3421118930000000\"",
+      "id": "1k9m3d5g7ppl2c8j4rhn6a2b",
+      "status": "confirmed",
+      "created": "2026-07-30T14:03:11.000Z",
+      "updated": "2026-08-16T18:40:59.000Z",
+      "summary": "Cabin weekend",
+      "creator": { "email": "daniel@example.com", "self": true },
+      "organizer": { "email": "daniel@example.com", "self": true },
+      "start": { "date": "2026-08-21" },
+      "end": { "date": "2026-08-24" },
+      "transparency": "transparent",
+      "iCalUID": "1k9m3d5g7ppl2c8j4rhn6a2b@google.com",
+      "sequence": 1,
+      "eventType": "default"
+    }
+  ]
+}

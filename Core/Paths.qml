@@ -36,6 +36,13 @@ Singleton {
     // beside every other document the shell may come to own.
     readonly property string calendarFile: dataDir + "/calendar/events.json"
 
+    // What the Google sync round remembers between runs: the syncToken that
+    // makes the next pull incremental, and the ops an offline edit queued.
+    // Beside the events and not in `stateDir`, because losing it is not losing
+    // ephemera — a dropped queue is an edit that never reaches the server, and a
+    // dropped token is a full re-pull of the whole calendar.
+    readonly property string googleSyncFile: dataDir + "/calendar/google-sync.json"
+
     // The people the calendar can invite. Config and not data, deliberately: a
     // contact list is hand-written and hand-copied between machines, which is
     // the same claim settings.json makes, so it sits beside it.

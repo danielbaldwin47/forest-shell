@@ -1,0 +1,22 @@
+{
+  "kind": "calendar#events",
+  "etag": "\"p32ofplf4pcbnu0h\"",
+  "summary": "daniel@example.com",
+  "updated": "2026-08-18T08:12:44.221Z",
+  "timeZone": "Europe/London",
+  "accessRole": "owner",
+  "defaultReminders": [{ "method": "popup", "minutes": 10 }],
+  "nextSyncToken": "CPjS5rDF1IgDEPjS5rDF1IgDGAUggIDA_5vP6bcB",
+  "items": [
+    {
+      "kind": "calendar#event",
+      "etag": "\"3421118944000000\"",
+      "id": "8b4n2q6r0ssk5f1h9tjm3d7c",
+      "status": "cancelled",
+      "recurringEventId": "8b4n2q6r0ssk5f1h9tjm3d7c_R20260801T080000Z",
+      "originalStartTime": { "dateTime": "2026-08-19T14:00:00+01:00", "timeZone": "Europe/London" },
+      "updated": "2026-08-18T07:55:02.000Z",
+      "sequence": 2
+    }
+  ]
+}

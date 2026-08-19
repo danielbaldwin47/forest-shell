@@ -497,4 +497,52 @@ TestCase {
         compare(format.upcomingWhen("", false, "2026-08-18", true), "");
     }
 
+    // --- elapsed --------------------------------------------------------------
+
+    // Both stamps in the same kind, so the assertion is arithmetic and not the
+    // machine's zone. The mixed pair — a UTC instant against a local wall clock,
+    // which is what the status line actually holds — gets its own case below.
+    function test_the_ladder_of_words_for_how_long_ago() {
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T14:00:30Z"),
+                "just now");
+        // The boundary: 59s is still "just now", 60 is a minute.
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T14:00:59Z"),
+                "just now");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T14:01:00Z"),
+                "1 min ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T14:03:00Z"),
+                "3 min ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T14:59:59Z"),
+                "59 min ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-18T15:00:00Z"),
+                "1 hr ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-19T13:59:00Z"),
+                "23 hr ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-19T14:00:00Z"),
+                "1 day ago");
+        compare(format.relativeAgo("2026-08-18T14:00:00Z", "2026-08-22T14:00:00Z"),
+                "4 days ago");
+    }
+
+    // A server's clock a little ahead of this machine's is ordinary; "in -2 min"
+    // is not a thing a status line should ever say.
+    function test_an_instant_in_the_future_is_just_now_and_not_a_negative() {
+        compare(format.relativeAgo("2026-08-18T14:05:00Z", "2026-08-18T14:00:00Z"),
+                "just now");
+    }
+
+    // The real pair: `GoogleSync.lastSync` is UTC off a server, `now` is the
+    // shell's own local wall-clock stamp. Built with `Date` here on purpose, so
+    // the case holds in any zone the test runs in — which is the whole claim.
+    function test_a_utc_instant_is_compared_against_a_local_wall_clock() {
+        const now = "2026-08-18T14:15";
+        const threeMinutesBefore = new Date(Date.parse(now) - 3 * 60 * 1000).toISOString();
+        compare(format.relativeAgo(threeMinutesBefore, now), "3 min ago");
+    }
+
+    function test_a_stamp_that_is_not_one_answers_empty() {
+        compare(format.relativeAgo("", "2026-08-18T14:00"), "");
+        compare(format.relativeAgo("2026-08-18T14:00", ""), "");
+        compare(format.relativeAgo("never", "2026-08-18T14:00"), "");
+    }
 }

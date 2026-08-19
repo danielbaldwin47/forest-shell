@@ -1,0 +1,7 @@
+{
+  "access_token": "ya29.FIXTURE-access-token-page-one",
+  "expires_in": 3599,
+  "refresh_token": "1//FIXTURE-refresh-token-original",
+  "scope": "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email",
+  "token_type": "Bearer"
+}

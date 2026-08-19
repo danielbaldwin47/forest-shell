@@ -42,6 +42,63 @@ QtObject {
     /// it, and it stays last so picking it by index does not move anything else.
     readonly property int autoCount: policy.count - 1
 
+    /// Which of Google's eleven event colours each of our eight hues answers
+    /// for, canonical id first. One table rather than two so the many-to-one is
+    /// visible: Google has eleven, we have eight, and the extra three are warm
+    /// reds that read as one chip colour at chip size.
+    ///
+    /// The ids are Google's `colorId` strings for **events** (the `event`
+    /// palette, not the `calendar` one): 1 Lavender, 2 Sage, 3 Grape,
+    /// 4 Flamingo, 5 Banana, 6 Tangerine, 7 Peacock, 8 Graphite, 9 Blueberry,
+    /// 10 Basil, 11 Tomato.
+    ///
+    /// Graphite is the one mapping that is about meaning rather than angle:
+    /// `stone` is our grey and grey is a status, so Google's grey is the only
+    /// thing that may become it — nothing else falls back there.
+    readonly property var googleColorTable: ({
+        "glacier": ["7"],
+        "moss": ["10"],
+        "lamplight": ["5"],
+        "ember": ["6", "4", "11"],
+        "lake": ["9"],
+        "lichen": ["2"],
+        "heather": ["3", "1"],
+        "stone": ["8"]
+    })
+
+    /// A Google `colorId` as one of our hue names, or `""` for an id we do not
+    /// know — and `""` is not a failure here, it is the stored `colour` of an
+    /// event that never had one, so `indexFor` hashes it the way it hashes any
+    /// uncoloured event.
+    function hueForGoogleColor(colorId: var): string {
+        if (colorId === undefined || colorId === null)
+            return "";
+        const id = String(colorId).trim();
+        if (id.length === 0)
+            return "";
+        for (let i = 0; i < policy.names.length; i++) {
+            const name = policy.names[i];
+            const ids = policy.googleColorTable[name] || [];
+            if (ids.indexOf(id) >= 0)
+                return name;
+        }
+        return "";
+    }
+
+    /// One of our hue names as the Google `colorId` to push, or `""` for an
+    /// unnamed (hashed) event — which is the right answer: an event whose
+    /// colour we never chose should not arrive over there wearing one.
+    ///
+    /// Lossy on purpose in this direction's shadow: three ids come back as
+    /// `ember` and `ember` goes up as Tangerine, so a pulled Tomato that is
+    /// edited here and pushed lands as Tangerine. The alternative is storing an
+    /// id we cannot draw.
+    function googleColorForHue(name: var): string {
+        const key = String(name === undefined || name === null ? "" : name).trim().toLowerCase();
+        const ids = key.length > 0 ? policy.googleColorTable[key] : null;
+        return (Array.isArray(ids) && ids.length > 0) ? ids[0] : "";
+    }
+
     /// A stable non-negative hash of a string. djb2, kept here rather than
     /// pulled from anywhere clever because the only property that matters is
     /// that it never changes — an implementation someone might "improve" would

@@ -448,4 +448,44 @@ QtObject {
         const day = named || format.dayHeader(iso).weekdayFull;
         return day + " · " + when;
     }
+
+    // --- elapsed --------------------------------------------------------------
+
+    /// How long ago an instant was, in the three or four words a status line
+    /// has room for: `just now`, `3 min ago`, `2 hr ago`, `4 days ago`.
+    ///
+    /// **The one function here that touches `Date`, and the header's rule is
+    /// why rather than an exception to it.** Everything else in this file is
+    /// wall-clock arithmetic — days, months, minutes-past-midnight — where
+    /// `Date` is a trap and `CalendarTime` is the answer. This is the opposite
+    /// question: `GoogleSync.lastSync` is an *instant* stamped by a server in
+    /// UTC (`2026-08-18T13:12:04.000Z`) and `now` is the shell's own local
+    /// wall-clock stamp (`2026-08-18T14:15`), and the elapsed time between two
+    /// stamps of different kinds is exactly what `Date.parse` is for: it reads
+    /// the zone where one is written and the machine's own where none is, which
+    /// is what each of these two stamps means. Doing it with day arithmetic
+    /// would need this file to know the machine's offset, which is the thing
+    /// the header is keeping out.
+    ///
+    /// A future instant answers `just now` rather than a negative: the two
+    /// clocks are a server's and this machine's, so a few seconds of skew is
+    /// ordinary and "in -2 min" is not a thing a status line should ever say.
+    /// Anything unparseable answers `""`, like the rest of the file.
+    function relativeAgo(iso: string, now: string): string {
+        const then = Date.parse(iso || "");
+        const stamp = Date.parse(now || "");
+        if (isNaN(then) || isNaN(stamp))
+            return "";
+        const seconds = Math.floor((stamp - then) / 1000);
+        if (seconds < 60)
+            return "just now";
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60)
+            return minutes + " min ago";
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24)
+            return hours + " hr ago";
+        const days = Math.floor(hours / 24);
+        return days + (days === 1 ? " day ago" : " days ago");
+    }
 }

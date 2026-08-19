@@ -412,6 +412,46 @@ FloatingWindow {
     property CreatePolicy createPolicy: CreatePolicy {}
     property UpcomingPolicy upcomingPolicy: UpcomingPolicy {}
     property CalendarFormat railFormat: CalendarFormat {}
+    property SyncStatusPolicy syncPolicy: SyncStatusPolicy {}
+
+    /// The Google half's four status properties, handed in the way every other
+    /// piece of state is — `GoogleSync` is a singleton, and this view is also
+    /// built by `tools/capture-harness.sh` with no singleton anywhere, so
+    /// reading it here would make the connected state unphotographable. It
+    /// arrives as one object because it is read as one: no field of it means
+    /// anything without the others.
+    ///
+    /// The default is the off state, which is what an unbound view draws.
+    property var syncState: ({
+        "status": "off", "account": "", "lastSync": "",
+        "error": "", "connecting": false
+    })
+
+    /// What the rail's Google block draws, and what the toolbar's dot is handed
+    /// — `SyncStatusPolicy`'s answer, so the four states are a table checked in
+    /// `tests/tst_syncstatuspolicy.qml` rather than branches in two surfaces.
+    ///
+    /// An object literal rather than a function body: a binding built inside a
+    /// function does not see the properties the body read, so a status that
+    /// changed would leave the rail showing the old word.
+    readonly property var syncFacts: ({
+        "status": window.syncState.status ?? "off",
+        "account": window.syncState.account ?? "",
+        "lastSync": window.syncState.lastSync ?? "",
+        // Recomputed as the shell's clock ticks, which is what turns "just now"
+        // into "3 min ago" with nothing driving it.
+        "ago": window.railFormat.relativeAgo(window.syncState.lastSync ?? "",
+                                             window.nowStamp),
+        "error": window.syncState.error ?? "",
+        "connecting": window.syncState.connecting === true
+    })
+
+    readonly property var syncBlock: window.syncPolicy.block(window.syncFacts)
+
+    /// *Sync now* and *Connect*. Signals for the reason the header gives: the
+    /// singleton that owns `GoogleSync` is the one that built this view.
+    signal syncRequested()
+    signal syncConnectRequested()
 
     /// When one of the sidebar's upcoming rows happens. `CalendarFormat` spells
     /// it; this only unpacks the event the rail is holding.
@@ -607,13 +647,33 @@ FloatingWindow {
                     /// room to spare and do not clear the 560px minimum, and a
                     /// `Column` has no opinion about that — it would simply
                     /// draw through the account block and out of the panel.
-                    height: Math.min(calendarList.implicitHeight,
-                                     upcoming.y - calendarList.y - Theme.space3)
+                    ///
+                    /// **Whole rows, and the heading is not one of them.** The
+                    /// bound is a pixel count and `clip` is honest about it, so
+                    /// the list used to end in whatever fraction of a row the
+                    /// arithmetic left — a 6px sliver of a colour swatch under
+                    /// the last name, which reads as a rendering fault rather
+                    /// than as a list that ran out of room. Floored to the row
+                    /// pitch it ends on a row, and the leftover pixels become
+                    /// air above *UPCOMING*, where they are invisible. The
+                    /// Google block below moves this bound whenever sync is
+                    /// switched on, which is what made the sliver a picture
+                    /// somebody had to look at.
+                    readonly property int rowH: 26
+                    readonly property int headingH: 22
+
+                    height: Math.min(
+                        calendarList.implicitHeight,
+                        calendarList.headingH
+                        + Math.max(0, Math.floor(
+                            (upcoming.y - calendarList.y - Theme.space3
+                             - calendarList.headingH) / calendarList.rowH))
+                          * calendarList.rowH)
                     clip: true
 
                     Item {
                         width: calendarList.width
-                        height: 22
+                        height: calendarList.headingH
 
                         Text {
                             anchors.left: parent.left
@@ -636,7 +696,7 @@ FloatingWindow {
                             required property var modelData
 
                             width: calendarList.width
-                            height: 26
+                            height: calendarList.rowH
 
                             /// The hover wash the rest of the shell's list rows
                             /// wear. It is feedback, not a promise: the row
@@ -723,7 +783,11 @@ FloatingWindow {
 
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    anchors.bottom: account.top
+                    // The Google block when there is one, the footer when there
+                    // is not: the rail's skeleton is fixed from the floor up, so
+                    // a shell with sync switched off draws exactly the column it
+                    // drew before this existed.
+                    anchors.bottom: google.visible ? google.top : account.top
                     anchors.bottomMargin: Theme.space4
 
                     readonly property var rows:
@@ -832,6 +896,165 @@ FloatingWindow {
                     }
                 }
 
+                /// The Google half, drawn as **the other source row** — the
+                /// same tile, the same two lines, the same text origin as
+                /// *This device* directly beneath it. Two members of one class
+                /// get one treatment.
+                ///
+                /// It used to get a full-rank `GOOGLE CALENDAR` heading, peer
+                /// to *CALENDARS* and *UPCOMING*, over an address in the
+                /// sidebar's top ink. That was a feature advertisement for
+                /// plumbing: a status readout is not a section, and *This
+                /// device* had already settled how a calendar source is
+                /// rendered here — a tile, a name, a dim subtitle, no heading
+                /// at all. The rank is flipped with it: the sync time is the
+                /// only string on this row that ever changes, so it takes the
+                /// line *This device* spends on its name, and the address —
+                /// which never changes and cannot be acted on — takes the dim
+                /// one under it. `SyncStatusPolicy.block` decides both.
+                ///
+                /// The rule above it is the rail's only divider, and it now
+                /// separates the pair of sources from *UPCOMING* rather than
+                /// separating the two siblings from each other. `account`'s
+                /// own hairline stands down whenever this row is drawn.
+                Item {
+                    id: google
+
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: account.top
+                    // The footer's height exactly: whatever else these two rows
+                    // disagree about, their pitch is not it.
+                    height: 52
+                    visible: window.syncBlock.visible
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 1
+                        color: Theme.borderSubtle
+                    }
+
+                    Rectangle {
+                        id: googleMark
+
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: 1
+                        width: 28
+                        height: 28
+                        radius: Theme.radiusSm
+                        color: Qt.alpha(Theme.accentPrimary, 0.14)
+
+                        /// A cloud against the footer's hard drive: the tile
+                        /// says *which kind of source*, which is the one thing
+                        /// that genuinely differs between these two rows. State
+                        /// stays in the words, where it can be read rather than
+                        /// decoded — a tile that changed colour would be the
+                        /// invisible dot again, one size up.
+                        Icon {
+                            anchors.centerIn: parent
+                            name: "cloud"
+                            size: 15
+                            color: Theme.accentPrimary
+                        }
+                    }
+
+                    Column {
+                        anchors.left: googleMark.right
+                        anchors.leftMargin: Theme.space3
+                        anchors.right: connectButton.visible
+                                       ? connectButton.left : parent.right
+                        anchors.rightMargin: connectButton.visible
+                                             ? Theme.space2 : 0
+                        // 248px of rail, minus the tile, minus the button, is
+                        // what *Not connected* has to fit inside — so the
+                        // button is padded to `space2` rather than the `space3`
+                        // a toolbar control gets. At `space3` the title elided
+                        // to "Not connect…", which is the one string in this
+                        // row nobody can guess the end of.
+                        anchors.verticalCenter: googleMark.verticalCenter
+                        spacing: 1
+
+                        /// What the last round did. The row's payload, at the
+                        /// row's top rank.
+                        Text {
+                            width: parent.width
+                            text: window.syncBlock.title
+                            color: Theme.textPrimary
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(12.5)
+                            font.weight: Theme.weightMedium
+                            font.features: CalendarTokens.tabularFigures
+                        }
+
+                        /// Whose account it is — or, when a round has failed,
+                        /// what went wrong, in the one ink this shell reserves
+                        /// for urgent. The address is what a failure displaces:
+                        /// it is the least useful string on the row, and
+                        /// *This device* proves the row reads without one.
+                        Text {
+                            width: parent.width
+                            text: window.syncBlock.subtitle
+                            color: window.syncBlock.tone === "error"
+                                   ? Theme.accentEmber : Theme.textMuted
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(11)
+                            font.weight: Theme.weightRegular
+                        }
+                    }
+
+                    /// *Connect*, and only in the state that has nothing to
+                    /// connect with. The outlined ghost the toolbar's *Today*
+                    /// button is — the same kind of thing, one deliberate
+                    /// press — sitting on the row it belongs to rather than
+                    /// across a gutter from it.
+                    Rectangle {
+                        id: connectButton
+
+                        anchors.right: parent.right
+                        anchors.verticalCenter: googleMark.verticalCenter
+                        width: connectLabel.implicitWidth + Theme.space2 * 2
+                        height: 28
+                        radius: Theme.radiusSm
+                        visible: window.syncBlock.action === "Connect"
+                        color: connectPointer.containsMouse
+                               ? CalendarTokens.chromeHover : "transparent"
+                        border.width: 1
+                        border.color: Theme.borderSubtle
+
+                        Behavior on color {
+                            enabled: Theme.animateTransforms
+                            ColorAnimation {
+                                duration: Theme.duration(Theme.motionFast)
+                            }
+                        }
+
+                        Text {
+                            id: connectLabel
+
+                            anchors.centerIn: parent
+                            text: window.syncBlock.action
+                            color: Theme.textPrimary
+                            font.family: Theme.fontUi
+                            font.pointSize: Theme.pt(11.5)
+                            font.weight: Theme.weightMedium
+                        }
+
+                        MouseArea {
+                            id: connectPointer
+
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.syncConnectRequested()
+                        }
+                    }
+                }
+
                 /// Whose calendars these are, pinned to the floor of the
                 /// panel.
                 ///
@@ -856,12 +1079,17 @@ FloatingWindow {
                     anchors.bottom: parent.bottom
                     height: 52
 
+                    /// The rule that closes the rail — and it stands down when
+                    /// the Google row is drawn, because that row brings its own
+                    /// and two sources of the same kind are not separated from
+                    /// each other. One rule above the pair, none between them.
                     Rectangle {
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
                         height: 1
                         color: Theme.borderSubtle
+                        visible: !google.visible
                     }
 
                     Rectangle {
@@ -929,13 +1157,20 @@ FloatingWindow {
             anchors.right: parent.right
             anchors.top: parent.top
             height: CalendarTokens.toolbarH
+            // Above the grid, and only just: the sync control's hover label
+            // hangs below the chrome band's hairline, and a sibling declared
+            // after this one would otherwise paint over it. The overlays stay
+            // above at z 40.
+            z: 2
 
             view: window.view
             anchorDate: window.anchorDate
             todayIso: window.todayIso
             firstDay: window.firstDay
+            syncFacts: window.syncFacts
 
             onViewRequested: name => window.viewRequested(name)
+            onSyncRequested: window.syncRequested()
             onTodayRequested: window.todayRequested()
             onCreateRequested: window.createHere()
             onStepRequested: delta => {

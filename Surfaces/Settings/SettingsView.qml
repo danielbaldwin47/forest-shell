@@ -340,6 +340,7 @@ FloatingWindow {
         case "dashboard": return dashboardPage;
         case "notifications": return notificationsPage;
         case "weatherTime": return weatherTimePage;
+        case "calendar": return calendarPage;
         case "wallpaper": return wallpaperPage;
         case "system": return systemPage;
         case "about": return aboutPage;
@@ -354,6 +355,7 @@ FloatingWindow {
     Component { id: dashboardPage; DashboardTab {} }
     Component { id: notificationsPage; NotificationsTab {} }
     Component { id: weatherTimePage; WeatherTimeTab {} }
+    Component { id: calendarPage; CalendarTab {} }
     Component { id: wallpaperPage; WallpaperTab {} }
     Component { id: systemPage; SystemTab {} }
     Component { id: aboutPage; AboutTab {} }

@@ -1,7 +1,7 @@
 // The `settings.json` spec table — the whole definition of what a forest-shell
 // config *is* (#21, #33).
 //
-// Nine top-level sections, mirroring the settings GUI tabs 1:1 (#54, #55 — the
+// Ten top-level sections, mirroring the settings GUI tabs 1:1 (#54, #55 — the
 // About tab has no config), plus the `settingsVersion` stamp the migration
 // runner owns. Keys are camelCase. The point of the 1:1 mapping is that
 // hand-editing this file and using the GUI are the same mental model.
@@ -314,10 +314,10 @@ QtObject {
             // The OSD (#46) — the pill that pops on a volume, mic or
             // brightness change.
             //
-            // **Here, and not in a tenth section**, which is the one thing
-            // about this ticket the resolutions do not settle: #21 fixes the
-            // section list at nine and `tests/tst_settingstabs.qml` holds the
-            // tabs to ten, so an `osd` section would be a tab #9 never listed.
+            // **Here, and not in a section of its own**, which is the one thing
+            // about this ticket the resolutions do not settle: a section is a
+            // tab (`tests/tst_settingstabs.qml` holds every one of them to
+            // one), and an `osd` tab is a tab #9 never listed.
             // The OSD reports exactly the three channels the control centre
             // puts sliders on — volume out, mic, brightness (#9) — so it sits
             // under the section that owns those controls, and reads as "what
@@ -544,6 +544,57 @@ QtObject {
             }
         },
 
+        // The calendar's Google account (#calendar). A section of its own, and
+        // therefore a tab of its own, which is the eleventh — the "here, and not
+        // in a section of its own" arguments elsewhere in this file are about
+        // keys that had no surface to sit on, and this one brings its own
+        // (`Surfaces/Settings/Tabs/CalendarTab.qml`). Nothing about the account
+        // itself is here: the client credentials live in `google-oauth.json` and
+        // the token in `google-token.json`, both 0600 and both written by
+        // `tools/gcal-sync.py`. A settings file is hand-edited, copied between
+        // machines and pasted into bug reports; a refresh token must not be.
+        calendar: {
+            google: {
+                // Off until someone connects an account. Every trigger in
+                // `Services/Calendar/GoogleSync.qml` reads this first, so a
+                // shell that has never been told about Google spawns no helper
+                // and makes no request.
+                enabled: { def: false, coerce: c.boolean,
+                           label: "Sync the calendar with a Google account" },
+
+                // Which calendar of that account. `primary` is the one the
+                // account is named after; a shared or secondary calendar is its
+                // address (`…@group.calendar.google.com`), which Google Calendar
+                // shows as the Calendar ID in that calendar's own settings.
+                calendarId: { def: "primary", coerce: c.string,
+                              label: "The Google calendar to sync with" },
+
+                // Minutes between background rounds. Five, because a pull with
+                // a syncToken is one small request that usually answers with an
+                // empty list — and the two triggers that matter for a person
+                // watching are opening the window and making an edit, both of
+                // which sync straight away. The floor is one: a round spawns a
+                // process, and a shell doing that every few seconds is a shell
+                // the idle budget (#22 §5) can see.
+                intervalMin: { def: 5, coerce: c.integer(1, 240),
+                               label: "Minutes between background sync rounds" },
+
+                // How far either side of today a *full* pull asks for. Only the
+                // full pull: an incremental one carries a syncToken and the
+                // server decides what changed, so a window on it would filter
+                // out the very changes it exists to deliver. The two full pulls
+                // are the first round on a machine and the one after a 410.
+                //
+                // Four months, because that is a calendar somebody scrolls
+                // through rather than the decade of dentist appointments an
+                // account has accumulated, and because the first pull is the
+                // one that must not take a minute. The floor is a week — a
+                // shorter window would hide next Monday.
+                windowDays: { def: 120, coerce: c.integer(7, 730),
+                              label: "Days either side of today a first sync pulls" }
+            }
+        },
+
         wallpaper: {
             path: { def: "", coerce: c.path },
 
@@ -564,8 +615,8 @@ QtObject {
         system: {
             // The region picker (#51).
             //
-            // **Here, and not in a tenth section.** #21 fixes the section list
-            // at nine and `tests/tst_settingstabs.qml` holds every section to a
+            // **Here, and not in a section of its own.**
+            // `tests/tst_settingstabs.qml` holds every section to a
             // tab, so a top-level `screenshot` would be a section the GUI
             // cannot reach — the constraint the OSD hit above, resolved the
             // same way. This tab already owns the session's commands, the night

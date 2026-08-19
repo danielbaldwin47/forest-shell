@@ -18,9 +18,12 @@ TestCase {
     SettingsTabs { id: registry }
     SettingsSchema { id: settings }
 
-    function test_there_are_ten_tabs() {
-        // The number is a decision (#9), not an accident of the list below.
-        compare(registry.tabs.length, 10);
+    function test_there_are_eleven_tabs() {
+        // The number is a decision (#9), not an accident of the list below. It
+        // moved from ten to eleven when the calendar gained a Google account to
+        // configure: a section without a tab is a setting the GUI cannot reach,
+        // so the count follows the sections rather than holding them back.
+        compare(registry.tabs.length, 11);
     }
 
     function test_every_tab_maps_to_a_config_section() {
@@ -96,7 +99,8 @@ TestCase {
         compare(registry.neighbour("launcher", 1), "controlCenter");
         compare(registry.neighbour("controlCenter", 1), "dashboard");
         compare(registry.neighbour("notifications", 1), "weatherTime");
-        compare(registry.neighbour("weatherTime", 1), "wallpaper");
+        compare(registry.neighbour("weatherTime", 1), "calendar");
+        compare(registry.neighbour("calendar", 1), "wallpaper");
         compare(registry.neighbour("wallpaper", 1), "system");
         compare(registry.neighbour("system", 1), "about");
     }

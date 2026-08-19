@@ -112,6 +112,59 @@ TestCase {
         compare(e.guests.join(","), "mira,juno");
     }
 
+    // normalize is the schema: a field it does not name is dropped on the next
+    // read of events.json, so the sync identity has to survive it or every pull
+    // re-creates every event it already pulled.
+    function test_normalize_keeps_the_sync_identity() {
+        const e = policy.normalize({ "id": "evt-1", "start": "2026-08-18T09:00",
+                                     "end": "2026-08-18T10:00",
+                                     "googleId": "g-abc", "etag": "\"42\"",
+                                     "updated": "2026-08-18T07:00:00.000Z",
+                                     "modifiedAt": "2026-08-18T09:10:00Z",
+                                     "recurringEventId": "g-series",
+                                     "originalStartTime": "2026-08-18T09:00:00+02:00" });
+        compare(e.googleId, "g-abc");
+        compare(e.etag, "\"42\"");
+        compare(e.updated, "2026-08-18T07:00:00.000Z");
+        compare(e.modifiedAt, "2026-08-18T09:10:00Z");
+        compare(e.recurringEventId, "g-series");
+        compare(e.originalStartTime, "2026-08-18T09:00:00+02:00");
+        // And a local-only event carries them empty rather than missing.
+        const local = policy.normalize({ "id": "evt-2", "start": "2026-08-18T09:00",
+                                         "end": "2026-08-18T10:00", "googleId": 7 });
+        compare(local.googleId, "");
+        compare(local.modifiedAt, "");
+    }
+
+    // Every mutation goes through `replace`, which normalizes twice — so the
+    // sync identity survives a drag, a rename and a recolour, or the first edit
+    // after a pull would orphan the event and the next pull would create it a
+    // second time. This is the half of the schema change that nothing else
+    // asserts: `normalize` naming the fields is necessary, carrying them
+    // through the mutations is what makes it true.
+    function test_a_mutation_keeps_the_sync_identity() {
+        const synced = testCase.event("evt-1", "2026-08-18T09:00", "2026-08-18T10:00", {
+            "googleId": "g-abc", "etag": "\"42\"",
+            "updated": "2026-08-18T07:00:00.000Z", "modifiedAt": "2026-08-18T09:10:00Z",
+            "recurringEventId": "g-series", "originalStartTime": "2026-08-18T09:00:00+02:00"
+        });
+        const moved = policy.byId(policy.move([synced], "evt-1", "2026-08-19T14:00"), "evt-1");
+        compare(moved.start, "2026-08-19T14:00");
+        compare(moved.googleId, "g-abc");
+        compare(moved.etag, "\"42\"");
+        compare(moved.updated, "2026-08-18T07:00:00.000Z");
+        compare(moved.recurringEventId, "g-series");
+        compare(moved.originalStartTime, "2026-08-18T09:00:00+02:00");
+        const named = policy.byId(policy.retitle([synced], "evt-1", "Standup"), "evt-1");
+        compare(named.title, "Standup");
+        compare(named.googleId, "g-abc");
+        compare(named.modifiedAt, "2026-08-18T09:10:00Z");
+        // And a create from a pulled event keeps it too — that is the path a
+        // pull takes into the store.
+        const made = policy.create([], synced);
+        compare(made[0].googleId, "g-abc");
+    }
+
     function test_sanitize_keeps_the_good_and_names_the_bad() {
         const clean = policy.sanitize([
             event("evt-2", "2026-08-18T10:00", "2026-08-18T11:00"),
@@ -438,5 +491,112 @@ TestCase {
         const list = policy.retitle(testCase.week(), "evt-2", "Design review");
         compare(policy.byId(list, "evt-2").title, "Design review");
         compare(policy.byId(list, "evt-3").title, "evt-3");
+    }
+
+    // --- the schema version ---------------------------------------------------
+    //
+    // The migration is here rather than in `CalendarStore` for the usual reason
+    // — the store imports Quickshell — but also because the decision worth
+    // checking is not "does the file get rewritten", it is *what the stamp
+    // means*. An event with no `modifiedAt` loses every conflict it is ever in,
+    // so a v1 file read by a syncing build would have its pre-sync edits
+    // overwritten by the first pull, and the calendar would look fine.
+
+    readonly property string migrationStamp: "2026-08-18T12:00:00.000Z"
+
+    function test_migrate_stamps_a_v1_file_and_says_it_changed() {
+        const out = policy.migrate({ "version": 1, "events": [
+            { "id": "evt-1", "start": "2026-08-18T09:00", "end": "2026-08-18T10:00" }
+        ] }, testCase.migrationStamp);
+        compare(out.changed, true);
+        compare(out.version, 2);
+        compare(out.events[0].modifiedAt, testCase.migrationStamp);
+        compare(out.events[0].id, "evt-1", "a migration is not a rewrite of everything else");
+    }
+
+    function test_migrate_leaves_a_current_file_alone() {
+        // `changed` is what makes the store write. A migration that reported
+        // one every read would be a file that is never at rest, and the store
+        // watches its own writes.
+        const out = policy.migrate({ "version": 2, "events": [
+            { "id": "evt-1", "modifiedAt": "2026-08-01T00:00:00.000Z" }
+        ] }, testCase.migrationStamp);
+        compare(out.changed, false);
+        compare(out.events[0].modifiedAt, "2026-08-01T00:00:00.000Z");
+    }
+
+    function test_migrate_does_not_downgrade_a_newer_file() {
+        const out = policy.migrate({ "version": 99, "events": [] }, testCase.migrationStamp);
+        compare(out.changed, false);
+        compare(out.version, 99, "a build that ran yesterday must not rewrite tomorrow's file");
+    }
+
+    function test_migrate_reads_a_bare_array_as_version_zero() {
+        // The oldest shape the reader has always accepted, and a hand-written
+        // file's most likely shape.
+        const out = policy.migrate([{ "id": "evt-1" }], testCase.migrationStamp);
+        compare(out.changed, true);
+        compare(out.events[0].modifiedAt, testCase.migrationStamp);
+    }
+
+    function test_migrate_keeps_a_stamp_that_is_already_there() {
+        const out = policy.migrate({ "version": 1, "events": [
+            { "id": "evt-1", "modifiedAt": "2026-08-01T00:00:00.000Z" }
+        ] }, testCase.migrationStamp);
+        compare(out.events[0].modifiedAt, "2026-08-01T00:00:00.000Z");
+    }
+
+    // --- dating a local edit --------------------------------------------------
+
+    function test_stamp_dates_the_events_that_actually_moved() {
+        const before = policy.sanitize(testCase.week()).events;
+        const after = policy.retitle(before, "evt-2", "Design review");
+        const stamped = policy.stampChanged(before, after, testCase.migrationStamp);
+        compare(policy.byId(stamped, "evt-2").modifiedAt, testCase.migrationStamp);
+        compare(policy.byId(stamped, "evt-3").modifiedAt, "",
+                "an untouched event is not an edit");
+    }
+
+    function test_stamp_dates_a_brand_new_event() {
+        const before = policy.sanitize(testCase.week()).events;
+        const made = policy.nextId(before);
+        const after = policy.create(before, { "start": "2026-08-20T09:00", "end": "2026-08-20T10:00" });
+        const stamped = policy.stampChanged(before, after, testCase.migrationStamp);
+        compare(policy.byId(stamped, made).modifiedAt, testCase.migrationStamp);
+    }
+
+    function test_stamp_ignores_a_server_answer_arriving() {
+        // `etag`/`updated` land when a push is accepted. Dating them as a local
+        // edit would leave every pushed event looking newer than the server
+        // that just took it, and push it again on the next round, forever.
+        const before = [{ "id": "evt-1", "start": "2026-08-18T09:00", "end": "2026-08-18T10:00",
+                          "modifiedAt": "2026-08-01T00:00:00.000Z" }];
+        const after = [{ "id": "evt-1", "start": "2026-08-18T09:00", "end": "2026-08-18T10:00",
+                         "modifiedAt": "2026-08-01T00:00:00.000Z",
+                         "etag": "\"9\"", "updated": "2026-08-18T11:00:00.000Z" }];
+        const stamped = policy.stampChanged(before, after, testCase.migrationStamp);
+        compare(stamped[0].modifiedAt, "2026-08-01T00:00:00.000Z");
+    }
+
+    function test_stamp_dates_a_guest_change_and_a_room_change() {
+        const before = [{ "id": "evt-1", "start": "2026-08-18T09:00", "end": "2026-08-18T10:00",
+                          "guests": ["mira"], "modifiedAt": "2026-08-01T00:00:00.000Z" }];
+        const withoutGuest = policy.removeGuest(before, "evt-1", "mira");
+        compare(policy.stampChanged(before, withoutGuest, testCase.migrationStamp)[0].modifiedAt,
+                testCase.migrationStamp, "removing the last guest is an edit like any other");
+    }
+
+    function test_the_schema_keeps_the_meeting_room() {
+        // `otherAttendees` is what a push sends back so a pulled event does not
+        // get booked out of its room. Everything `normalize` does not name is
+        // dropped on the next read, silently.
+        const e = policy.normalize({ "id": "evt-1", "otherAttendees": [
+            { "email": "room-4@resource.calendar.google.com", "resource": true },
+            { "email": "room-4@resource.calendar.google.com" },
+            { "email": "" }, "nonsense"
+        ] });
+        compare(e.otherAttendees.length, 1, "one address, once");
+        compare(e.otherAttendees[0].email, "room-4@resource.calendar.google.com");
+        compare(e.otherAttendees[0].resource, true);
     }
 }

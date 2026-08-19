@@ -71,12 +71,32 @@ QtObject {
     /// A copy with every field present and of the right type. What the store
     /// runs each entry of a hand-edited file through, so nothing downstream has
     /// to ask whether `guests` exists.
+    ///
+    /// **This function is the schema.** Everything it does not name is dropped
+    /// on the next read, silently, which is why the Google sync fields are here
+    /// rather than only in `GoogleEventPolicy`: `googleId`/`etag`/`updated` are
+    /// what a pull matches and compares against, `modifiedAt` is the local half
+    /// of that comparison, and `recurringEventId`/`originalStartTime` are what
+    /// say an event is one instance of a series rather than a thing of its own.
+    /// `otherAttendees` is the meeting room: attendees Google sent that the
+    /// guest row deliberately does not draw, kept because a push sends the whole
+    /// attendee list and an event that forgot its room gets pushed out of it.
+    /// A local-only event simply has them all empty.
     function normalize(event: var): var {
         const raw = event || {};
         const guests = [];
         for (const guest of (Array.isArray(raw.guests) ? raw.guests : []))
             if (typeof guest === "string" && guest.length > 0 && guests.indexOf(guest) < 0)
                 guests.push(guest);
+        const others = [];
+        const seenOther = [];
+        for (const other of (Array.isArray(raw.otherAttendees) ? raw.otherAttendees : [])) {
+            const email = (other && typeof other.email === "string") ? other.email.trim() : "";
+            if (email.length === 0 || seenOther.indexOf(email) >= 0)
+                continue;
+            seenOther.push(email);
+            others.push({ "email": email, "resource": other.resource === true });
+        }
         return {
             "id": typeof raw.id === "string" ? raw.id : "",
             "title": typeof raw.title === "string" ? raw.title : "",
@@ -84,7 +104,14 @@ QtObject {
             "end": typeof raw.end === "string" ? raw.end : "",
             "allDay": raw.allDay === true,
             "colour": typeof raw.colour === "string" ? raw.colour : "",
-            "guests": guests
+            "guests": guests,
+            "otherAttendees": others,
+            "googleId": typeof raw.googleId === "string" ? raw.googleId : "",
+            "etag": typeof raw.etag === "string" ? raw.etag : "",
+            "updated": typeof raw.updated === "string" ? raw.updated : "",
+            "modifiedAt": typeof raw.modifiedAt === "string" ? raw.modifiedAt : "",
+            "recurringEventId": typeof raw.recurringEventId === "string" ? raw.recurringEventId : "",
+            "originalStartTime": typeof raw.originalStartTime === "string" ? raw.originalStartTime : ""
         };
     }
 
@@ -129,6 +156,91 @@ QtObject {
                 return a.end < b.end ? -1 : 1;
             return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
         });
+    }
+
+    // --- schema version -------------------------------------------------------
+
+    /// The version this file writes. **v2** adds `modifiedAt`, the local half of
+    /// the sync comparison — see `migrate`.
+    readonly property int version: 2
+
+    /// One events.json document, brought up to `version`.
+    ///
+    /// Returns `{version, events, changed}`. `changed` is the whole point: a
+    /// migration that rewrites the file on every read is a file that is never
+    /// at rest, and `CalendarStore` watches its own writes. It is true exactly
+    /// once — on the read that found an older version — and false forever after.
+    ///
+    /// The v1 → v2 step is `modifiedAt`. Without it every pre-sync event has an
+    /// empty local timestamp, and the last-writer-wins comparison reads that as
+    /// "older than anything the server has ever said", so the first pull would
+    /// quietly overwrite local edits made before sync was ever switched on. The
+    /// honest answer is not the epoch and not now-forever: it is *the moment we
+    /// noticed*, `nowStamp`, stamped once and then left alone. That makes a
+    /// pre-existing event lose to a server change made after the upgrade and win
+    /// against one made before it, which is the best a file with no history can
+    /// say.
+    ///
+    /// An event that already carries a `modifiedAt` keeps it — a document
+    /// half-written by a newer build is not re-stamped — and a document already
+    /// at or past `version` is returned untouched, so a downgrade never
+    /// rewrites a newer file into an older shape.
+    function migrate(doc: var, nowStamp: string): var {
+        const parsed = doc || {};
+        const raw = Array.isArray(parsed) ? parsed : parsed.events;
+        const events = Array.isArray(raw) ? raw : [];
+        const was = typeof parsed.version === "number" ? parsed.version : 0;
+        if (was >= policy.version)
+            return { "version": was, "events": events, "changed": false };
+
+        const out = [];
+        for (const event of events) {
+            const copy = {};
+            for (const key in (event || {}))
+                copy[key] = event[key];
+            if (typeof copy.modifiedAt !== "string" || copy.modifiedAt.length === 0)
+                copy.modifiedAt = nowStamp;
+            out.push(copy);
+        }
+        return { "version": policy.version, "events": out, "changed": true };
+    }
+
+    /// `after`, with `modifiedAt` set to `nowStamp` on every event that is new
+    /// or actually different from its counterpart in `before`.
+    ///
+    /// The store funnels every mutation through one commit, so this is the one
+    /// place a local edit gets dated — a per-verb stamp would be six chances to
+    /// forget one, and a forgotten stamp is an edit that loses every conflict it
+    /// is ever in.
+    ///
+    /// "Different" ignores `modifiedAt` itself, so re-stamping is not itself a
+    /// change and a re-commit of an untouched list dates nothing. It also
+    /// ignores `etag`/`updated`: those are the server's answer arriving, not a
+    /// local edit, and dating them would make every pull look like a local
+    /// change and push it straight back.
+    function stampChanged(before: var, after: var, nowStamp: string): var {
+        const previous = before || [];
+        return (after || []).map(function (event) {
+            const old = policy.byId(previous, event && event.id ? event.id : "");
+            if (old && policy.sameContent(old, event))
+                return event;
+            const copy = {};
+            for (const key in (event || {}))
+                copy[key] = event[key];
+            copy.modifiedAt = nowStamp;
+            return copy;
+        });
+    }
+
+    /// Do two events say the same thing, ignoring the bookkeeping fields that
+    /// are not a local edit (`modifiedAt`, `etag`, `updated`)?
+    function sameContent(a: var, b: var): bool {
+        const left = policy.normalize(a);
+        const right = policy.normalize(b);
+        left.modifiedAt = ""; right.modifiedAt = "";
+        left.etag = ""; right.etag = "";
+        left.updated = ""; right.updated = "";
+        return JSON.stringify(left) === JSON.stringify(right);
     }
 
     // --- mutations ------------------------------------------------------------

@@ -24,7 +24,7 @@ TestCase {
         // 1:1 with the GUI tabs (#54, #55), so hand-editing and the settings
         // window are the same mental model.
         const expected = ["appearance", "bar", "launcher", "controlCenter", "dashboard",
-                          "notifications", "weatherTime", "wallpaper", "system"];
+                          "notifications", "weatherTime", "calendar", "wallpaper", "system"];
         compare(Object.keys(settings.spec).length, expected.length);
         for (const section of expected)
             verify(settings.spec[section] !== undefined, "missing section " + section);
@@ -221,7 +221,7 @@ TestCase {
 
     function test_the_osd_keys_live_under_the_control_centre() {
         // #46's geometry and timeout. Here rather than in a tenth section
-        // because #21 fixes the section list at nine and the tabs at ten
+        // because #21 fixes the OSD's home under the controls it reports on
         // (tests/tst_settingstabs.qml), and because the OSD reports exactly the
         // three channels the control centre puts sliders on — Core/
         // SettingsSchema.qml argues it where the keys are.
@@ -325,6 +325,20 @@ TestCase {
         // being passed through to the API as a query parameter.
         compare(weather.units.coerce("kelvin"), undefined);
         compare(weather.units.coerce("imperial"), "imperial");
+    }
+
+    function test_the_first_google_pull_asks_for_a_window_a_person_would_scroll() {
+        // Only the first pull, and the one after a 410: every round after that
+        // carries a syncToken and is told what changed. So this is how much
+        // history a freshly connected account brings down, and both ends are
+        // clamped — a hand-edited 1 would hide next Monday, and an unbounded
+        // one is the decade of dentist appointments the account has kept.
+        const google = settings.spec.calendar.google;
+        compare(google.windowDays.def, 120);
+        compare(google.windowDays.coerce(1), 7);
+        compare(google.windowDays.coerce(7), 7);
+        compare(google.windowDays.coerce(120), 120);
+        compare(google.windowDays.coerce(99999), 730);
     }
 
     function test_a_hand_edited_sample_interval_cannot_become_a_busy_loop() {

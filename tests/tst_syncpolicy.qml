@@ -355,6 +355,48 @@ TestCase {
         compare(policy.instantMs(""), -1);
     }
 
+    function test_a_naked_stamp_is_read_as_utc() {
+        // The one that matters: a bare date-time is *local* to ECMAScript, so a
+        // UTC stamp parsed naked is wrong by this machine's offset — and the
+        // offsets the mapping looks up per instant are what place an event on
+        // the right side of a DST change.
+        compare(policy.utcMs("2026-10-25T00:30"), policy.utcMs("2026-10-25T00:30Z"),
+                "a naked stamp is the same instant as the Z-suffixed one");
+        compare(policy.utcMs("2026-10-25T00:30:00.000Z"), Date.UTC(2026, 9, 25, 0, 30));
+        compare(policy.utcMs("2026-10-25T00:30"), Date.UTC(2026, 9, 25, 0, 30));
+        compare(policy.utcMs("2026-10-25T02:30+02:00"), Date.UTC(2026, 9, 25, 0, 30),
+                "a stamp that already names a zone is left alone");
+        compare(policy.utcMs("not a date"), -1);
+        compare(policy.utcMs(""), -1);
+        compare(policy.utcMs(null), -1);
+    }
+
+    // --- how a run ended --------------------------------------------------------
+
+    function test_exit_three_is_a_state_and_everything_else_is_an_error() {
+        compare(policy.classifyExit(0, "").kind, "ok");
+        compare(policy.classifyExit(3, "fake: no account is connected").kind, "auth");
+        compare(policy.classifyExit(3, "anything").lastError, "not connected",
+                "a helper that has never been consented to is not a failure to report");
+        compare(policy.classifyExit(1, "").kind, "error");
+    }
+
+    function test_an_error_is_named_by_the_last_thing_the_helper_said() {
+        // The helper narrates progress on stderr, so the earlier lines are what
+        // it was doing and the last one is what went wrong.
+        compare(policy.classifyExit(1, "fake: authorising\nfake: the network is down\n").lastError,
+                "fake: the network is down");
+        compare(policy.classifyExit(1, "  padded  ").lastError, "padded");
+    }
+
+    function test_a_run_that_said_nothing_is_named_by_its_code() {
+        compare(policy.classifyExit(1, "").lastError, "exit 1");
+        compare(policy.classifyExit(1, "\n \n").lastError, "exit 1");
+        compare(policy.classifyExit(1, null).lastError, "exit 1");
+        compare(policy.classifyExit("bad-json", "").lastError, "exit bad-json",
+                "not every failure has an exit code");
+    }
+
     function test_an_event_with_no_local_stamp_loses() {
         // A hand-edited file, or one the migration never reached. We cannot
         // claim it is newer than a server change we can read the date of.

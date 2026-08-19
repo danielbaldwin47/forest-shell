@@ -57,6 +57,24 @@ QtObject {
         return isNaN(ms) ? -1 : ms;
     }
 
+    /// A UTC stamp as epoch milliseconds, or `-1` for anything that is not one.
+    ///
+    /// The difference from `instantMs` is the naked form. ECMAScript reads a
+    /// date-time with no zone — `2026-10-25T00:30` — as **local** time, and the
+    /// stamps the Google mapping asks about are UTC by construction, so parsing
+    /// one naked is wrong by the local offset. That is invisible for most of the
+    /// year and wrong for exactly the hour a DST change moves: the offset looked
+    /// up for `00:30Z` on a European autumn Sunday decides whether an event sits
+    /// at 01:30 or 02:30 locally, and the naked read asks about the wrong
+    /// instant. A stamp that already names a zone (`Z`, `+02:00`) is left alone.
+    function utcMs(stamp: var): real {
+        if (typeof stamp !== "string" || stamp.length === 0)
+            return -1;
+        const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : stamp + "Z";
+        const ms = Date.parse(zoned);
+        return isNaN(ms) ? -1 : ms;
+    }
+
     /// Does the server's copy win?
     ///
     /// **Equal means the server wins.** Not a coin toss: equal timestamps are
@@ -89,6 +107,44 @@ QtObject {
         for (let i = 1; i < attempt && wait < policy.backoffCapMs; i++)
             wait = wait * 2;
         return Math.min(wait, policy.backoffCapMs);
+    }
+
+    /// What a finished helper run means: `{kind, lastError}`, where `kind` is
+    /// `"ok"`, `"auth"` or `"error"`.
+    ///
+    /// `3` is the helper's "this account is not connected", which is a state and
+    /// not an error: it is what a shell says when nobody has run the consent
+    /// flow yet, and retrying it on a backoff would be a subprocess every few
+    /// seconds forever. Everything else is an error, and its message is the
+    /// **last** line the helper complained on — the helper narrates progress on
+    /// stderr, so the earlier lines are what it was doing and the last one is
+    /// what went wrong. A run that said nothing at all is named by its code, so
+    /// the status line is never blank.
+    ///
+    /// `code` is a `var` because not every failure has an exit code: a run that
+    /// exits 0 with something that is not JSON is classified here too, under a
+    /// name (`"bad-json"`) rather than a number.
+    function classifyExit(code: var, stderrTail: var): var {
+        const spelled = String(code);
+        if (spelled === "0")
+            return { "kind": "ok", "lastError": "" };
+        if (spelled === "3")
+            return { "kind": "auth", "lastError": "not connected" };
+        return { "kind": "error",
+                 "lastError": policy.lastLine(stderrTail) || ("exit " + spelled) };
+    }
+
+    /// The last non-empty line of a stderr capture, trimmed. `""` for nothing.
+    function lastLine(text: var): string {
+        if (typeof text !== "string")
+            return "";
+        const lines = text.split("\n");
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (line.length > 0)
+                return line;
+        }
+        return "";
     }
 
     // --- the queue ------------------------------------------------------------

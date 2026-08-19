@@ -327,6 +327,20 @@ TestCase {
         compare(weather.units.coerce("imperial"), "imperial");
     }
 
+    function test_the_first_google_pull_asks_for_a_window_a_person_would_scroll() {
+        // Only the first pull, and the one after a 410: every round after that
+        // carries a syncToken and is told what changed. So this is how much
+        // history a freshly connected account brings down, and both ends are
+        // clamped — a hand-edited 1 would hide next Monday, and an unbounded
+        // one is the decade of dentist appointments the account has kept.
+        const google = settings.spec.calendar.google;
+        compare(google.windowDays.def, 120);
+        compare(google.windowDays.coerce(1), 7);
+        compare(google.windowDays.coerce(7), 7);
+        compare(google.windowDays.coerce(120), 120);
+        compare(google.windowDays.coerce(99999), 730);
+    }
+
     function test_a_hand_edited_sample_interval_cannot_become_a_busy_loop() {
         // A zero-interval timer is four file reads in a tight loop; the floor
         // is what a hand-edit lands on instead.

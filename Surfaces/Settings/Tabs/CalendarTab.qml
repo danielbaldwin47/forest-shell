@@ -1,8 +1,9 @@
 // Calendar — the Google account the calendar syncs with (#calendar).
 //
-// Three controls, and deliberately only three: whether to sync at all, which
-// calendar of the account, and how often a background round runs. Everything
-// else about the connection is not a setting. The client credentials live in
+// Four controls, and deliberately only four: whether to sync at all, which
+// calendar of the account, how often a background round runs, and how much
+// history the first round brings down. Everything else about the connection is
+// not a setting. The client credentials live in
 // `~/.config/forest-shell/google-oauth.json` and the token in
 // `~/.local/share/forest-shell/calendar/google-token.json`, both 0600 and both
 // written by `tools/gcal-sync.py`; a settings file is hand-edited, copied
@@ -54,8 +55,8 @@ TabPage {
     SettingRow {
         label: "Calendar"
         hint: "`primary` is the calendar the account is named after. A shared or secondary "
-              + "one is its address — `…@group.calendar.google.com` — which is what "
-              + "`tools/gcal-sync.py calendars` prints."
+              + "one is its address — `…@group.calendar.google.com` — which Google Calendar "
+              + "shows under a calendar's Settings, as its Calendar ID."
         binding: calendarBinding
 
         ConfigBinding { id: calendarBinding; path: "calendar.google.calendarId" }
@@ -73,5 +74,17 @@ TabPage {
         ConfigBinding { id: intervalBinding; path: "calendar.google.intervalMin" }
 
         SettingSlider { binding: intervalBinding; from: 1; to: 240 }
+    }
+
+    SettingRow {
+        label: "First pull window"
+        hint: "Days either side of today the **first** sync asks for. Later rounds carry a "
+              + "sync token and are told what changed, so this is not a filter on them — it "
+              + "is how much history a freshly connected account brings down."
+        binding: windowBinding
+
+        ConfigBinding { id: windowBinding; path: "calendar.google.windowDays" }
+
+        SettingSlider { binding: windowBinding; from: 7; to: 730 }
     }
 }

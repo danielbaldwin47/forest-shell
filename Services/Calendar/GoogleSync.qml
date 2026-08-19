@@ -36,15 +36,25 @@ pragma Singleton
 //
 // ## The log contract
 //
-// Six lines, and they are what `tools/calendar-harness.sh` asserts on, so their
-// shape is the contract rather than a debugging aid:
+// These lines are what `tools/calendar-harness.sh` asserts on, so their shape is
+// the contract rather than a debugging aid. Every one of them, in the order a
+// round meets them:
 //
-//   calendar: sync pull N changes
-//   calendar: sync push evt-N ok|failed
-//   calendar: sync auth needed
-//   calendar: sync error <code>
-//   calendar: sync idle <iso>
-//   calendar: sync full resync
+//   calendar: sync on                      the setting was switched on
+//   calendar: sync off                     …and off, on the same transition
+//   calendar: sync off — nothing to do     a round was asked for while off
+//   calendar: sync auth already running    a second connect during a consent flow
+//   calendar: sync connected <email>       a consent flow finished
+//   calendar: sync full resync             the token was too old; starting over
+//   calendar: sync pull N changes          what the pull decided to apply
+//   calendar: sync push evt-N ok|failed    one line per queued op, per result
+//   calendar: sync auth needed             exit 3 — nobody has consented yet
+//   calendar: sync error <code>            a warning; the code is the helper's
+//   calendar: sync idle <iso>              the round ended, at this instant
+//
+// And one at startup, through `Logger.stage`:
+//
+//   calendar sync armed (on|off, helper <path>)
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -105,6 +115,13 @@ Singleton {
     /// to, so this outlives either process.
     property bool busy: false
 
+    /// Set when an edit landed while a round was already in flight. A round is
+    /// not about a particular edit — the queue is — but the *timing* is: the
+    /// debounce fired, found the round busy and dropped its trigger, so without
+    /// this the edit waits for the interval timer, which is five minutes by
+    /// default. `settle()` re-arms the debounce instead.
+    property bool dirtyDuringRound: false
+
     /// Set when a plan came back needing a full resync, and cleared by the pull
     /// that serves it. One retry and not a loop: a second 410 in a row on an
     /// empty token is the server saying something this shell cannot fix by
@@ -142,11 +159,16 @@ Singleton {
     /// the mapping as a *function* rather than a number on purpose: an event
     /// that straddles a DST change needs a different answer for its start than
     /// for its end, and only asking per instant gives one.
+    ///
+    /// The stamp is UTC, and it is `SyncPolicy.utcMs` that says so: a naked
+    /// `2026-10-25T00:30` is *local* to ECMAScript, which is the wrong instant
+    /// by exactly the offset being asked for — invisible most of the year and
+    /// wrong for the hour a DST change moves.
     function offsetAt(utcStamp: string): real {
-        const at = new Date(utcStamp);
-        if (isNaN(at.getTime()))
+        const ms = root.policy.utcMs(utcStamp);
+        if (ms === -1)
             return -new Date().getTimezoneOffset();
-        return -at.getTimezoneOffset();
+        return -new Date(ms).getTimezoneOffset();
     }
 
     // --- the address book, as the mapping wants it -------------------------------
@@ -207,9 +229,18 @@ Singleton {
 
     // --- the pull ------------------------------------------------------------------
 
+    /// A pull with a token asks for what changed and nothing else, so a window
+    /// on it would be a filter the server has already applied — and worse than
+    /// nothing, because a change that moved an event *out* of the window is one
+    /// the token would otherwise have told us about. The window belongs to the
+    /// full pull: the first round on a machine, and the one after a 410, are the
+    /// two moments the whole calendar is on offer and a decade of it is not
+    /// wanted.
     function startPull(token: string): void {
-        pull.command = root.helperCommand(
-            ["pull", "--calendar", root.calendarId, "--sync-token", token || ""]);
+        const args = ["pull", "--calendar", root.calendarId, "--sync-token", token || ""];
+        if (!token)
+            args.push("--window", String(Math.max(1, root.settings.windowDays)));
+        pull.command = root.helperCommand(args);
         pull.running = true;
     }
 
@@ -329,19 +360,23 @@ Singleton {
 
     // --- endings ---------------------------------------------------------------
 
-    /// True when the run failed, having already said so. `3` is the helper's
-    /// "this account is not connected", which is a state and not an error: it is
-    /// what a shell says when nobody has run the consent flow yet, and retrying
-    /// it on a backoff would be a subprocess every few seconds forever.
+    /// True when the run failed, having already said so. What a code *means* —
+    /// and what an error is called on the status line — is `SyncPolicy`'s to
+    /// decide, so it can be stated at the first seam; this reads the verdict.
     function failed(exitCode: int, complaint: string): bool {
-        if (exitCode === 0)
+        const verdict = root.policy.classifyExit(exitCode, complaint);
+        if (verdict.kind === "ok")
             return false;
-        if (exitCode === 3) {
+        if (verdict.kind === "auth") {
+            // A state, not an error: nobody has run the consent flow yet, and a
+            // backoff around that would be a subprocess every few seconds
+            // forever. No `attempt`, therefore, and nothing to retry.
             Logger.log("calendar", "sync auth needed");
             root.status = "auth";
-            root.lastError = "not connected";
+            root.lastError = verdict.lastError;
             root.busy = false;
             root.retryingFull = false;
+            root.dirtyDuringRound = false;
             return true;
         }
         root.fail(String(exitCode), complaint);
@@ -351,10 +386,16 @@ Singleton {
     function fail(code: string, complaint: string): void {
         Logger.warn("calendar", "sync error " + code);
         root.status = "error";
-        root.lastError = (complaint || "").trim().split("\n").pop() || ("exit " + code);
+        root.lastError = root.policy.classifyExit(code, complaint).lastError;
         root.attempt += 1;
         root.busy = false;
         root.retryingFull = false;
+        // The edit that arrived mid-round is not lost by dropping the flag here:
+        // it is in `pendingOps`, and the backoff below is the round that drains
+        // it. Re-arming the three-second debounce as well would be a second
+        // round inside the backoff, which is the thing the backoff exists to
+        // stop.
+        root.dirtyDuringRound = false;
         retry.interval = root.policy.backoffMs(root.attempt);
         retry.restart();
     }
@@ -366,6 +407,14 @@ Singleton {
         root.lastSync = root.store.nowStamp();
         retry.stop();
         Logger.log("calendar", "sync idle " + root.lastSync);
+        if (root.dirtyDuringRound) {
+            // An edit made while this round was in flight. The round is over and
+            // it went out with nothing, so the debounce is re-armed rather than
+            // left to the interval timer — five minutes is a long time to watch
+            // an edit not reach a phone.
+            root.dirtyDuringRound = false;
+            debounce.restart();
+        }
     }
 
     function parse(text: string): var {
@@ -409,12 +458,18 @@ Singleton {
     }
 
     onEnabledChanged: {
+        // Logged on the transition, and not only when something asks for a
+        // round: this is a setting changed in a file, so the shell saying it
+        // read it is the only evidence there is that the change arrived.
         if (root.enabled) {
+            Logger.log("calendar", "sync on");
             if (root.status === "off")
                 root.status = "idle";
         } else {
+            Logger.log("calendar", "sync off");
             root.status = "off";
             retry.stop();
+            root.dirtyDuringRound = false;
         }
     }
 
@@ -482,7 +537,17 @@ Singleton {
         // crossed. Long enough to be one push, short enough that letting go of
         // an event and looking at your phone shows it there.
         interval: 3000
-        onTriggered: root.sync()
+        onTriggered: {
+            // A trigger that lands mid-round is dropped by `sync()`, so the
+            // round remembers that it happened and re-arms this timer when it
+            // ends. Otherwise the edit that arrived a moment too late waits for
+            // the interval timer.
+            if (root.busy) {
+                root.dirtyDuringRound = true;
+                return;
+            }
+            root.sync();
+        }
     }
 
     Timer {
@@ -541,9 +606,15 @@ Singleton {
 
         onExited: exitCode => {
             if (exitCode !== 0) {
-                Logger.warn("calendar", "sync error " + exitCode);
+                // The same ending as any other failed run — one `fail()`, so the
+                // attempt count and the backoff apply here too — and it says
+                // why it died in the helper's own last line rather than in a
+                // fixed string that is true of every cause. The fixed string is
+                // kept for the flow that died silently. `auth` and not `error`
+                // afterwards, because what a person has to do about it is the
+                // consent flow either way.
+                root.fail(String(exitCode), authErr.text || "consent failed");
                 root.status = "auth";
-                root.lastError = "consent failed";
                 return;
             }
             const answer = root.parse(authOut.text) || {};

@@ -23,8 +23,6 @@ fi
 TOTAL_STAGES=0
 
 _STAGE_INDEX=0
-ENV_FILE="${ENV_FILE:-.env}"
-WRITTEN_ENV=()    # KEYs written to ENV_FILE this run
 WRITTEN_SECRET=() # secret NAMEs set this run
 SKIPPED=()        # things we couldn't do (e.g. gh missing)
 
@@ -42,7 +40,7 @@ banner() {
   printf '%s  %s stages%s\n\n' "$DIM" "$TOTAL_STAGES" "$RESET"
   printf '%s  You drive the browser; this wizard tells you exactly what to do and\n' "$DIM"
   printf '  captures the values you copy back. Stop any time with Ctrl-C and re-run\n'
-  printf '  later — it remembers values already saved.%s\n' "$RESET"
+  printf '  later — the stages already done are cheap to repeat.%s\n' "$RESET"
   pause "Ready to start?"
 }
 
@@ -88,54 +86,25 @@ confirm() {
   [[ "$reply" =~ ^[Yy] ]]
 }
 
-# _existing KEY — current value of KEY in ENV_FILE, if any.
-_existing() {
-  [[ -f "$ENV_FILE" ]] || return 1
-  local line; line=$(grep -E "^${1}=" "$ENV_FILE" | tail -n1) || return 1
-  printf '%s' "${line#*=}"
-}
-
-# ask KEY "Prompt" — read a value into $KEY. Offers the existing .env value as
-# a default on re-runs (Enter keeps it). Visible input (non-secret).
+# ask KEY "Prompt" — read a value into $KEY. Visible input (non-secret).
+#
+# No remembered default: nothing this wizard collects is kept anywhere it could
+# read back. The client id and secret go straight into google-oauth.json at
+# 0600, which is the one file that may hold them.
 ask() {
-  local key="$1" prompt="$2" current input
-  current=$(_existing "$key" || true)
-  if [[ -n "$current" ]]; then
-    printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
-  else
-    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
-  fi
+  local key="$1" prompt="$2" input
+  printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
   read -r input || true
-  [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
 }
 
 # ask_secret KEY "Prompt" — like ask, but input is hidden.
 ask_secret() {
-  local key="$1" prompt="$2" current input
-  current=$(_existing "$key" || true)
-  if [[ -n "$current" ]]; then
-    printf '  %s%s%s %s[Enter keeps current]%s ' "$BOLD" "$prompt" "$RESET" "$DIM" "$RESET"
-  else
-    printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
-  fi
+  local key="$1" prompt="$2" input
+  printf '  %s%s%s ' "$BOLD" "$prompt" "$RESET"
   read -rs input || true
   printf '\n'
-  [[ -z "$input" && -n "$current" ]] && input="$current"
   printf -v "$key" '%s' "$input"
-}
-
-# write_env KEY VALUE — upsert KEY=VALUE into ENV_FILE (creates it; replaces
-# any existing line). Idempotent.
-write_env() {
-  local key="$1" value="$2" tmp
-  touch "$ENV_FILE"
-  tmp=$(mktemp)
-  grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
-  printf '%s=%s\n' "$key" "$value" >> "$tmp"
-  mv "$tmp" "$ENV_FILE"
-  WRITTEN_ENV+=("$key")
-  printf '  %s✓ wrote%s %s → %s\n' "$GREEN" "$RESET" "$key" "$ENV_FILE"
 }
 
 # set_secret NAME VALUE — set a GitHub Actions repo secret via gh. Falls back
@@ -170,7 +139,6 @@ set_var() {
 finish() {
   _clear
   printf '\n%s%s  ✓ Setup complete%s\n' "$BOLD" "$GREEN" "$RESET"
-  (( ${#WRITTEN_ENV[@]} ))    && note "wrote ${#WRITTEN_ENV[@]} value(s) to $ENV_FILE: ${WRITTEN_ENV[*]}"
   (( ${#WRITTEN_SECRET[@]} )) && note "set ${#WRITTEN_SECRET[@]} GitHub secret(s): ${WRITTEN_SECRET[*]}"
   if (( ${#SKIPPED[@]} )); then
     printf '\n'; warn "still to do by hand:"
@@ -199,11 +167,6 @@ REPO=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 OAUTH_FILE="${FOREST_GCAL_OAUTH:-${XDG_CONFIG_HOME:-$HOME/.config}/forest-shell/google-oauth.json}"
 TOKEN_FILE="${FOREST_GCAL_TOKEN:-${XDG_DATA_HOME:-$HOME/.local/share}/forest-shell/calendar/google-token.json}"
 SHELL_QML="$REPO/shell.qml"
-
-# The library's `.env` machinery is for wizards that fill one in. This one's
-# only secret goes to google-oauth.json at 0600 instead, so point the default
-# somewhere that reads back empty and never gets written.
-ENV_FILE=/dev/null
 
 CONSOLE_CREDENTIALS="https://console.cloud.google.com/apis/credentials"
 CONSOLE_LIBRARY="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
@@ -355,7 +318,7 @@ fi
 step "Settings → Calendar → 'Sync with Google': switch it on."
 step "Leave 'Calendar' on 'primary' unless you sync a shared one; leave the"
 step "  round interval at 5 minutes."
-note "a shared calendar's id is an address — \`python3 tools/gcal-sync.py calendars\` lists them"
+note "a shared calendar's id is an address — Google Calendar shows it as that calendar's Calendar ID"
 pause "Sync switched on?"
 
 # ── 8 ─────────────────────────────────────────────────────────────────────

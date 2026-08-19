@@ -37,6 +37,11 @@
 #                         The pushes file says what left the shell; this says
 #                         whether a *process* did — which is how "sync is off, so
 #                         nothing ran" and "two triggers, one helper" are asked.
+#   GCAL_FAKE_ARGS        append one line per invocation, the whole argv as the
+#                         shell spelled it. Flags that only a full pull carries
+#                         (`--window`) are past seam 1 and live nowhere else: a
+#                         policy test can state what the number should be, and
+#                         only this says the process was told it.
 #
 # It also prints a bearer token nobody should ever see again. That is a control,
 # not decoration: `refute_since 'ya29\.'` over a log is a check that passes just
@@ -59,6 +64,7 @@ cmd="${1:-}"
 shift || true
 
 sync_token=""
+raw_args="$*"
 while (( $# )); do
     case "$1" in
         --sync-token) sync_token="${2:-}"; shift 2 ;;
@@ -70,6 +76,10 @@ done
 
 if [[ -n "${GCAL_FAKE_RUNS:-}" ]]; then
     printf '%s %s\n' "${mode:-none}" "${cmd:-none}" >> "$GCAL_FAKE_RUNS"
+fi
+
+if [[ -n "${GCAL_FAKE_ARGS:-}" ]]; then
+    printf '%s %s\n' "${cmd:-none}" "$raw_args" >> "$GCAL_FAKE_ARGS"
 fi
 
 # Before the mode gate, because "the token was there to leak" has to be true of

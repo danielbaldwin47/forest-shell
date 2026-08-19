@@ -147,15 +147,18 @@ cp "$REPO/tools/fixtures/calendar-contacts.json" "$CONTACTS"
 GCAL_PUSHES="$SCRATCH/pushes.jsonl"
 GCAL_MODE="$SCRATCH/gcal-mode"
 GCAL_RUNS="$SCRATCH/gcal-runs"
+GCAL_ARGS="$SCRATCH/gcal-args"
 : > "$GCAL_PUSHES"
 : > "$GCAL_MODE"
 : > "$GCAL_RUNS"
+: > "$GCAL_ARGS"
 
 NESTED_ENV=("XDG_CONFIG_HOME=$SCRATCH/config" "XDG_STATE_HOME=$SCRATCH/state"
             "XDG_DATA_HOME=$SCRATCH/data"
             "FOREST_GCAL_HELPER=$REPO/tools/fixtures/gcal-fake.sh"
             "GCAL_FAKE_PUSHES=$GCAL_PUSHES"
             "GCAL_FAKE_RUNS=$GCAL_RUNS"
+            "GCAL_FAKE_ARGS=$GCAL_ARGS"
             "GCAL_FAKE_MODE_FILE=$GCAL_MODE")
 
 nested_shell shell.qml 'calendar window armed' || exit 1
@@ -957,6 +960,8 @@ SETTINGS="$SCRATCH/config/forest-shell/settings.json"
 ## a mark, never the whole thing — because this section runs several rounds and
 ## every question here is about one of them.
 runs_since() { tail -n "+$(($1 + 1))" "$GCAL_RUNS" 2>/dev/null; }
+args_lines() { wc -l < "$GCAL_ARGS" 2>/dev/null || echo 0; }
+args_since() { tail -n "+$(($1 + 1))" "$GCAL_ARGS" 2>/dev/null; }
 runs_lines() { wc -l < "$GCAL_RUNS" 2>/dev/null || echo 0; }
 pushes_lines() { wc -l < "$GCAL_PUSHES" 2>/dev/null || echo 0; }
 
@@ -994,17 +999,30 @@ with open(path, "w") as handle:
     json.dump(doc, handle, indent=2)
     handle.write("\n")
 PY
-expect_since "$mark" 'config: reloaded .*settings\.json \(1 key\(s\) changed\)' \
+# The shell's own line and not `config: reloaded`: the reload proves a file was
+# re-read, and this proves the service that reads it saw the change. They are
+# different claims, and the second is the one this section is about.
+expect_since "$mark" 'calendar: sync on' \
     'switching sync on in settings.json is picked up without a restart'
 
 # The first round. No syncToken yet, so the fake answers as a full pull does:
 # two events, one timed with a guest and a meeting room, one all-day.
 mark=$(log_lines)
+args_mark=$(args_lines)
 ipc sync > /dev/null
 expect_since "$mark" 'calendar: sync pull 2 changes' \
     'a round pulls the fake helper'"'"'s two events'
 expect_since "$mark" 'calendar: sync idle [0-9]{4}-[0-9]{2}-[0-9]{2}T' \
     'the round ends by saying when it ended'
+
+# `--window` is a flag only a *full* pull carries, and nothing at the first seam
+# can see an argv — `SettingsSchema` states the number and `SyncPolicy` never
+# meets it. This is the only place the claim "the process was told" is checkable.
+if args_since "$args_mark" | grep -qE '^pull .*--window [0-9]+'; then
+    nested_pass 'the first pull — no token yet — carries a --window'
+else
+    nested_fail "a full pull went out without a --window: $(args_since "$args_mark" | tr '\n' '|')"
+fi
 
 # The log is the shell'"'"'s claim; the file is the evidence. The store writes on a
 # 250ms debounce, so this polls rather than reads once.
@@ -1045,12 +1063,21 @@ fi
 # difference between an incremental pull and a full one. The fake answers an
 # incremental pull with nothing, which is the shape of almost every real round.
 pushes_mark=$(pushes_lines)
+args_mark=$(args_lines)
 mark=$(log_lines)
 ipc sync > /dev/null
 expect_since "$mark" 'calendar: sync pull 0 changes' \
     'the next round is incremental — the syncToken was kept'
 expect_since "$mark" 'calendar: sync idle [0-9]{4}' \
     'and finishes rather than hanging on an empty answer'
+# …and carries no window. A token pull asks what changed, and a change that
+# moved an event *out* of the window is one the server would then not mention —
+# so a window here is worse than a filter, it is a hole.
+if args_since "$args_mark" | grep -qE '^pull .*--window'; then
+    nested_fail "an incremental pull carried a --window: $(args_since "$args_mark" | tr '\n' '|')"
+else
+    nested_pass 'and asks for no --window — the token already says what changed'
+fi
 # The round before it uploaded the whole seeded calendar and was told each
 # event's `googleId` and `updated`. If any of that was dropped on the way back
 # into the store, every round from here to forever would upload it again — the
@@ -1348,7 +1375,7 @@ fi
 # fails instead of congratulating itself — several blocks above only run when the
 # ones before them found something to aim at, and "all calendar checks passed" is
 # a sentence a half-run could print. Bump it deliberately when a check is added.
-CALENDAR_EXPECTED=120
+CALENDAR_EXPECTED=122
 
 printf '\n'
 printf 'calendar: %s passed, %s failed, expected %s\n' \

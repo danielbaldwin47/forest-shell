@@ -564,8 +564,8 @@ QtObject {
 
                 // Which calendar of that account. `primary` is the one the
                 // account is named after; a shared or secondary calendar is its
-                // address (`…@group.calendar.google.com`), which is what the
-                // helper's `calendars` subcommand prints.
+                // address (`…@group.calendar.google.com`), which Google Calendar
+                // shows as the Calendar ID in that calendar's own settings.
                 calendarId: { def: "primary", coerce: c.string,
                               label: "The Google calendar to sync with" },
 
@@ -577,7 +577,21 @@ QtObject {
                 // process, and a shell doing that every few seconds is a shell
                 // the idle budget (#22 §5) can see.
                 intervalMin: { def: 5, coerce: c.integer(1, 240),
-                               label: "Minutes between background sync rounds" }
+                               label: "Minutes between background sync rounds" },
+
+                // How far either side of today a *full* pull asks for. Only the
+                // full pull: an incremental one carries a syncToken and the
+                // server decides what changed, so a window on it would filter
+                // out the very changes it exists to deliver. The two full pulls
+                // are the first round on a machine and the one after a 410.
+                //
+                // Four months, because that is a calendar somebody scrolls
+                // through rather than the decade of dentist appointments an
+                // account has accumulated, and because the first pull is the
+                // one that must not take a minute. The floor is a week — a
+                // shorter window would hide next Monday.
+                windowDays: { def: 120, coerce: c.integer(7, 730),
+                              label: "Days either side of today a first sync pulls" }
             }
         },
 

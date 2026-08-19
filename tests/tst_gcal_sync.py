@@ -18,9 +18,9 @@ everything the suite did, not at one convenient spot.
 Stdlib only, same rule as the tool: this runs inside a gate.
 """
 
+import base64
 import contextlib
 import hashlib
-import base64
 import importlib.util
 import io
 import json
@@ -313,22 +313,6 @@ def test_status(root):
     check("status reports expiry and nothing else about the token",
           obj["expiresAt"].endswith("Z") and obj["expired"] is False
           and "access_token" not in obj and "refresh_token" not in obj)
-
-
-def test_calendars(root):
-    workspace(root, "calendars", token=stored_token())
-    calls = fake_http(lambda call, n: (200, fixture("calendar-list.json")))
-    code, obj, _ = run(["calendars"])
-
-    check("calendars exits 0", code == 0, str(code))
-    check("calendars flattens the list to what the shell needs",
-          [c["id"] for c in obj["calendars"]]
-          == ["daniel@example.com", "en.uk#holiday@group.v.calendar.google.com"])
-    check("calendars marks the primary one",
-          obj["calendars"][0]["primary"] is True
-          and obj["calendars"][1]["primary"] is False)
-    check("calendars asks calendarList, not events",
-          calls[0]["url"].endswith("/users/me/calendarList"), calls[0]["url"])
 
 
 def test_push(root):
@@ -788,7 +772,13 @@ def test_probe_http_is_the_only_chokepoint():
 
 
 def test_probe_existing_token_file_is_narrowed(root):
-    """Replacing a token file left world-readable by an older run narrows it."""
+    """Replacing a token file left world-readable by an older run narrows it.
+
+    The *directory* is left exactly as it was found. It is shared — events.json
+    lives in it — so a helper that tightened somebody's own choice of mode would
+    be reaching outside the one file it owns. The secret's protection is the
+    0600, which does not depend on the directory's mode.
+    """
     tokfile = workspace(root, "narrow", token=stored_token(expires_in=-10))
     os.chmod(tokfile, 0o644)
     os.chmod(tokfile.parent, 0o755)
@@ -796,8 +786,20 @@ def test_probe_existing_token_file_is_narrowed(root):
     code, _, _ = run(["refresh"])
     check("refreshing over a 0644 token file leaves it 0600",
           code == 0 and mode_of(tokfile) == 0o600, oct(mode_of(tokfile)))
-    check("the directory holding it is 0700 too",
-          mode_of(tokfile.parent) == 0o700, oct(mode_of(tokfile.parent)))
+    check("and leaves the shared directory's mode alone",
+          mode_of(tokfile.parent) == 0o755, oct(mode_of(tokfile.parent)))
+
+
+def test_probe_a_directory_this_helper_creates_is_0700(root):
+    """The one case the helper does decide: a token directory it made itself."""
+    tokfile = workspace(root, "fresh-dir", token=stored_token())
+    shutil.rmtree(tokfile.parent, ignore_errors=True)
+    check("the token directory did not exist before the write",
+          not tokfile.parent.exists())
+    written = gcal.save_token(stored_token())
+    check("a token directory this helper created is 0700",
+          mode_of(written.parent) == 0o700, oct(mode_of(written.parent)))
+    check("and the token in it is 0600", mode_of(written) == 0o600, oct(mode_of(written)))
 
 
 def main():
@@ -817,7 +819,6 @@ def main():
         test_refresh_invalid_grant(root)
         test_no_token_is_auth(root)
         test_status(root)
-        test_calendars(root)
         test_push(root)
         test_machine_timezone()
         test_fill_timezone()
@@ -837,6 +838,7 @@ def main():
         test_probe_partial_auth_batch_still_exits_0(root)
         test_probe_http_is_the_only_chokepoint()
         test_probe_existing_token_file_is_narrowed(root)
+        test_probe_a_directory_this_helper_creates_is_0700(root)
         test_no_secret_reached_stdout()
     finally:
         gcal._http, gcal.open_in_browser = real_http, real_opener

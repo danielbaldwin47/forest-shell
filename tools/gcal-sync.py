@@ -9,7 +9,6 @@ this and parses one JSON object.
 
     tools/gcal-sync.py auth
     tools/gcal-sync.py status
-    tools/gcal-sync.py calendars
     tools/gcal-sync.py pull [--calendar ID] [--sync-token T] [--window DAYS]
     tools/gcal-sync.py push --stdin < ops.json
     tools/gcal-sync.py refresh
@@ -61,7 +60,6 @@ API_ROOT = "https://www.googleapis.com/calendar/v3"
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
 
@@ -178,13 +176,20 @@ def save_token(tok):
     `os.open` sets the mode at creation so the secret is never briefly world
     readable; umask can only take bits away, so chmod restates it. The rename
     is what makes a half-written file impossible.
+
+    The 0700 is on the directory only when this call is what created it. The
+    directory is shared — `calendar/` holds events.json too — so narrowing one
+    somebody already has is this helper reaching outside its own file to change
+    a permission nobody asked it to. The secret's protection is the 0600 below,
+    which does not depend on the directory's mode.
     """
     path = token_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
@@ -540,26 +545,6 @@ def cmd_refresh(args):
     return {"ok": True, "expiresAt": _rfc3339(tok["expires_at"])}, 0
 
 
-def cmd_calendars(args):
-    tok = access_token()
-    status, obj = _http("GET", f"{API_ROOT}/users/me/calendarList",
-                        params={"minAccessRole": "reader", "maxResults": 250},
-                        headers=_auth_header(tok))
-    if status == 401:
-        raise AuthError("calendarList refused the token")
-    if status != 200:
-        raise ToolError(f"calendarList: {_api_error(obj, status)}")
-    calendars = [{
-        "id": item.get("id", ""),
-        "summary": item.get("summary", ""),
-        "primary": bool(item.get("primary")),
-        "accessRole": item.get("accessRole", ""),
-        "timeZone": item.get("timeZone", ""),
-        "backgroundColor": item.get("backgroundColor", ""),
-    } for item in obj.get("items", [])]
-    return {"ok": True, "calendars": calendars}, 0
-
-
 def cmd_pull(args):
     tok = access_token()
     cal = urllib.parse.quote(args.calendar, safe="")
@@ -703,7 +688,6 @@ def build_parser():
     subs.add_parser("auth", help="run the loopback PKCE consent flow")
     subs.add_parser("status", help="report the stored token, never its value")
     subs.add_parser("refresh", help="spend the refresh token now")
-    subs.add_parser("calendars", help="list the calendars this account reads")
 
     pull = subs.add_parser("pull", help="list events, incrementally when able")
     pull.add_argument("--calendar", default="primary")
@@ -722,7 +706,6 @@ HANDLERS = {
     "auth": cmd_auth,
     "status": cmd_status,
     "refresh": cmd_refresh,
-    "calendars": cmd_calendars,
     "pull": cmd_pull,
     "push": cmd_push,
 }

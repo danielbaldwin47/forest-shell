@@ -303,8 +303,9 @@ client of type *Desktop app*, and a consent screen you are a test user on.
 `tools/gcal-connect-wizard.sh` walks all of it, writes the credentials file, runs
 the consent flow and prints the account it connected. Then Settings → Calendar →
 *Sync with Google*, which is `calendar.google.enabled`; the same tab picks the
-calendar (`primary`, or a shared one's `…@group.calendar.google.com` address —
-`python3 tools/gcal-sync.py calendars` lists them) and the round interval.
+calendar (`primary`, or a shared one's `…@group.calendar.google.com` address,
+which Google Calendar shows as that calendar's Calendar ID), the round interval,
+and how many days either side of today the first pull asks for.
 
 **Where the secrets live**, and nowhere else: client credentials in
 `$XDG_CONFIG_HOME/forest-shell/google-oauth.json`, tokens in

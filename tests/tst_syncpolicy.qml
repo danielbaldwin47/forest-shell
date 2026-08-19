@@ -371,6 +371,43 @@ TestCase {
         compare(policy.utcMs(null), -1);
     }
 
+    function test_every_zone_suffix_rfc3339_allows_counts_as_zoned() {
+        // The two the first version of the test missed, and both are real: RFC
+        // 3339's grammar permits a lowercase `z`, and a bare hour offset
+        // (`+02`, no minutes) is what several calendar exporters write. Read as
+        // *naked*, either one gets a `Z` appended to a stamp that already named
+        // a zone — `…+02Z` — which `Date.parse` refuses outright, so a stamp
+        // that was perfectly readable comes back `-1` and the event it dates
+        // loses every conflict it is in.
+        compare(policy.utcMs("2026-10-25T00:30:00z"), Date.UTC(2026, 9, 25, 0, 30),
+                "a lowercase z is a zone");
+        compare(policy.utcMs("2026-10-25T02:30:00+02"), Date.UTC(2026, 9, 25, 0, 30),
+                "an hour-only offset is a zone");
+        compare(policy.utcMs("2026-10-25T02:30:00+0200"), Date.UTC(2026, 9, 25, 0, 30),
+                "and so is a colonless one");
+        compare(policy.utcMs("2026-10-24T22:30:00-02"), Date.UTC(2026, 9, 25, 0, 30),
+                "west of UTC too");
+    }
+
+    // --- what reaches a log -----------------------------------------------------
+
+    function test_a_bearer_token_never_survives_a_scrub() {
+        // The prefix goes too. The only control on this is a refutation over
+        // the shell log for `ya29\.`, so a scrub that kept the literal prefix
+        // would fail its own check and a leak would be indistinguishable from a
+        // clean run. The words are what keep "a token was there" sayable.
+        compare(policy.scrub("authorising with bearer ya29.SECRET-abc_123"),
+                "authorising with bearer <bearer redacted>");
+        compare(policy.scrub("ya29.one and ya29.two"),
+                "<bearer redacted> and <bearer redacted>",
+                "every one of them, not just the first");
+        compare(policy.scrub("no account is connected"), "no account is connected",
+                "text with nothing token-shaped in it is left alone");
+        compare(policy.scrub(""), "");
+        compare(policy.scrub(null), "");
+        compare(policy.scrub(42), "");
+    }
+
     // --- how a run ended --------------------------------------------------------
 
     function test_exit_three_is_a_state_and_everything_else_is_an_error() {

@@ -790,6 +790,36 @@ def test_probe_existing_token_file_is_narrowed(root):
           mode_of(tokfile.parent) == 0o755, oct(mode_of(tokfile.parent)))
 
 
+def test_probe_a_world_writable_token_directory_is_narrowed(root):
+    """The one pre-existing directory the helper does change: a writable one.
+
+    0755 is a preference and is left alone (above). 0757 is a hole: the 0600 on
+    the token protects nothing when anyone can rename it out of the directory
+    and drop their own file in its place, so the mode has to come down or the
+    file mode is a claim the filesystem does not back.
+    """
+    tokfile = workspace(root, "wide-dir", token=stored_token(expires_in=-10))
+    os.chmod(tokfile.parent, 0o757)
+    fake_http(lambda call, n: (200, fixture("token-refresh-rotated.json")))
+    code, _, _ = run(["refresh"])
+    check("a world-writable token directory is narrowed to 0700",
+          code == 0 and mode_of(tokfile.parent) == 0o700, oct(mode_of(tokfile.parent)))
+
+    group = workspace(root, "group-dir", token=stored_token(expires_in=-10))
+    os.chmod(group.parent, 0o775)
+    fake_http(lambda call, n: (200, fixture("token-refresh-rotated.json")))
+    code, _, _ = run(["refresh"])
+    check("and so is a group-writable one",
+          code == 0 and mode_of(group.parent) == 0o700, oct(mode_of(group.parent)))
+
+    readable = workspace(root, "readable-dir", token=stored_token(expires_in=-10))
+    os.chmod(readable.parent, 0o755)
+    fake_http(lambda call, n: (200, fixture("token-refresh-rotated.json")))
+    code, _, _ = run(["refresh"])
+    check("a merely readable one is somebody's choice and is left alone",
+          code == 0 and mode_of(readable.parent) == 0o755, oct(mode_of(readable.parent)))
+
+
 def test_probe_a_directory_this_helper_creates_is_0700(root):
     """The one case the helper does decide: a token directory it made itself."""
     tokfile = workspace(root, "fresh-dir", token=stored_token())
@@ -838,6 +868,7 @@ def main():
         test_probe_partial_auth_batch_still_exits_0(root)
         test_probe_http_is_the_only_chokepoint()
         test_probe_existing_token_file_is_narrowed(root)
+        test_probe_a_world_writable_token_directory_is_narrowed(root)
         test_probe_a_directory_this_helper_creates_is_0700(root)
         test_no_secret_reached_stdout()
     finally:

@@ -976,7 +976,11 @@ gcal_mark=$(log_lines)
 # calls `syncOnOpen`, so this counts those too.
 mark=$(log_lines)
 ipc sync > /dev/null
-expect_since "$mark" 'calendar: sync off' \
+# Anchored to the whole line the verb produces, not to `sync off` — which is
+# also a prefix of the *transition* line the setting change below logs. A loose
+# pattern here would pass on either, and the two are different claims: this one
+# is "the verb was refused", the one below is "the setting changed".
+expect_since "$mark" 'calendar: sync off — nothing to do' \
     'a sync asked for while the setting is off says so'
 if (( $(runs_lines) == 0 )); then
     nested_pass 'and runs no helper at all — not for the verb, and not for the opens above'
@@ -984,26 +988,52 @@ else
     nested_fail "sync is off and the helper ran $(runs_lines) time(s): $(tr '\n' ' ' < "$GCAL_RUNS")"
 fi
 
-mark=$(log_lines)
-python3 - "$SETTINGS" <<'PY'
+## set_enabled true|false — rewrite calendar.google.enabled in settings.json.
+set_enabled() {
+    python3 - "$SETTINGS" "$1" <<'PY'
 import json, sys
-path = sys.argv[1]
+path, wanted = sys.argv[1], sys.argv[2] == "true"
 try:
     with open(path) as handle:
         doc = json.load(handle)
 except (OSError, ValueError):
     doc = {}
-doc.setdefault("calendar", {}).setdefault("google", {})["enabled"] = True
+doc.setdefault("calendar", {}).setdefault("google", {})["enabled"] = wanted
 doc["calendar"]["google"]["calendarId"] = "primary"
 with open(path, "w") as handle:
     json.dump(doc, handle, indent=2)
     handle.write("\n")
 PY
+}
+
+mark=$(log_lines)
+set_enabled true
 # The shell's own line and not `config: reloaded`: the reload proves a file was
 # re-read, and this proves the service that reads it saw the change. They are
 # different claims, and the second is the one this section is about.
 expect_since "$mark" 'calendar: sync on' \
     'switching sync on in settings.json is picked up without a restart'
+
+# And the other direction, which until now nothing asked for. Two things are
+# being checked at once and both matter: that the *off* transition is logged as
+# well as the on one, and that the line is the bare transition — `sync off` and
+# not `sync off — nothing to do`, which is the verb being refused and would
+# arrive from a `sync` nobody asked for. Anchored to the end of the line, so
+# the refused-verb line cannot satisfy this check.
+mark=$(log_lines)
+set_enabled false
+expect_since "$mark" 'calendar: sync off' \
+    'and switching it back off is logged as a transition of its own'
+refute_since "$mark" 'calendar: sync off —' \
+    'and as the transition line, not the refused-verb one'
+
+# …and on again, which is the state the rest of this section runs in. This is
+# also the only evidence that the arm-time gate did not latch: a shell that only
+# ever logged the first transition would pass every check above and fail here.
+mark=$(log_lines)
+set_enabled true
+expect_since "$mark" 'calendar: sync on' \
+    'and on again — the transition log is not a one-shot'
 
 # The first round. No syncToken yet, so the fake answers as a full pull does:
 # two events, one timed with a guest and a meeting room, one all-day.
@@ -1115,7 +1145,8 @@ fi
 # The id is read off the file the way section 8 argues it must be, not written
 # down: two of the events in there now arrived from the fake helper, so the
 # highest id is not the fixture's any more.
-push_id="evt-$(python3 -c '
+next_event_id() {
+    printf 'evt-%s' "$(python3 -c '
 import json, re, sys
 events = json.load(open(sys.argv[1]))
 events = events["events"] if isinstance(events, dict) else events
@@ -1126,6 +1157,8 @@ for event in events:
         highest = max(highest, int(match.group(1)))
 print(highest + 1)
 ' "$EVENTS")"
+}
+push_id=$(next_event_id)
 mark=$(log_lines)
 made=$(ipc create 2026-08-21 840 30 'Pushed by the harness' 2>/dev/null)
 if ! grep -qa "$push_id" <<< "$made"; then
@@ -1146,6 +1179,46 @@ else
     fi
 fi
 
+# An edit made *inside* a round — the `dirtyDuringRound` case. The debounce
+# fires three seconds after the edit, finds the round still out, and drops its
+# trigger; without the flag the edit then waits for the five-minute interval
+# timer, which on a real calendar is "I moved it and my phone never saw it".
+#
+# `slow` is what makes the timing deliberate: a slow round is a two-second pull
+# and a two-second push, so an edit made at the start of one has its debounce
+# fire at three seconds with a second still to run. The assertion is the cheap
+# end of it — the helper ran again and the op is in the log by name — rather
+# than a read of the flag, which is a property no seam here can see.
+printf 'slow\n' > "$GCAL_MODE"
+dirty_id=$(next_event_id)
+runs_mark=$(runs_lines)
+mark=$(log_lines)
+ipc sync > /dev/null
+made=$(ipc create 2026-08-22 900 30 'Edited mid-round' 2>/dev/null)
+if ! grep -qa "$dirty_id" <<< "$made"; then
+    nested_fail "could not make an event mid-round (create answered '${made:-nothing}')"
+    nested_fail "and so could not check that a mid-round edit still reaches the helper"
+else
+    pushed=""
+    for _ in $(seq 1 60); do
+        if since "$mark" | grep -qaE "calendar: sync push $dirty_id ok"; then
+            pushed=yes; break
+        fi
+        sleep 0.1
+    done
+    if [[ -n "$pushed" ]]; then
+        nested_pass 'an edit made inside a round is pushed rather than left for the interval timer'
+    else
+        nested_fail "an edit made mid-round was never pushed: $(since "$mark" | grep -a 'calendar: sync' | tr '\n' '|')"
+    fi
+    if (( $(runs_lines) > runs_mark + 1 )); then
+        nested_pass 'and it took a second helper run to do it — the round it landed in had already gone out'
+    else
+        nested_fail "a mid-round edit produced $(( $(runs_lines) - runs_mark )) helper run(s), wanted more than 1"
+    fi
+fi
+: > "$GCAL_MODE"
+
 # Exit 3 is the helper saying no account is connected. A state and not an error:
 # the shell says so once and does not spend a subprocess every few seconds
 # retrying a consent flow nobody has run.
@@ -1156,6 +1229,24 @@ expect_since "$mark" 'calendar: sync auth needed' \
     'a helper that exits 3 is reported as an account to connect, not a failure'
 refute_since "$mark" 'calendar: sync error' \
     'and not also as an error'
+
+# A consent flow that dies, while the helper is still refusing. This is the path
+# that used to hand the surface the helper's raw stderr — and the fake's stderr
+# is a bearer token, so this is the run that would have leaked one. Two claims:
+# the shell says the flow failed, and neither the log nor the status a script
+# can read has the token in it.
+auth_mark=$(log_lines)
+ipc syncConnect > /dev/null
+expect_since "$auth_mark" 'calendar: sync auth failed 3' \
+    'a consent flow that dies says so, with the helper'"'"'s code'
+refute_since "$auth_mark" 'ya29\.' \
+    'and the stderr it logged was scrubbed of the bearer token in it'
+status=$(ipc syncStatus 2>/dev/null)
+if grep -qaE 'ya29\.' <<< "$status"; then
+    nested_fail "syncStatus rendered a bearer token: $status"
+else
+    nested_pass 'and syncStatus answers without one either'
+fi
 
 # Exit 1 is the other kind of bad news: a failure rather than a state. The shell
 # names the code — an error whose code is not in the log is a bug report that
@@ -1375,7 +1466,7 @@ fi
 # fails instead of congratulating itself — several blocks above only run when the
 # ones before them found something to aim at, and "all calendar checks passed" is
 # a sentence a half-run could print. Bump it deliberately when a check is added.
-CALENDAR_EXPECTED=122
+CALENDAR_EXPECTED=130
 
 printf '\n'
 printf 'calendar: %s passed, %s failed, expected %s\n' \

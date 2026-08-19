@@ -177,17 +177,30 @@ def save_token(tok):
     readable; umask can only take bits away, so chmod restates it. The rename
     is what makes a half-written file impossible.
 
-    The 0700 is on the directory only when this call is what created it. The
-    directory is shared — `calendar/` holds events.json too — so narrowing one
-    somebody already has is this helper reaching outside its own file to change
-    a permission nobody asked it to. The secret's protection is the 0600 below,
-    which does not depend on the directory's mode.
+    The directory is 0700 in two cases and left alone in every other one. It is
+    shared — `calendar/` holds events.json too — so narrowing somebody's own
+    choice of mode is this helper reaching outside the one file it owns, and a
+    merely *readable* directory (0755, which is what a plain mkdir under the
+    usual umask gives) is that choice. The two exceptions:
+
+      - a directory this call created, which is nobody's choice yet;
+      - a directory that is group- or world-**writable** (`0o022`). That is not
+        a preference, it is a hole: anyone who can write the directory can
+        rename the 0600 token out of it and drop their own in its place, so the
+        file mode below protects nothing there. Narrowing it is the only way
+        the 0600 means what it says.
     """
     path = token_path()
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
+    else:
+        try:
+            if os.stat(path.parent).st_mode & 0o022:
+                os.chmod(path.parent, 0o700)
         except OSError:
             pass
     tmp = path.with_name(path.name + ".tmp")

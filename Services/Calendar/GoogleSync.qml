@@ -43,12 +43,14 @@ pragma Singleton
 //   calendar: sync on                      the setting was switched on
 //   calendar: sync off                     …and off, on the same transition
 //   calendar: sync off — nothing to do     a round was asked for while off
-//   calendar: sync auth already running    a second connect during a consent flow
+//   calendar: sync connect refused (busy)  a second connect during a consent flow
 //   calendar: sync connected <email>       a consent flow finished
 //   calendar: sync full resync             the token was too old; starting over
 //   calendar: sync pull N changes          what the pull decided to apply
 //   calendar: sync push evt-N ok|failed    one line per queued op, per result
 //   calendar: sync auth needed             exit 3 — nobody has consented yet
+//   calendar: sync auth failed <code>      a warning; the consent flow died
+//   calendar: sync auth stderr: <text>     a warning; scrubbed of bearer tokens
 //   calendar: sync error <code>            a warning; the code is the helper's
 //   calendar: sync idle <iso>              the round ended, at this instant
 //
@@ -211,8 +213,13 @@ Singleton {
     /// listens on loopback. Runs whether or not `enabled` is set — connecting is
     /// how you get to a state where switching it on means anything.
     function connect(): void {
+        // Only a consent flow blocks a consent flow. A round in flight does
+        // *not*: the two have separate `Process`es and separate endings now, so
+        // consenting while a pull is out is an overlap the shell survives — and
+        // it is the overlap a person actually produces, because "sync is
+        // failing" is what makes them press Connect.
         if (auth.running) {
-            Logger.log("calendar", "sync auth already running");
+            Logger.log("calendar", "sync connect refused (busy)");
             return;
         }
         auth.command = root.helperCommand(["auth"]);
@@ -239,9 +246,42 @@ Singleton {
     function startPull(token: string): void {
         const args = ["pull", "--calendar", root.calendarId, "--sync-token", token || ""];
         if (!token)
-            args.push("--window", String(Math.max(1, root.settings.windowDays)));
+            args.push("--window", String(root.windowDays()));
         pull.command = root.helperCommand(args);
         pull.running = true;
+    }
+
+    /// How many days either side of today a full pull asks for.
+    ///
+    /// The fallback matters more than it looks. `root.settings.windowDays` is a
+    /// read through the config tree, and a tree that has not resolved yet — or
+    /// a section a migration has not filled in — answers `undefined`;
+    /// `Math.max(1, undefined)` is `NaN`, `String(NaN)` is `"NaN"`, and the
+    /// helper is then handed `--window NaN` on the one pull that decides how
+    /// much of somebody's calendar arrives. So a non-number falls back to the
+    /// schema's own default rather than to arithmetic.
+    function windowDays(): int {
+        const configured = Number(root.settings ? root.settings.windowDays : NaN);
+        if (!isFinite(configured) || configured < 1)
+            return root.windowDaysDefault;
+        return Math.max(1, Math.round(configured));
+    }
+
+    /// The schema's `calendar.google.windowDays.def`, read from the schema
+    /// itself so the two cannot drift, with a literal behind it for the case
+    /// where the schema object is not reachable (a test harness instantiating
+    /// this file without `Config`). Keep the literal equal to
+    /// `Core/SettingsSchema.qml`'s `windowDays: { def: … }`.
+    readonly property int windowDaysFallback: 120
+    readonly property int windowDaysDefault: {
+        try {
+            const leaf = Config.schema.spec.calendar.google.windowDays;
+            if (leaf && typeof leaf.def === "number" && isFinite(leaf.def))
+                return leaf.def;
+        } catch (error) {
+            // No schema reachable from here — the literal below is the answer.
+        }
+        return root.windowDaysFallback;
     }
 
     function finishPull(exitCode: int, text: string): void {
@@ -457,16 +497,26 @@ Singleton {
             root.writeState();
     }
 
+    /// Whether `onEnabledChanged` is a real transition yet. `enabled` is a
+    /// binding on the config tree, and the tree resolves *during* startup — so
+    /// the handler runs once before anyone changed anything, and a `sync on`
+    /// logged there is a transition the harness would read as the setting
+    /// having been switched. Armed at the end of `Component.onCompleted`, after
+    /// the arm line, so the log reads as one state and then the changes to it.
+    property bool armed: false
+
     onEnabledChanged: {
         // Logged on the transition, and not only when something asks for a
         // round: this is a setting changed in a file, so the shell saying it
         // read it is the only evidence there is that the change arrived.
         if (root.enabled) {
-            Logger.log("calendar", "sync on");
+            if (root.armed)
+                Logger.log("calendar", "sync on");
             if (root.status === "off")
                 root.status = "idle";
         } else {
-            Logger.log("calendar", "sync off");
+            if (root.armed)
+                Logger.log("calendar", "sync off");
             root.status = "off";
             retry.stop();
             root.dirtyDuringRound = false;
@@ -606,14 +656,40 @@ Singleton {
 
         onExited: exitCode => {
             if (exitCode !== 0) {
-                // The same ending as any other failed run — one `fail()`, so the
-                // attempt count and the backoff apply here too — and it says
-                // why it died in the helper's own last line rather than in a
-                // fixed string that is true of every cause. The fixed string is
-                // kept for the flow that died silently. `auth` and not `error`
-                // afterwards, because what a person has to do about it is the
-                // consent flow either way.
-                root.fail(String(exitCode), authErr.text || "consent failed");
+                // A consent flow has its own ending, and deliberately not
+                // `fail()`. Two reasons, and both are about a round it may be
+                // running alongside:
+                //
+                //   - `fail()` clears `busy`, `retryingFull` and
+                //     `dirtyDuringRound`. A consent flow that a person
+                //     abandoned while a pull was in flight would clear a live
+                //     round's state out from under it — the pull would come
+                //     back to a shell that thinks nothing is running, and the
+                //     edit that landed mid-round would be dropped from the
+                //     debounce it was waiting on.
+                //   - `fail()` arms the retry timer. Retrying a *consent flow*
+                //     is opening a browser at somebody on a backoff, which is
+                //     not a thing to do; and arming it during a round would put
+                //     a second round inside the one already out.
+                //
+                // So: the status and the reason, and nothing else. If no round
+                // is in flight there is also nothing for the retry timer to
+                // trip over, and it is left stopped — a person pressing Connect
+                // again is the retry.
+                Logger.warn("calendar", "sync auth failed " + exitCode);
+                // Never the helper's stderr. It is the one stream a bearer
+                // token is most likely to be in, and `lastError` is rendered in
+                // the surface — so the surface gets a fixed string or the
+                // helper's own structured `error` field, and the raw text goes
+                // to the log scrubbed.
+                const complaint = authErr.text || "";
+                if (complaint.length > 0)
+                    Logger.warn("calendar", "sync auth stderr: "
+                                + root.policy.scrub(complaint));
+                const reported = root.parse(authOut.text) || {};
+                root.lastError = typeof reported.error === "string"
+                                 && reported.error.length > 0
+                               ? reported.error : "consent failed";
                 root.status = "auth";
                 return;
             }
@@ -641,5 +717,8 @@ Singleton {
         root.status = root.enabled ? "idle" : "off";
         Logger.stage("calendar sync armed (" + (root.enabled ? "on" : "off")
                      + ", helper " + root.helper + ")");
+        // Last: everything above is startup reading its own state, and only a
+        // change after this line is somebody changing it.
+        root.armed = true;
     }
 }

@@ -70,7 +70,13 @@ QtObject {
     function utcMs(stamp: var): real {
         if (typeof stamp !== "string" || stamp.length === 0)
             return -1;
-        const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : stamp + "Z";
+        // Every zone suffix RFC 3339 allows, and the two the old form missed: a
+        // lowercase `z`, which the grammar permits and some servers send, and a
+        // bare hour offset (`+02`), which is what several calendar exporters
+        // write. Both used to fall through to "naked", so `+Z` was appended to
+        // a stamp that already named a zone and `Date.parse` refused the whole
+        // thing — a `-1` for a stamp that was perfectly readable.
+        const zoned = /(?:[Zz]|[+-]\d{2}(?::?\d{2})?)$/.test(stamp) ? stamp : stamp + "Z";
         const ms = Date.parse(zoned);
         return isNaN(ms) ? -1 : ms;
     }
@@ -145,6 +151,32 @@ QtObject {
                 return line;
         }
         return "";
+    }
+
+    /// Helper text with anything bearer-token-shaped replaced by `ya29.…`.
+    ///
+    /// A Google access token is `ya29.` and then a long opaque run of URL-safe
+    /// base64, and it turns up in helper stderr for the dullest reasons — a
+    /// `curl`-style trace, an `Authorization:` header echoed into an error, a
+    /// stack frame carrying the request. That text is useful in a log and must
+    /// never *be* the log, so this is the one gate between the two.
+    ///
+    /// Named rather than inlined at the call site because it is arithmetic over
+    /// a string and therefore checkable here, at the first seam, while the
+    /// place it is called from imports Quickshell and is not.
+    ///
+    /// The replacement keeps *none* of the prefix, and that is deliberate. The
+    /// check that this works is a refutation over the whole shell log for
+    /// `ya29\.` (`tools/calendar-harness.sh`), and a scrub that left the
+    /// literal `ya29.` behind would trip its own check — a leak and a
+    /// successful scrub would be indistinguishable to the one control that
+    /// exists. The replacement says a token was there in words instead, which
+    /// keeps the difference between "nothing leaked" and "nothing happened"
+    /// without keeping the string being hunted for.
+    function scrub(text: var): string {
+        if (typeof text !== "string")
+            return "";
+        return text.replace(/ya29\.[A-Za-z0-9_-]+/g, "<bearer redacted>");
     }
 
     // --- the queue ------------------------------------------------------------

@@ -102,9 +102,14 @@ if [[ "$mode" == "broken" ]]; then
 fi
 
 if [[ "$mode" == "slow" ]]; then
-    # Long enough that a second trigger lands inside the first round, and short
-    # enough that the harness is not waiting on it.
-    sleep 1.5
+    # Two seconds, which is not an arbitrary "slow". A round is a pull *and* the
+    # push behind it, so a slow round is two of these — four seconds — and the
+    # shell's edit debounce is three. That ordering is the whole point: an edit
+    # made at the start of a slow round has its debounce fire while the round is
+    # still out, which is the one way to produce `dirtyDuringRound` on purpose.
+    # Shorter than that and the round beats the debounce and the flag is never
+    # set; much longer and the harness is waiting on the fixture.
+    sleep 2
 fi
 
 case "$cmd" in
@@ -117,10 +122,6 @@ auth)
     # the helper writes it to a 0600 file. The shell is expected to read exactly
     # one field out of this object and log exactly that.
     echo '{"ok":true,"email":"fake@example.com","accessToken":"'"$FAKE_TOKEN"'"}'
-    ;;
-
-calendars)
-    echo '{"ok":true,"calendars":[{"id":"primary","summary":"Fake","primary":true}]}'
     ;;
 
 pull)
